@@ -1,5 +1,6 @@
 """Dash application entry point. Initializes services, wires up global callbacks."""
 
+import os
 import dash
 import dash_bootstrap_components as dbc
 from config.settings import settings
@@ -52,10 +53,12 @@ def _init_services() -> dict:
 # ---------------------------------------------------------------------------
 # Create Dash app
 # ---------------------------------------------------------------------------
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 app = dash.Dash(
     __name__,
     use_pages=True,
-    pages_folder="pages",
+    pages_folder=os.path.join(_THIS_DIR, "pages"),
     external_stylesheets=[
         dbc.themes.DARKLY,
         dbc.icons.BOOTSTRAP,
@@ -63,6 +66,11 @@ app = dash.Dash(
     suppress_callback_exceptions=True,
     title="IBKR Options Platform",
 )
+
+# Log registered pages for debugging
+import logging
+_log = logging.getLogger("app.pages")
+_log.info("Registered pages: %s", list(dash.page_registry.keys()))
 
 server = app.server  # Flask server for gunicorn
 
