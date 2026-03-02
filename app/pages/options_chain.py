@@ -5,6 +5,7 @@ from dash import html, dcc, callback, Output, Input, State, no_update
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from app.components.tables import create_data_table
+from app.services import get_services
 
 dash.register_page(__name__, path="/options-chain", name="Options Chain", order=3)
 
@@ -67,7 +68,6 @@ def load_option_params(n_clicks, symbol):
         return no_update, no_update, no_update
     symbol = symbol.strip().upper()
 
-    from app.main import get_services
     services = get_services()
     if not services or not services["conn_mgr"].is_connected:
         return [], [], None
@@ -100,7 +100,6 @@ def load_chain(expiry, right_filter, symbol):
         return no_update, no_update
     symbol = symbol.strip().upper()
 
-    from app.main import get_services
     services = get_services()
     if not services or not services["conn_mgr"].is_connected:
         return [], html.P("Please connect to IBKR", className="text-warning")

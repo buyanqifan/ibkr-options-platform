@@ -5,6 +5,7 @@ from dash import html, dcc, callback, Output, Input, State, no_update
 import dash_bootstrap_components as dbc
 from app.components.tables import metric_card, create_data_table
 from app.components.charts import create_pnl_chart, create_monthly_heatmap
+from app.services import get_services
 
 dash.register_page(__name__, path="/backtester", name="Backtester", order=4)
 
@@ -113,7 +114,6 @@ def run_backtest(
         return no_update, no_update
     symbol = symbol.strip().upper()
 
-    from app.main import get_services
     services = get_services()
     if not services:
         return {}, html.P("Services not initialized", className="text-warning")

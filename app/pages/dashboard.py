@@ -5,6 +5,7 @@ from dash import html, dcc, callback, Output, Input
 import dash_bootstrap_components as dbc
 from app.components.tables import metric_card, create_data_table
 from app.components.connection_status import connection_badge
+from app.services import get_services
 
 dash.register_page(__name__, path="/", name="Dashboard", order=0)
 
@@ -62,7 +63,6 @@ layout = html.Div([
     Input("dashboard-interval", "n_intervals"),
 )
 def update_connection_info(n):
-    from app.main import get_services
     services = get_services()
     if not services:
         return (
@@ -88,7 +88,6 @@ def update_connection_info(n):
     Input("dashboard-interval", "n_intervals"),
 )
 def update_account_metrics(n):
-    from app.main import get_services
     services = get_services()
     if not services:
         return []
@@ -119,7 +118,6 @@ def update_account_metrics(n):
     Input("dashboard-interval", "n_intervals"),
 )
 def update_positions(n):
-    from app.main import get_services
     services = get_services()
     if not services:
         return html.P("Connect to IBKR to view positions", className="text-muted")

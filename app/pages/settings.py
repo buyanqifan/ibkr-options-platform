@@ -4,6 +4,7 @@ import dash
 from dash import html, dcc, callback, Output, Input, State, no_update
 import dash_bootstrap_components as dbc
 from app.components.connection_status import connection_badge
+from app.services import get_services
 
 dash.register_page(__name__, path="/settings", name="Settings", order=5)
 
@@ -109,7 +110,6 @@ layout = html.Div([
     Input("set-interval", "n_intervals"),
 )
 def update_status(n):
-    from app.main import get_services
     services = get_services()
 
     if not services:
@@ -145,7 +145,6 @@ def update_status(n):
 )
 def handle_connection(connect_clicks, disconnect_clicks, host, port, client_id):
     from dash import ctx
-    from app.main import get_services
     services = get_services()
     if not services:
         return dbc.Alert("Services not initialized", color="warning")
@@ -171,7 +170,6 @@ def handle_connection(connect_clicks, disconnect_clicks, host, port, client_id):
     prevent_initial_call=True,
 )
 def clear_cache(n):
-    from app.main import get_services
     services = get_services()
     if not services:
         return no_update

@@ -4,6 +4,7 @@ import dash
 from dash import html, dcc, callback, Output, Input, State, no_update
 import dash_bootstrap_components as dbc
 from app.components.tables import create_data_table
+from app.services import get_services
 
 dash.register_page(__name__, path="/screener", name="Screener", order=2)
 
@@ -105,7 +106,6 @@ def run_screener(
     n_clicks, symbols_str, pe_min, pe_max,
     mcap_min, mcap_max, iv_rank_range, min_opt_vol, min_put_yield,
 ):
-    from app.main import get_services
     services = get_services()
     if not services or not services["conn_mgr"].is_connected:
         return [], html.P("Please connect to IBKR first", className="text-warning")

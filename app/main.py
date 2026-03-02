@@ -10,18 +10,9 @@ from core.ibkr.data_client import IBKRDataClient
 from core.market_data.cache import DataCache
 from models.base import init_db
 from utils.logger import setup_logger
+from app.services import get_services, set_services
 
 logger = setup_logger("app")
-
-# ---------------------------------------------------------------------------
-# Global service registry
-# ---------------------------------------------------------------------------
-_services: dict | None = None
-
-
-def get_services() -> dict | None:
-    """Access shared service instances from any callback."""
-    return _services
 
 
 def _init_services() -> dict:
@@ -99,13 +90,12 @@ def update_navbar_badge(n):
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    global _services
-
     logger.info("Initializing database...")
     init_db()
 
     logger.info("Initializing services...")
-    _services = _init_services()
+    services = _init_services()
+    set_services(services)
 
     logger.info("Starting Dash app on %s:%d", settings.APP_HOST, settings.APP_PORT)
     app.run(
