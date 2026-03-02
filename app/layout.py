@@ -1,21 +1,19 @@
 """Top-level layout: navbar + page container with manual URL routing."""
 
+import dash
 from dash import html, dcc, callback, Output, Input
 import dash_bootstrap_components as dbc
 from app.components.navbar import create_navbar
 
-# Import page modules at module level (not inside callback)
-# This is safe because pages are already registered by Dash's use_pages
-from app.pages import dashboard, market_data, screener, options_chain, backtester, settings
-
-# Route mapping
+# Route mapping - use dash.page_registry to get layouts
+# This avoids duplicate registration issues
 _ROUTES = {
-    "/": dashboard.layout,
-    "/market-data": market_data.layout,
-    "/screener": screener.layout,
-    "/options-chain": options_chain.layout,
-    "/backtester": backtester.layout,
-    "/settings": settings.layout,
+    "/": dash.page_registry["pages.dashboard"]["layout"],
+    "/market-data": dash.page_registry["pages.market_data"]["layout"],
+    "/screener": dash.page_registry["pages.screener"]["layout"],
+    "/options-chain": dash.page_registry["pages.options_chain"]["layout"],
+    "/backtester": dash.page_registry["pages.backtester"]["layout"],
+    "/settings": dash.page_registry["pages.settings"]["layout"],
 }
 
 
