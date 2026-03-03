@@ -87,9 +87,10 @@ class IBKRConnectionManager:
         self._status.message = f"Connecting to {host}:{port}..."
 
         try:
+            # Increased timeout for remote connections (from 15s to 30s)
             self._bridge.run_coroutine(
                 self._async_connect(host, port, client_id),
-                timeout=15.0,
+                timeout=30.0,
             )
             self._status.state = ConnectionState.CONNECTED
             self._status.last_connected = time.time()
@@ -116,6 +117,11 @@ class IBKRConnectionManager:
             logger.info("Connected to IBKR at %s:%d, account=%s", host, port, self._status.account)
             return True
 
+        except asyncio.TimeoutError as e:
+            self._status.state = ConnectionState.ERROR
+            self._status.message = f"Connection timed out after 30s. Please check network connectivity and IB Gateway status."
+            logger.error(f"Connection to {host}:{port} timed out: {e}")
+            return False
         except Exception as e:
             self._status.state = ConnectionState.ERROR
             self._status.message = f"Connection failed: {e}"
@@ -166,7 +172,8 @@ class IBKRConnectionManager:
     # ------------------------------------------------------------------
 
     async def _async_connect(self, host: str, port: int, client_id: int):
-        await self._ib.connectAsync(host, port, clientId=client_id, timeout=10)
+        # Increased connection timeout for remote servers (from 10s to 20s)
+        await self._ib.connectAsync(host, port, clientId=client_id, timeout=20)
 
     async def _async_disconnect(self):
         self._ib.disconnect()

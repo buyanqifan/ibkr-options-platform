@@ -177,7 +177,9 @@ def handle_connection(connect_clicks, disconnect_clicks, host, port, client_id):
             if "111" in error_msg or "refused" in error_msg.lower():
                 error_msg += " - Make sure IB Gateway/TWS is running and the host/port are correct."
             elif "timeout" in error_msg.lower():
-                error_msg += " - Connection timed out. Check network connectivity and firewall settings."
+                error_msg += " - Connection timed out. This can happen with remote servers. Try:\n  • Check network connectivity (ping the server)\n  • Verify IB Gateway is running on the server\n  • Check firewall rules allow port 4002\n  • Wait for IB Gateway to fully start up (can take 1-2 minutes)"
+            elif "timed out after 30s" in error_msg:
+                error_msg += "\n\nSuggestions:\n  • Verify the server is reachable: ping <server-ip>\n  • Check if IB Gateway container is running: docker ps\n  • View IB Gateway logs: docker compose logs ibgateway\n  • Ensure port 4002 is not blocked by firewall"
             
             return dbc.Alert(f"Connection failed: {error_msg}", color="danger")
         except ValueError as e:
