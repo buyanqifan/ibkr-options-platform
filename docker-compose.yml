@@ -8,10 +8,11 @@ services:
       TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
       TWS_ACCEPT_INCOMING: "yes"
       READ_ONLY_API: "no"
-      # Use port 4001 for IB Gateway API
-      IBG_PORT: "4001"
+      # Bind API to all network interfaces
+      IBG_BIND_ADDRESS: "0.0.0.0"
+      IBG_PORT: "4002"
     ports:
-      - "4001:4001"
+      - "4002:4002"
     networks:
       - trading-net
 
@@ -22,7 +23,7 @@ services:
       - "8050:8050"
     environment:
       IBKR_HOST: ibgateway
-      IBKR_PORT: "4001"
+      IBKR_PORT: "4002"
       IBKR_CLIENT_ID: "1"
       IBKR_TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
       APP_HOST: "0.0.0.0"
