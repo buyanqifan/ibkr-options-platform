@@ -4,7 +4,7 @@ import dash
 from dash import html, dcc, callback, Output, Input, State, no_update
 import dash_bootstrap_components as dbc
 from app.components.tables import metric_card, create_data_table
-from app.components.charts import create_pnl_chart, create_monthly_heatmap
+from app.components.charts import create_pnl_chart, create_monthly_heatmap, create_trade_timeline_chart
 from app.components.monitoring import create_monitoring_dashboard, create_trade_history_table, create_phase_transition_log
 from app.services import get_services
 
@@ -263,6 +263,15 @@ def run_backtest(
     monthly = metrics.get("monthly_returns", {})
     monthly_tupled = {(int(k.split("-")[0]), int(k.split("-")[1])): v for k, v in monthly.items()} if monthly else {}
     heatmap = dcc.Graph(figure=create_monthly_heatmap(monthly_tupled)) if monthly_tupled else html.Div()
+    
+    # Trade timeline chart
+    underlying_prices = result.get("underlying_prices", [])
+    trade_timeline = dcc.Graph(figure=create_trade_timeline_chart(
+        trades=trades,
+        daily_pnl=daily_pnl,
+        underlying_prices=underlying_prices,
+        title="Trade Timeline: Entry/Exit Points & Performance"
+    ))
 
     # Trades table
     trade_columns = [
@@ -305,6 +314,8 @@ def run_backtest(
         extra_row,
         heatmap,
         monitoring_section,
+        html.H5("Trade Timeline Analysis", className="mt-4 mb-3"),
+        trade_timeline,
         html.H5("Trade Log", className="mt-4 mb-3"),
         trades_table,
     ])

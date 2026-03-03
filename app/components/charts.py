@@ -238,3 +238,174 @@ def create_monthly_heatmap(monthly_returns: dict) -> go.Figure:
         margin=dict(l=50, r=50, t=50, b=30),
     )
     return fig
+
+
+def create_trade_timeline_chart(
+    trades: list[dict],
+    daily_pnl: list[dict],
+    underlying_prices: list[dict] | None = None,
+    title: str = "Trade Timeline and Performance",
+) -> go.Figure:
+    """Create a comprehensive trade timeline chart showing entry/exit points and performance.
+    
+    Args:
+        trades: List of trade dictionaries with entry/exit info
+        daily_pnl: List of daily P&L data
+        underlying_prices: Optional list of underlying price data
+        title: Chart title
+    """
+    if not trades and not daily_pnl:
+        fig = go.Figure()
+        fig.update_layout(title="No trade data available", template="plotly_dark")
+        return fig
+    
+    # Create subplots: Price chart (top) and P&L chart (bottom)
+    fig = make_subplots(
+        rows=2, 
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        row_heights=[0.6, 0.4],
+        subplot_titles=('Underlying Price with Trade Points', 'Cumulative P&L')
+    )
+    
+    # Add underlying price data if available
+    if underlying_prices:
+        price_dates = [p["date"] for p in underlying_prices]
+        prices = [p["close"] for p in underlying_prices]
+        
+        fig.add_trace(
+            go.Scatter(
+                x=price_dates,
+                y=prices,
+                name="Price",
+                line=dict(color="#29B6F6", width=1.5),
+            ),
+            row=1, col=1
+        )
+    
+    # Add trade entry points
+    entry_dates = []
+    entry_prices = []
+    entry_annotations = []
+    
+    exit_dates = []
+    exit_prices = []
+    exit_annotations = []
+    
+    for i, trade in enumerate(trades):
+        # Entry point
+        entry_date = trade.get("entry_date", "")
+        entry_price = trade.get("underlying_entry", 0)
+        if entry_date and entry_price:
+            entry_dates.append(entry_date)
+            entry_prices.append(entry_price)
+            entry_annotations.append(f"Entry {i+1}<br>{trade.get('trade_type', '')}<br>${entry_price:.2f}")
+        
+        # Exit point
+        exit_date = trade.get("exit_date", "")
+        exit_price = trade.get("underlying_exit", trade.get("underlying_entry", 0))
+        if exit_date and exit_price:
+            exit_dates.append(exit_date)
+            exit_prices.append(exit_price)
+            pnl = trade.get("pnl", 0)
+            exit_annotations.append(f"Exit {i+1}<br>{trade.get('exit_reason', '')}<br>${exit_price:.2f}<br>P&L: ${pnl:+.2f}")
+    
+    # Add entry markers
+    if entry_dates:
+        fig.add_trace(
+            go.Scatter(
+                x=entry_dates,
+                y=entry_prices,
+                mode='markers',
+                name="Entry Points",
+                marker=dict(
+                    color="#4CAF50",
+                    size=10,
+                    symbol="triangle-up",
+                    line=dict(color="white", width=1)
+                ),
+                text=entry_annotations,
+                hovertemplate="<b>%{text}</b><extra></extra>",
+            ),
+            row=1, col=1
+        )
+    
+    # Add exit markers
+    if exit_dates:
+        fig.add_trace(
+            go.Scatter(
+                x=exit_dates,
+                y=exit_prices,
+                mode='markers',
+                name="Exit Points",
+                marker=dict(
+                    color="#F44336",
+                    size=10,
+                    symbol="triangle-down",
+                    line=dict(color="white", width=1)
+                ),
+                text=exit_annotations,
+                hovertemplate="<b>%{text}</b><extra></extra>",
+            ),
+            row=1, col=1
+        )
+    
+    # Add P&L curve
+    if daily_pnl:
+        pnl_dates = [p["date"] for p in daily_pnl]
+        cumulative_pnl = [p["cumulative_pnl"] for p in daily_pnl]
+        
+        fig.add_trace(
+            go.Scatter(
+                x=pnl_dates,
+                y=cumulative_pnl,
+                name="Cumulative P&L",
+                line=dict(color="#26a69a", width=2),
+                fill="tozeroy",
+                fillcolor="rgba(38, 166, 154, 0.1)",
+            ),
+            row=2, col=1
+        )
+    
+    # Add trade P&L annotations on P&L chart
+    for i, trade in enumerate(trades):
+        exit_date = trade.get("exit_date", "")
+        if exit_date:
+            # Find corresponding P&L value
+            pnl_value = 0
+            for pnl_point in daily_pnl:
+                if pnl_point["date"] == exit_date:
+                    pnl_value = pnl_point["cumulative_pnl"]
+                    break
+            
+            fig.add_annotation(
+                x=exit_date,
+                y=pnl_value,
+                text=f"Trade {i+1}<br>P&L: ${trade.get('pnl', 0):+.2f}",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=2,
+                ax=0,
+                ay=-30,
+                row=2,
+                col=1
+            )
+    
+    # Update layout
+    fig.update_layout(
+        title=title,
+        template="plotly_dark",
+        height=700,
+        margin=dict(l=50, r=50, t=50, b=30),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    
+    # Update axes
+    fig.update_xaxes(title_text="Date", row=2, col=1)
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+    fig.update_yaxes(title_text="Cumulative P&L ($)", row=2, col=1)
+    
+    return fig

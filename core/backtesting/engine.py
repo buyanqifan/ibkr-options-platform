@@ -175,10 +175,19 @@ class BacktestEngine:
         if hasattr(strategy, 'get_performance_report'):
             strategy_performance = strategy.get_performance_report()
 
+        # Get underlying price data for timeline chart
+        underlying_prices = []
+        if bars:
+            underlying_prices = [
+                {"date": bar["date"][:10], "close": bar["close"]}
+                for bar in bars
+            ]
+        
         return {
             "metrics": metrics,
             "trades": trades,
             "daily_pnl": daily_pnl,
+            "underlying_prices": underlying_prices,
             "params": params,
             "strategy_performance": strategy_performance,
         }
