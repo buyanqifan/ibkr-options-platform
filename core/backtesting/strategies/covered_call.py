@@ -32,13 +32,24 @@ class CoveredCallStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
+        # Calculate position size based on available capital, position percentage and leverage
+        available_capital = self.initial_capital * self.position_percentage
+        leveraged_capital = available_capital * self.max_leverage
+        
+        # For covered call, we need to own 100 shares per contract
+        max_contracts_by_capital = int(leveraged_capital / (underlying_price * 100))
+        
+        # Limit position size to a reasonable number
+        max_contracts = min(max_pos, max_contracts_by_capital, 10)  # Cap at 10 contracts
+        quantity = max(1, max_contracts) * -1  # Sell calls (negative quantity)
+        
         return [Signal(
             symbol=self.params["symbol"],
             trade_type="COVERED_CALL",
             right="C",
             strike=strike,
             expiry=expiry_str,
-            quantity=-1,
+            quantity=quantity,  # Dynamic quantity based on capital
             iv=iv,
             delta=delta,
             premium=premium,

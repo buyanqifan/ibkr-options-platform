@@ -65,6 +65,10 @@ class BacktestEngine:
         daily_pnl = []
         cumulative_pnl = 0.0
         last_entry_idx = -999  # Track cooldown between entries
+        
+        # Initialize margin interest tracking
+        margin_interest_rate_daily = 0.05 / 365  # 5% annual rate divided by 365 days
+        borrowed_funds = 0.0  # Track borrowed funds for leverage
 
         for i, bar in enumerate(bars):
             bar_date = bar["date"][:10]  # YYYY-MM-DD
@@ -109,6 +113,11 @@ class BacktestEngine:
                     simulator.open_position(pos)
                     last_entry_idx = i
 
+            # Apply daily margin interest if leverage is used
+            if borrowed_funds > 0:
+                daily_interest = borrowed_funds * margin_interest_rate_daily
+                cumulative_pnl -= daily_interest  # Subtract interest from P&L
+            
             # Daily mark-to-market
             open_pnl = simulator.get_total_open_pnl()
             daily_pnl.append({
@@ -116,6 +125,7 @@ class BacktestEngine:
                 "cumulative_pnl": cumulative_pnl + open_pnl,
                 "closed_pnl": cumulative_pnl,
                 "open_pnl": open_pnl,
+                "margin_interest": daily_interest if borrowed_funds > 0 else 0,
             })
 
         # Force close remaining positions at end

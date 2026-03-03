@@ -27,9 +27,12 @@ class SellPutStrategy(BaseStrategy):
         premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
 
-        # Calculate position size based on available capital and risk management
+        # Calculate position size based on available capital, position percentage and leverage
         # For cash secured put, need to reserve cash equal to strike * 100 per contract
-        max_contracts_by_capital = int(self.initial_capital * 0.8 / (strike * 100))  # Use 80% of capital
+        available_capital = self.initial_capital * self.position_percentage
+        leveraged_capital = available_capital * self.max_leverage
+        
+        max_contracts_by_capital = int(leveraged_capital / (strike * 100))
         
         # For risk-based sizing, use premium income as the measure
         # We can risk a percentage of account value per trade based on potential premium income

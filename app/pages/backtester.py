@@ -46,6 +46,12 @@ layout = html.Div([
                     dbc.Label("Initial Capital ($)"),
                     dbc.Input(id="bt-capital", type="number", value=100000, className="mb-3"),
 
+                    dbc.Label("Position Size (% of capital)"),
+                    dbc.Input(id="bt-position-size", type="number", value=10.0, step=0.1, min=0.1, max=100, className="mb-3"),
+
+                    dbc.Label("Max Leverage"),
+                    dbc.Input(id="bt-leverage", type="number", value=1.0, step=0.1, min=1.0, className="mb-3"),
+
                     html.Hr(),
                     html.H6("Strategy Parameters", className="fw-bold mb-2"),
 
@@ -99,6 +105,8 @@ layout = html.Div([
     State("bt-start", "value"),
     State("bt-end", "value"),
     State("bt-capital", "value"),
+    State("bt-position-size", "value"),
+    State("bt-leverage", "value"),
     State("bt-dte-min", "value"),
     State("bt-dte-max", "value"),
     State("bt-delta", "value"),
@@ -108,7 +116,7 @@ layout = html.Div([
 )
 def run_backtest(
     n_clicks, strategy, symbol, start_date, end_date,
-    capital, dte_min, dte_max, delta, profit_target, stop_loss,
+    capital, position_size, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
 ):
     if not symbol or not start_date or not end_date:
         return no_update, no_update
@@ -126,6 +134,8 @@ def run_backtest(
         "start_date": start_date,
         "end_date": end_date,
         "initial_capital": capital or 100000,
+        "position_percentage": (position_size or 10.0) / 100,  # Convert percentage to decimal
+        "max_leverage": leverage or 1.0,
         "dte_min": dte_min or 21,
         "dte_max": dte_max or 45,
         "delta_target": delta or 0.30,

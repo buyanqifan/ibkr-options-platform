@@ -31,6 +31,9 @@ class BaseStrategy(ABC):
         self.stop_loss_pct = params.get("stop_loss_pct", 200)
         self.initial_capital = params.get("initial_capital", 100000)
         self.max_risk_per_trade = params.get("max_risk_per_trade", 0.02)  # 2% risk per trade
+        # Position management parameters
+        self.position_percentage = params.get("position_percentage", 0.10)  # 10% of capital per trade
+        self.max_leverage = params.get("max_leverage", 1.0)  # No leverage by default
 
     @property
     @abstractmethod
