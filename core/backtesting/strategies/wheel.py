@@ -11,8 +11,10 @@ Phase 2 (CC): Sell OTM calls against owned shares
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import List, Dict, Any
 from core.backtesting.strategies.base import BaseStrategy, Signal
 from core.backtesting.pricing import OptionsPricer
+import logging
 
 
 @dataclass
@@ -22,9 +24,37 @@ class StockHolding:
     cost_basis: float = 0.0  # average cost per share
     total_premium_collected: float = 0.0  # cumulative premium from both phases
 
+@dataclass
+class PerformanceMetrics:
+    """Tracks detailed performance metrics for monitoring."""
+    total_trades: int = 0
+    successful_assignments: int = 0
+    expired_worthless: int = 0
+    profit_target_exits: int = 0
+    stop_loss_exits: int = 0
+    total_pnl: float = 0.0
+    avg_pnl_per_trade: float = 0.0
+    win_rate: float = 0.0
+    max_drawdown: float = 0.0
+    phase_transitions: int = 0
+    
+    def to_dict(self) -> dict:
+        return {
+            "total_trades": self.total_trades,
+            "successful_assignments": self.successful_assignments,
+            "expired_worthless": self.expired_worthless,
+            "profit_target_exits": self.profit_target_exits,
+            "stop_loss_exits": self.stop_loss_exits,
+            "total_pnl": round(self.total_pnl, 2),
+            "avg_pnl_per_trade": round(self.avg_pnl_per_trade, 2),
+            "win_rate": round(self.win_rate, 2),
+            "max_drawdown": round(self.max_drawdown, 2),
+            "phase_transitions": self.phase_transitions,
+        }
+
 
 class WheelStrategy(BaseStrategy):
-    """Wheel strategy implementation with state machine."""
+    """Wheel strategy implementation with state machine and performance monitoring."""
 
     def __init__(self, params: dict):
         super().__init__(params)
@@ -34,14 +64,28 @@ class WheelStrategy(BaseStrategy):
         self.call_delta = params.get("call_delta", 0.30)
         # Track pending assignments
         self._pending_assignment = None
+        
+        # Performance monitoring
+        self.logger = logging.getLogger(f"wheel_strategy_{params.get('symbol', 'unknown')}")
+        self.performance_metrics = PerformanceMetrics()
+        self.trade_history: List[Dict[str, Any]] = []
+        self.phase_history: List[Dict[str, Any]] = []
+        self.daily_stats: List[Dict[str, Any]] = []
+        self._current_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._peak_value = self.initial_capital
+        self._trough_value = self.initial_capital
 
     @property
     def name(self) -> str:
         return "wheel"
 
     def on_trade_closed(self, trade: dict):
-        """Called by engine when a trade is closed. Updates internal state."""
+        """Called by engine when a trade is closed. Updates internal state and tracks performance."""
+        # Record trade in history
+        self._record_trade(trade)
+        
         if trade.get("exit_reason") == "ASSIGNMENT":
+            self.performance_metrics.successful_assignments += 1
             if trade.get("trade_type") == "WHEEL_PUT":
                 # Put assigned: we bought shares at strike price
                 strike = trade["strike"]
@@ -59,8 +103,11 @@ class WheelStrategy(BaseStrategy):
                 premium_collected = trade["entry_price"] * shares_acquired
                 self.stock_holding.total_premium_collected += premium_collected
                 
+                # Log transition
+                self._log_transition("SP", "CC", f"Put assigned at ${strike}, acquired {shares_acquired} shares")
                 # Switch to Covered Call phase
                 self.phase = "CC"
+                self.performance_metrics.phase_transitions += 1
                 
             elif trade.get("trade_type") == "WHEEL_CALL":
                 # Call assigned: we sold shares at strike price
@@ -77,14 +124,24 @@ class WheelStrategy(BaseStrategy):
                 
                 # If no more shares, switch back to Sell Put phase
                 if self.stock_holding.shares == 0:
+                    self._log_transition("CC", "SP", f"Call assigned at ${strike}, sold {shares_sold} shares")
                     self.phase = "SP"
                     self.stock_holding.cost_basis = 0.0
+                    self.performance_metrics.phase_transitions += 1
         else:
             # For non-assignment exits (profit target, stop loss, expiry worthless)
-            # Just collect the premium difference
             if trade.get("trade_type") in ("WHEEL_PUT", "WHEEL_CALL"):
-                # Premium is already accounted for in PnL
-                pass
+                # Track exit reasons
+                exit_reason = trade.get("exit_reason", "UNKNOWN")
+                if exit_reason == "PROFIT_TARGET":
+                    self.performance_metrics.profit_target_exits += 1
+                elif exit_reason == "STOP_LOSS":
+                    self.performance_metrics.stop_loss_exits += 1
+                elif exit_reason == "EXPIRED_WORTHLESS":
+                    self.performance_metrics.expired_worthless += 1
+                
+                # Log trade completion
+                self.logger.info(f"Trade closed: {trade.get('trade_type')} {exit_reason} PnL: ${trade.get('pnl', 0):+.2f}")
 
     def generate_signals(
         self,
@@ -195,16 +252,98 @@ class WheelStrategy(BaseStrategy):
             premium=premium,
         )]
 
+    def _record_trade(self, trade: dict):
+        """Record trade details for performance tracking."""
+        self.performance_metrics.total_trades += 1
+        pnl = trade.get("pnl", 0)
+        self.performance_metrics.total_pnl += pnl
+        self.performance_metrics.avg_pnl_per_trade = (
+            self.performance_metrics.total_pnl / self.performance_metrics.total_trades
+            if self.performance_metrics.total_trades > 0 else 0
+        )
+        
+        # Update win rate
+        winning_trades = sum(1 for t in self.trade_history if t.get("pnl", 0) > 0)
+        self.performance_metrics.win_rate = (
+            (winning_trades + (1 if pnl > 0 else 0)) / self.performance_metrics.total_trades * 100
+        )
+        
+        # Track drawdown
+        current_value = self.initial_capital + self.performance_metrics.total_pnl
+        if current_value > self._peak_value:
+            self._peak_value = current_value
+        drawdown = (self._peak_value - current_value) / self._peak_value * 100
+        self.performance_metrics.max_drawdown = max(self.performance_metrics.max_drawdown, drawdown)
+        
+        # Add to trade history
+        trade_record = {
+            "trade_id": len(self.trade_history) + 1,
+            "date": trade.get("exit_date", datetime.now().strftime("%Y-%m-%d")),
+            "type": trade.get("trade_type", "UNKNOWN"),
+            "exit_reason": trade.get("exit_reason", "UNKNOWN"),
+            "pnl": round(pnl, 2),
+            "strike": trade.get("strike", 0),
+            "phase": self.phase,
+            "cumulative_pnl": round(self.performance_metrics.total_pnl, 2),
+        }
+        self.trade_history.append(trade_record)
+    
+    def _log_transition(self, from_phase: str, to_phase: str, reason: str):
+        """Log phase transitions for monitoring."""
+        transition = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "from_phase": from_phase,
+            "to_phase": to_phase,
+            "reason": reason,
+            "shares_held": self.stock_holding.shares,
+            "premium_collected": round(self.stock_holding.total_premium_collected, 2),
+        }
+        self.phase_history.append(transition)
+        self.logger.info(f"Phase transition: {from_phase} → {to_phase} ({reason})")
+    
+    def update_daily_stats(self, date: str, portfolio_value: float, open_pnl: float):
+        """Update daily statistics for performance monitoring."""
+        daily_record = {
+            "date": date,
+            "portfolio_value": round(portfolio_value, 2),
+            "open_pnl": round(open_pnl, 2),
+            "closed_pnl": round(self.performance_metrics.total_pnl, 2),
+            "total_pnl": round(self.performance_metrics.total_pnl + open_pnl, 2),
+            "phase": self.phase,
+            "shares_held": self.stock_holding.shares,
+            "premium_collected": round(self.stock_holding.total_premium_collected, 2),
+        }
+        self.daily_stats.append(daily_record)
+    
+    def get_performance_report(self) -> dict:
+        """Generate comprehensive performance report."""
+        return {
+            "strategy": "wheel",
+            "run_id": self._current_run_id,
+            "current_state": self.get_state_summary(),
+            "performance_metrics": self.performance_metrics.to_dict(),
+            "trade_history": self.trade_history[-10:],  # Last 10 trades
+            "phase_history": self.phase_history[-5:],   # Last 5 transitions
+            "daily_stats": self.daily_stats[-30:],      # Last 30 days
+        }
+    
     def get_state_summary(self) -> dict:
         """Return current strategy state for debugging/display."""
+        effective_cost_basis = 0
+        if self.stock_holding.shares > 0:
+            effective_cost_basis = self.stock_holding.cost_basis - (
+                self.stock_holding.total_premium_collected / self.stock_holding.shares
+            )
+        
         return {
             "phase": self.phase,
             "shares_held": self.stock_holding.shares,
             "cost_basis": round(self.stock_holding.cost_basis, 2),
             "total_premium_collected": round(self.stock_holding.total_premium_collected, 2),
-            "effective_cost_basis": round(
-                self.stock_holding.cost_basis - 
-                (self.stock_holding.total_premium_collected / self.stock_holding.shares 
-                 if self.stock_holding.shares > 0 else 0), 2
+            "effective_cost_basis": round(effective_cost_basis, 2),
+            "current_portfolio_value": round(
+                self.initial_capital + self.performance_metrics.total_pnl, 2
             ),
+            "total_pnl": round(self.performance_metrics.total_pnl, 2),
+            "win_rate": round(self.performance_metrics.win_rate, 2),
         }

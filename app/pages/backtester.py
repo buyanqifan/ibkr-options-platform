@@ -5,6 +5,7 @@ from dash import html, dcc, callback, Output, Input, State, no_update
 import dash_bootstrap_components as dbc
 from app.components.tables import metric_card, create_data_table
 from app.components.charts import create_pnl_chart, create_monthly_heatmap
+from app.components.monitoring import create_monitoring_dashboard, create_trade_history_table, create_phase_transition_log
 from app.services import get_services
 
 dash.register_page(__name__, path="/backtester", name="Backtester", order=4)
@@ -239,6 +240,12 @@ def run_backtest(
         dbc.Col(metric_card("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}", "primary"), md=3),
         dbc.Col(metric_card("Sortino", f"{metrics.get('sortino_ratio', 0):.2f}", "info"), md=3),
     ], className="mb-3 g-3")
+    
+    # Add monitoring dashboard for wheel strategy
+    monitoring_section = html.Div()
+    strategy_performance = result.get("strategy_performance", {})
+    if strategy_performance and params.get("strategy") == "wheel":
+        monitoring_section = create_monitoring_dashboard(strategy_performance)
 
     content = html.Div([
         html.H5("Performance Summary", className="mb-3"),
@@ -247,8 +254,28 @@ def run_backtest(
         html.H5("Additional Metrics", className="mt-4 mb-3"),
         extra_row,
         heatmap,
+        monitoring_section,
         html.H5("Trade Log", className="mt-4 mb-3"),
         trades_table,
     ])
+    
+    # Add trade history and phase transition updates if monitoring data exists
+    if strategy_performance:
+        trade_history = strategy_performance.get("trade_history", [])
+        phase_history = strategy_performance.get("phase_history", [])
+        
+        # Update trade history display
+        if trade_history:
+            content.children.insert(-1, html.Div([
+                html.H5("Recent Trade History", className="mt-4 mb-3"),
+                create_trade_history_table(trade_history),
+            ]))
+        
+        # Update phase transition display
+        if phase_history:
+            content.children.insert(-1, html.Div([
+                html.H5("Phase Transition Log", className="mt-4 mb-3"),
+                create_phase_transition_log(phase_history),
+            ]))
 
     return result, content

@@ -125,11 +125,18 @@ class BacktestEngine:
             
             # Daily mark-to-market
             open_pnl = simulator.get_total_open_pnl()
+            portfolio_value = initial_capital + cumulative_pnl + open_pnl
+            
+            # Update strategy daily stats if it supports monitoring
+            if hasattr(strategy, 'update_daily_stats'):
+                strategy.update_daily_stats(bar_date, portfolio_value, open_pnl)
+            
             daily_pnl.append({
                 "date": bar_date,
                 "cumulative_pnl": cumulative_pnl + open_pnl,
                 "closed_pnl": cumulative_pnl,
                 "open_pnl": open_pnl,
+                "portfolio_value": portfolio_value,
                 "margin_interest": daily_interest if borrowed_funds > 0 else 0,
             })
 
@@ -162,12 +169,18 @@ class BacktestEngine:
         # Calculate metrics
         trades = [t.to_dict() for t in simulator.closed_trades]
         metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
+        
+        # Add strategy-specific performance data if available
+        strategy_performance = {}
+        if hasattr(strategy, 'get_performance_report'):
+            strategy_performance = strategy.get_performance_report()
 
         return {
             "metrics": metrics,
             "trades": trades,
             "daily_pnl": daily_pnl,
             "params": params,
+            "strategy_performance": strategy_performance,
         }
 
     def _get_historical_data(self, symbol: str, start_date: str, end_date: str) -> list[dict]:
