@@ -124,13 +124,24 @@ class BacktestEngine:
             last_date = last_bar["date"][:10]
             last_price = last_bar["close"]
             last_iv = hv[-1] if hv else 0.3
-            for pos in list(simulator.open_positions):
-                simulator.check_exits(
+            # Close all remaining positions at the end of backtest
+            while simulator.open_positions:
+                # Process one position at a time with immediate expiration
+                temp_simulator = TradeSimulator()
+                pos = simulator.open_positions.pop(0)
+                temp_simulator.open_position(pos)
+                
+                # Force close with min_dte=0 to trigger expiration logic
+                closed_trades = temp_simulator.check_exits(
                     last_date, last_price, last_iv,
                     profit_target_pct=9999,
                     stop_loss_pct=9999,
-                    min_dte=9999,
+                    min_dte=0,
                 )
+                
+                # Add the closed trades to main simulator
+                simulator.closed_trades.extend(closed_trades)
+            
             cumulative_pnl = sum(t.pnl for t in simulator.closed_trades)
 
         # Calculate metrics

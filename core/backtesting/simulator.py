@@ -131,8 +131,15 @@ class TradeSimulator:
 
             # Check expiration
             elif dte <= min_dte:
+                # At expiration, option value is its intrinsic value
+                if pos.right == "P":  # Put option
+                    intrinsic_value = max(0, pos.strike - underlying_price)
+                else:  # Call option
+                    intrinsic_value = max(0, underlying_price - pos.strike)
+                
+                exit_price = intrinsic_value
                 exit_reason = "EXPIRY"
-                exit_price = current_opt_price
+                
                 # Check assignment for short puts
                 if pos.right == "P" and pos.quantity < 0 and underlying_price < pos.strike:
                     exit_reason = "ASSIGNMENT"
