@@ -5,12 +5,13 @@ services:
     environment:
       TWS_USERID: ${IBKR_USERNAME}
       TWS_PASSWORD: ${IBKR_PASSWORD}
-      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      TRADING_MODE: paper
       TWS_ACCEPT_INCOMING: "yes"
       READ_ONLY_API: "no"
-      # Bind API to all network interfaces
       IBG_BIND_ADDRESS: "0.0.0.0"
       IBG_PORT: "4002"
+      # Wait longer for API to initialize
+      STARTUP_TIMEOUT: "300"
     ports:
       - "4002:4002"
     networks:
