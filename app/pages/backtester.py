@@ -29,6 +29,7 @@ layout = html.Div([
                             {"label": "Bear Call Spread", "value": "bear_call_spread"},
                             {"label": "Straddle (Short)", "value": "straddle"},
                             {"label": "Strangle (Short)", "value": "strangle"},
+                            {"label": "Wheel Strategy", "value": "wheel"},
                         ],
                         value="sell_put",
                         className="mb-3",
@@ -69,6 +70,21 @@ layout = html.Div([
 
                     dbc.Label("Stop Loss (% of premium)"),
                     dbc.Input(id="bt-stop-loss", type="number", value=200, size="sm", className="mb-3"),
+                    
+                    # Wheel Strategy Specific Parameters
+                    html.Div(id="wheel-params-container", children=[
+                        html.Hr(),
+                        html.H6("Wheel Strategy Parameters", className="fw-bold mb-2"),
+                        
+                        dbc.Label("Put Delta (absolute)"),
+                        dbc.Input(id="bt-put-delta", type="number", value=0.30, step=0.05, size="sm", className="mb-2"),
+                        
+                        dbc.Label("Call Delta (absolute)"),
+                        dbc.Input(id="bt-call-delta", type="number", value=0.30, step=0.05, size="sm", className="mb-2"),
+                        
+                        dbc.Label("Max Positions"),
+                        dbc.Input(id="bt-max-positions", type="number", value=1, min=1, max=10, step=1, size="sm", className="mb-3"),
+                    ], className="d-none"),
 
                     dbc.Button(
                         "Run Backtest", id="bt-run-btn",
@@ -97,6 +113,17 @@ layout = html.Div([
 
 
 @callback(
+    Output("wheel-params-container", "className"),
+    Input("bt-strategy", "value"),
+)
+def toggle_wheel_params(strategy):
+    """Show/hide wheel strategy specific parameters."""
+    if strategy == "wheel":
+        return "d-block"
+    return "d-none"
+
+
+@callback(
     Output("bt-results-store", "data"),
     Output("bt-results-container", "children"),
     Input("bt-run-btn", "n_clicks"),
@@ -112,11 +139,15 @@ layout = html.Div([
     State("bt-delta", "value"),
     State("bt-profit-target", "value"),
     State("bt-stop-loss", "value"),
+    State("bt-put-delta", "value"),
+    State("bt-call-delta", "value"),
+    State("bt-max-positions", "value"),
     prevent_initial_call=True,
 )
 def run_backtest(
     n_clicks, strategy, symbol, start_date, end_date,
     capital, position_size, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
+    put_delta, call_delta, max_positions
 ):
     if not symbol or not start_date or not end_date:
         return no_update, no_update
@@ -141,6 +172,10 @@ def run_backtest(
         "delta_target": delta or 0.30,
         "profit_target_pct": profit_target or 50,
         "stop_loss_pct": stop_loss or 200,
+        # Wheel strategy specific parameters
+        "put_delta": put_delta or 0.30,
+        "call_delta": call_delta or 0.30,
+        "max_positions": max_positions or 1,
     }
 
     try:
