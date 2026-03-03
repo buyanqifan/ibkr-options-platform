@@ -8,14 +8,22 @@ services:
       TRADING_MODE: paper
       TWS_ACCEPT_INCOMING: "yes"
       READ_ONLY_API: "no"
+      # Critical: Bind to all interfaces for container access
       IBG_BIND_ADDRESS: "0.0.0.0"
       IBG_PORT: "4002"
-      # Wait longer for API to initialize
-      STARTUP_TIMEOUT: "300"
+      # Disable Java security that may block connections
+      JAVA_TOOL_OPTIONS: "-Djava.security.egd=file:/dev/./urandom"
     ports:
       - "4002:4002"
     networks:
       - trading-net
+    # Add health check to ensure API is ready
+    healthcheck:
+      test: ["CMD", "cat", "/proc/net/tcp"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   app:
     build: .
