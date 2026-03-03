@@ -22,7 +22,7 @@ layout = html.Div([
                     dbc.FormText("Use 'ibgateway' for Docker, 'localhost' or '127.0.0.1' for local TWS/Gateway", className="mb-2"),
 
                     dbc.Label("Port"),
-                    dbc.Input(id="set-port", type="number", value=4002, className="mb-2"),
+                    dbc.Input(id="set-port", type="number", value=8888, className="mb-2"),
 
                     dbc.Label("Client ID"),
                     dbc.Input(id="set-client-id", type="number", value=1, className="mb-3"),
@@ -161,7 +161,7 @@ def handle_connection(connect_clicks, disconnect_clicks, host, port, client_id):
 
     if triggered == "set-connect-btn":
         try:
-            port_num = int(port) if port else 4002
+            port_num = int(port) if port else 8888
             client_num = int(client_id) if client_id else 1
             
             # Validate host
@@ -177,9 +177,9 @@ def handle_connection(connect_clicks, disconnect_clicks, host, port, client_id):
             if "111" in error_msg or "refused" in error_msg.lower():
                 error_msg += " - Make sure IB Gateway/TWS is running and the host/port are correct."
             elif "timeout" in error_msg.lower():
-                error_msg += " - Connection timed out. This can happen with remote servers. Try:\n  • Check network connectivity (ping the server)\n  • Verify IB Gateway is running on the server\n  • Check firewall rules allow port 4002\n  • Wait for IB Gateway to fully start up (can take 1-2 minutes)"
+                error_msg += " - Connection timed out. This can happen with remote servers. Try:\n  • Check network connectivity (ping the server)\n  • Verify IB Gateway is running on the server\n  • Check firewall rules allow port 8888\n  • Wait for IB Gateway to fully start up (can take 1-2 minutes)"
             elif "timed out after 30s" in error_msg:
-                error_msg += "\n\nSuggestions:\n  • Verify the server is reachable: ping <server-ip>\n  • Check if IB Gateway container is running: docker ps\n  • View IB Gateway logs: docker compose logs ibgateway\n  • Ensure port 4002 is not blocked by firewall"
+                error_msg += "\n\nSuggestions:\n  • Verify the server is reachable: ping <server-ip>\n  • Check if IB Gateway container is running: docker ps\n  • View IB Gateway logs: docker compose logs ibgateway\n  • Ensure port 8888 is not blocked by firewall"
             
             return dbc.Alert(f"Connection failed: {error_msg}", color="danger")
         except ValueError as e:

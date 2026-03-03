@@ -12,7 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class Settings:
     # IBKR Connection
     IBKR_HOST: str = os.getenv("IBKR_HOST", "ibgateway")
-    IBKR_PORT: int = int(os.getenv("IBKR_PORT", "4002"))
+    IBKR_PORT: int = int(os.getenv("IBKR_PORT", "8888"))
     IBKR_CLIENT_ID: int = int(os.getenv("IBKR_CLIENT_ID", "1"))
     IBKR_TRADING_MODE: str = os.getenv("IBKR_TRADING_MODE", "paper")
     
