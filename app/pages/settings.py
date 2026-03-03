@@ -18,7 +18,7 @@ layout = html.Div([
                 dbc.CardHeader("IBKR Connection"),
                 dbc.CardBody([
                     dbc.Label("Host"),
-                    dbc.Input(id="set-host", value="127.0.0.1", className="mb-2"),
+                    dbc.Input(id="set-host", value="ibgateway", className="mb-2"),
 
                     dbc.Label("Port"),
                     dbc.Input(id="set-port", type="number", value=4002, className="mb-2"),
