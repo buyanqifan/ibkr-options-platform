@@ -19,6 +19,7 @@ layout = html.Div([
                 dbc.CardBody([
                     dbc.Label("Host"),
                     dbc.Input(id="set-host", value="ibgateway", className="mb-2"),
+                    dbc.FormText("Use 'ibgateway' for Docker, 'localhost' or '127.0.0.1' for local TWS/Gateway", className="mb-2"),
 
                     dbc.Label("Port"),
                     dbc.Input(id="set-port", type="number", value=4002, className="mb-2"),
@@ -159,10 +160,30 @@ def handle_connection(connect_clicks, disconnect_clicks, host, port, client_id):
     triggered = ctx.triggered_id
 
     if triggered == "set-connect-btn":
-        success = conn_mgr.connect(host=host, port=int(port or 4002), client_id=int(client_id or 1))
-        if success:
-            return dbc.Alert("Connected successfully!", color="success", duration=3000)
-        return dbc.Alert(f"Connection failed: {conn_mgr.status.message}", color="danger")
+        try:
+            port_num = int(port) if port else 4002
+            client_num = int(client_id) if client_id else 1
+            
+            # Validate host
+            if not host or host.strip() == "":
+                return dbc.Alert("Host cannot be empty. Use 'ibgateway' for Docker or 'localhost' for local.", color="danger")
+            
+            success = conn_mgr.connect(host=host.strip(), port=port_num, client_id=client_num)
+            if success:
+                return dbc.Alert("Connected successfully!", color="success", duration=3000)
+            
+            # Provide more detailed error message
+            error_msg = conn_mgr.status.message
+            if "111" in error_msg or "refused" in error_msg.lower():
+                error_msg += " - Make sure IB Gateway/TWS is running and the host/port are correct."
+            elif "timeout" in error_msg.lower():
+                error_msg += " - Connection timed out. Check network connectivity and firewall settings."
+            
+            return dbc.Alert(f"Connection failed: {error_msg}", color="danger")
+        except ValueError as e:
+            return dbc.Alert(f"Invalid input: Port and Client ID must be numbers. Error: {e}", color="danger")
+        except Exception as e:
+            return dbc.Alert(f"Unexpected error: {e}", color="danger")
     elif triggered == "set-disconnect-btn":
         conn_mgr.disconnect()
         return dbc.Alert("Disconnected", color="info", duration=3000)
