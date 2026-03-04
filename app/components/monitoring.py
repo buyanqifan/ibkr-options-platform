@@ -208,10 +208,26 @@ def create_trade_history_table(trades: list) -> html.Div:
     rows = []
     for trade in trades[-10:]:  # Show last 10 trades
         pnl_class = "text-success" if trade.get("pnl", 0) >= 0 else "text-danger"
+        
+        # Extract option contract details
+        symbol = trade.get("symbol", "N/A")
+        expiry = trade.get("expiry", "N/A")
+        strike = trade.get("strike", 0)
+        right = trade.get("right", "N/A")  # P (Put) or C (Call)
+        quantity = trade.get("quantity", 0)
+        trade_type = trade.get("type", "N/A")
+        
+        # Format option name: e.g., "AAPL 240115 150 Put"
+        option_name = f"{symbol} {expiry[2:]} {strike:.0f} {'Put' if right == 'P' else 'Call'}"
+        
+        # Format quantity with direction
+        qty_display = f"{quantity}x"
+        
         rows.append(
             html.Tr([
                 html.Td(trade.get("date", "N/A")),
-                html.Td(trade.get("type", "N/A")),
+                html.Td(option_name, title=f"{trade_type}"),
+                html.Td(qty_display),
                 html.Td(trade.get("exit_reason", "N/A")),
                 html.Td(f"${trade.get('pnl', 0):+.2f}", className=pnl_class),
                 html.Td(f"${trade.get('cumulative_pnl', 0):+.2f}"),
@@ -221,8 +237,12 @@ def create_trade_history_table(trades: list) -> html.Div:
     return html.Table([
         html.Thead([
             html.Tr([
-                html.Th("Date"), html.Th("Type"), html.Th("Exit Reason"), 
-                html.Th("P&L"), html.Th("Cumulative P&L")
+                html.Th("Date"), 
+                html.Th("Option Contract"), 
+                html.Th("Qty"),
+                html.Th("Exit Reason"), 
+                html.Th("P&L"), 
+                html.Th("Cumulative P&L")
             ])
         ]),
         html.Tbody(rows),
