@@ -18,6 +18,7 @@ class StraddleStrategy(BaseStrategy):
         underlying_price: float,
         iv: float,
         open_positions: list,
+        position_mgr=None,
     ) -> list[Signal]:
         max_pos = self.params.get("max_positions", 1)
         if len(open_positions) >= max_pos:
@@ -40,13 +41,30 @@ class StraddleStrategy(BaseStrategy):
         put_delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
         call_delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
 
+        # Calculate quantity using position manager if available
+        if position_mgr:
+            # For short straddle, use the higher premium as margin reference
+            # Short options require margin for potential assignment
+            higher_premium = max(put_premium, call_premium)
+            # Margin estimate: higher premium × 100 × leverage factor (typically 10-20x)
+            margin_per_contract = higher_premium * 100 * 15  # Conservative 15x multiplier
+            margin_per_contract = max(margin_per_contract, strike * 100 * 0.2)  # Min 20% of underlying
+            
+            num_contracts = position_mgr.calculate_position_size(
+                margin_per_contract=margin_per_contract,
+                max_positions=max_pos,
+            )
+        else:
+            # Legacy: always 1 contract
+            num_contracts = 1
+        
         symbol = self.params["symbol"]
         return [
             Signal(symbol=symbol, trade_type="STRADDLE_PUT", right="P",
-                   strike=strike, expiry=expiry_str, quantity=-1,
+                   strike=strike, expiry=expiry_str, quantity=-num_contracts,
                    iv=iv, delta=put_delta, premium=put_premium),
             Signal(symbol=symbol, trade_type="STRADDLE_CALL", right="C",
-                   strike=strike, expiry=expiry_str, quantity=-1,
+                   strike=strike, expiry=expiry_str, quantity=-num_contracts,
                    iv=iv, delta=call_delta, premium=call_premium),
         ]
 
@@ -97,12 +115,29 @@ class StrangleStrategy(BaseStrategy):
         put_delta = OptionsPricer.delta(underlying_price, put_strike, T, iv, "P")
         call_delta = OptionsPricer.delta(underlying_price, call_strike, T, iv, "C")
 
+        # Calculate quantity using position manager if available
+        if position_mgr:
+            # For short strangle, similar to straddle but with OTM strikes
+            # Risk is slightly lower due to OTM strikes, but still significant
+            higher_premium = max(put_premium, call_premium)
+            # Margin estimate: higher premium × 100 × leverage factor (slightly lower than straddle)
+            margin_per_contract = higher_premium * 100 * 12  # Conservative 12x multiplier
+            margin_per_contract = max(margin_per_contract, min(put_strike, call_strike) * 100 * 0.15)  # Min 15% of lower strike
+            
+            num_contracts = position_mgr.calculate_position_size(
+                margin_per_contract=margin_per_contract,
+                max_positions=max_pos,
+            )
+        else:
+            # Legacy: always 1 contract
+            num_contracts = 1
+        
         symbol = self.params["symbol"]
         return [
             Signal(symbol=symbol, trade_type="STRANGLE_PUT", right="P",
-                   strike=put_strike, expiry=expiry_str, quantity=-1,
+                   strike=put_strike, expiry=expiry_str, quantity=-num_contracts,
                    iv=iv, delta=put_delta, premium=put_premium),
             Signal(symbol=symbol, trade_type="STRANGLE_CALL", right="C",
-                   strike=call_strike, expiry=expiry_str, quantity=-1,
+                   strike=call_strike, expiry=expiry_str, quantity=-num_contracts,
                    iv=iv, delta=call_delta, premium=call_premium),
         ]
