@@ -149,6 +149,7 @@ class WheelStrategy(BaseStrategy):
         underlying_price: float,
         iv: float,
         open_positions: list,
+        position_mgr=None,
     ) -> list[Signal]:
         """Generate signals based on current phase."""
         max_pos = self.params.get("max_positions", 1)
@@ -169,11 +170,11 @@ class WheelStrategy(BaseStrategy):
 
         if self.phase == "SP":
             return self._generate_sell_put_signal(
-                underlying_price, iv, T, expiry_str
+                underlying_price, iv, T, expiry_str, position_mgr
             )
         else:  # phase == "CC"
             return self._generate_covered_call_signal(
-                underlying_price, iv, T, expiry_str
+                underlying_price, iv, T, expiry_str, position_mgr
             )
 
     def _generate_sell_put_signal(
@@ -182,6 +183,7 @@ class WheelStrategy(BaseStrategy):
         iv: float,
         T: float,
         expiry_str: str,
+        position_mgr=None,
     ) -> list[Signal]:
         """Generate Sell Put signal for Phase 1."""
         # Use put-specific delta
@@ -193,11 +195,20 @@ class WheelStrategy(BaseStrategy):
         premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
 
-        # Position sizing: cash secured put requires cash = strike * 100 per contract
-        available_capital = self.initial_capital * self.position_percentage
-        leveraged_capital = available_capital * self.max_leverage
-        max_contracts = int(leveraged_capital / (strike * 100))
-        max_contracts = max(1, min(max_contracts, self.params.get("max_positions", 1)))
+        # Position sizing using position manager if available
+        if position_mgr:
+            # Cash-secured put: reserve strike * 100 per contract
+            max_contracts = position_mgr.calculate_position_size(
+                margin_per_contract=strike * 100,
+                max_positions=self.params.get("max_positions", 1),
+            )
+        else:
+            # Fallback to legacy calculation
+            available_capital = self.initial_capital * self.position_percentage
+            leveraged_capital = available_capital * self.max_leverage
+            max_contracts = int(leveraged_capital / (strike * 100))
+            max_contracts = max(1, min(max_contracts, self.params.get("max_positions", 1)))
+        
         quantity = -max_contracts  # Sell
 
         return [Signal(
@@ -218,13 +229,14 @@ class WheelStrategy(BaseStrategy):
         iv: float,
         T: float,
         expiry_str: str,
+        position_mgr=None,
     ) -> list[Signal]:
         """Generate Covered Call signal for Phase 2."""
         # Can only sell calls for shares we own
         if self.stock_holding.shares <= 0:
             # Shouldn't happen, but fallback to SP phase
             self.phase = "SP"
-            return self._generate_sell_put_signal(underlying_price, iv, T, expiry_str)
+            return self._generate_sell_put_signal(underlying_price, iv, T, expiry_str, position_mgr)
 
         # Use call-specific delta
         original_delta = self.delta_target
@@ -236,8 +248,22 @@ class WheelStrategy(BaseStrategy):
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
 
         # Covered call: 1 contract per 100 shares owned
-        max_contracts = self.stock_holding.shares // 100
-        max_contracts = max(1, min(max_contracts, self.params.get("max_positions", 1)))
+        max_contracts_by_shares = self.stock_holding.shares // 100
+        
+        # Also check capital constraints if position_mgr available
+        if position_mgr:
+            # For covered call, need to verify we have enough capital for shares
+            max_contracts_by_capital = position_mgr.calculate_position_size(
+                margin_per_contract=underlying_price * 100,
+                max_positions=self.params.get("max_positions", 1),
+            )
+            # Take minimum of shares-based and capital-based sizing
+            max_contracts = min(max_contracts_by_shares, max_contracts_by_capital)
+            max_contracts = max(1, min(max_contracts, self.params.get("max_positions", 1)))
+        else:
+            max_contracts = max_contracts_by_shares
+            max_contracts = max(1, min(max_contracts, self.params.get("max_positions", 1)))
+        
         quantity = -max_contracts  # Sell
 
         return [Signal(
