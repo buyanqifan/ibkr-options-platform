@@ -12,6 +12,9 @@ services:
       GATEWAY_OR_TWS: gateway
       IBC_TradingMode: paper
       IBC_ReadOnlyApi: 'no'
+      IBC_ExistingSessionDetectedAction: primaryonly
+      IBC_AutoRestart: 'yes'
+      # Accept incoming API connections (requires manual config in noVNC first time)
     networks:
       - trading-net
 
