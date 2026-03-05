@@ -51,10 +51,7 @@ layout = html.Div([
                     ], className="mb-3"),
 
                     dbc.Label("Initial Capital ($)"),
-                    dbc.Input(id="bt-capital", type="number", value=150000, className="mb-3"),  # Increased to $150k for realistic position sizing
-
-                    dbc.Label("Position Size (% of capital)"),
-                    dbc.Input(id="bt-position-size", type="number", value=15.0, step=0.1, min=0.1, max=100, className="mb-3"),  # 15% for better capital utilization
+                    dbc.Input(id="bt-capital", type="number", value=150000, className="mb-3"),  # Sufficient capital for desired positions
 
                     dbc.Label("Max Leverage"),
                     dbc.Input(id="bt-leverage", type="number", value=1.0, step=0.1, min=1.0, className="mb-3"),
@@ -179,7 +176,6 @@ def toggle_delta_config(strategy):
     State("bt-start", "value"),
     State("bt-end", "value"),
     State("bt-capital", "value"),
-    State("bt-position-size", "value"),
     State("bt-leverage", "value"),
     State("bt-dte-min", "value"),
     State("bt-dte-max", "value"),
@@ -194,7 +190,7 @@ def toggle_delta_config(strategy):
 )
 def run_backtest(
     n_clicks, strategy, symbol, start_date, end_date,
-    capital, position_size, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
+    capital, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
     put_delta, call_delta, max_positions, benchmarks
 ):
     if not symbol or not start_date or not end_date:
@@ -213,10 +209,9 @@ def run_backtest(
         "symbol": symbol,
         "start_date": start_date,
         "end_date": end_date,
-        "initial_capital": capital or 100000,
-        "position_percentage": (position_size or 10.0) / 100,  # Convert percentage to decimal
+        "initial_capital": capital or 150000,  # Default $150k for realistic trading
         "max_leverage": leverage or 1.0,
-        "dte_min": dte_min or 21,
+        "dte_min": dte_min or 30,
         "dte_max": dte_max or 45,
         "delta_target": delta or 0.30,
         "profit_target_pct": profit_target or 50,
@@ -224,7 +219,7 @@ def run_backtest(
         # Wheel strategy specific parameters
         "put_delta": put_delta or 0.30,
         "call_delta": call_delta or 0.30,
-        "max_positions": max_positions or 1,
+        "max_positions": max_positions or 10,  # Default 10 for diversification
     }
 
     # Get benchmark data if requested

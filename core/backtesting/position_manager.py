@@ -103,16 +103,11 @@ class PositionManager:
         if margin_per_contract <= 0:
             return 0
         
-        # Calculate maximum contracts by available margin
+        # Calculate maximum contracts by available margin (primary constraint)
         max_by_margin = int(self.available_margin / margin_per_contract)
         
-        # Apply position percentage constraint
-        allocated_capital = self.net_capital * self.position_percentage
-        leveraged_capital = allocated_capital * self.max_leverage
-        max_by_capital = int(leveraged_capital / margin_per_contract)
-        
-        # Take minimum of all constraints
-        num_contracts = min(max_positions, max_by_margin, max_by_capital)
+        # Take minimum of margin and max_positions constraints
+        num_contracts = min(max_positions, max_by_margin)
         
         # Return 0 if insufficient capital (no forced position sizing)
         # This ensures realistic backtest results - can't trade with no money!

@@ -40,20 +40,9 @@ class SellPutStrategy(BaseStrategy):
             if num_contracts <= 0:
                 return []
         else:
-            # Fallback to legacy calculation (backward compatibility)
-            available_capital = self.initial_capital * self.position_percentage
-            leveraged_capital = available_capital * self.max_leverage
-            
-            max_contracts_by_capital = int(leveraged_capital / (strike * 100))
-            
-            # For risk-based sizing, use premium income as the measure
-            expected_premium_income = premium * 100
-            max_contracts_by_risk = int((self.initial_capital * self.max_risk_per_trade) / expected_premium_income) if expected_premium_income > 0 else max_pos
-            
-            num_contracts = min(max_pos, max_contracts_by_capital, max_contracts_by_risk)
-            
-            # Return 0 if insufficient capital (no forced position sizing)
-            # This ensures realistic backtest results
+            # Without position manager, use simple max_positions limit
+            # Position manager is always provided in backtest engine
+            num_contracts = min(max_pos, int(self.initial_capital / (strike * 100)))
             if num_contracts <= 0:
                 return []
         
