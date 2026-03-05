@@ -68,8 +68,11 @@ layout = html.Div([
                         dbc.Col(dbc.Input(id="bt-dte-max", type="number", value=45, size="sm"), width=6),
                     ], className="mb-2"),
 
-                    dbc.Label("Target Delta (absolute)"),
-                    dbc.Input(id="bt-delta", type="number", value=0.30, step=0.05, size="sm", className="mb-2"),
+                    # Delta configuration - shown for non-Wheel strategies only
+                    html.Div(id="delta-config-container", children=[
+                        dbc.Label("Target Delta (absolute)"),
+                        dbc.Input(id="bt-delta", type="number", value=0.30, step=0.05, size="sm", className="mb-2"),
+                    ]),
 
                     dbc.Label("Profit Target (% of premium)"),
                     dbc.Input(id="bt-profit-target", type="number", value=50, size="sm", className="mb-2"),  # Take profit at 50%
@@ -152,6 +155,17 @@ layout = html.Div([
 def toggle_wheel_params(strategy):
     """Show/hide wheel strategy specific parameters."""
     if strategy == "wheel":
+        return "d-block"
+    return "d-none"
+
+
+@callback(
+    Output("delta-config-container", "className"),
+    Input("bt-strategy", "value"),
+)
+def toggle_delta_config(strategy):
+    """Show/hide delta configuration for non-Wheel strategies."""
+    if strategy != "wheel":
         return "d-block"
     return "d-none"
 
