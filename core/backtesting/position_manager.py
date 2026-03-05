@@ -116,7 +116,7 @@ class PositionManager:
                 f"Insufficient capital for position: "
                 f"available_margin={self.available_margin:.2f}, "
                 f"margin_per_contract={margin_per_contract:.2f}, "
-                f"max_by_margin={max_by_margin}, max_by_capital={max_by_capital}"
+                f"max_by_margin={max_by_margin}, max_positions={max_positions}"
             )
             return 0
         
