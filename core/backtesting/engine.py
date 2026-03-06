@@ -13,6 +13,7 @@ from core.backtesting.strategies.spreads import BullPutSpreadStrategy, BearCallS
 from core.backtesting.strategies.straddle import StraddleStrategy, StrangleStrategy
 from core.backtesting.strategies.wheel import WheelStrategy
 from core.backtesting.position_manager import PositionManager
+from core.backtesting.cost_model import TradingCostModel  # New: Trading cost model
 from utils.logger import setup_logger
 
 logger = setup_logger("backtest_engine")

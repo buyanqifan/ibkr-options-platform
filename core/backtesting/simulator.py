@@ -135,13 +135,21 @@ class TradeSimulator:
                 pnl_per_share = current_opt_price - pos.entry_price
                 pnl_pct = (pnl_per_share / pos.entry_price * 100) if pos.entry_price > 0 else 0
 
-            # Check profit target
-            if pnl_pct >= profit_target_pct:
+            # Check profit target (dynamic adjustment based on DTE)
+            adjusted_profit_target = profit_target_pct
+            if dte <= 7:  # Last week: reduce target to capture remaining premium
+                adjusted_profit_target = profit_target_pct * 0.7
+            
+            if pnl_pct >= adjusted_profit_target:
                 exit_reason = "PROFIT_TARGET"
                 exit_price = current_opt_price
 
-            # Check stop loss
-            elif pnl_pct <= -stop_loss_pct:
+            # Check stop loss (dynamic adjustment based on DTE and holding period)
+            adjusted_stop_loss = stop_loss_pct
+            if dte <= 7:  # Last week: widen stop to avoid whipsaw
+                adjusted_stop_loss = stop_loss_pct * 1.3
+            
+            if pnl_pct <= -adjusted_stop_loss:
                 exit_reason = "STOP_LOSS"
                 exit_price = current_opt_price
 
