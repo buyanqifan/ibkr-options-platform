@@ -74,8 +74,9 @@ class BacktestEngine:
         
         # Initialize cost model for trading costs
         cost_model = TradingCostModel(
-            commission_rate=params.get("commission_rate", 0.005),
-            slippage_rate=params.get("slippage_rate", 0.001),
+            commission_per_contract=params.get("commission_per_contract", 0.65),
+            commission_min=params.get("commission_min", 1.00),
+            slippage_per_contract=params.get("slippage_per_contract", 0.05),
         )
         
         # Run simulation
