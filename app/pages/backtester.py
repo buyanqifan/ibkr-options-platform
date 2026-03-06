@@ -42,7 +42,7 @@ layout = html.Div([
                     ),
 
                     dbc.Label("Symbol"),
-                    dbc.Input(id="bt-symbol", value="AAPL", className="mb-3"),
+                    dbc.Input(id="bt-symbol", value="NVDA", className="mb-3"),
 
                     dbc.Label("Date Range"),
                     dbc.Row([
