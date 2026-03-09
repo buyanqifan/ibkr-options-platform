@@ -52,7 +52,9 @@ class TradeRecord:
         try:
             expiry_short = self.expiry[2:] if len(self.expiry) >= 6 else self.expiry
             option_type = "Put" if self.right == "P" else "Call"
-            contract_name = f"{self.symbol} {expiry_short} {self.strike:.0f} {option_type}"
+            # Format strike: use integer if whole number, otherwise keep 1 decimal
+            strike_display = int(self.strike) if self.strike == int(self.strike) else self.strike
+            contract_name = f"{self.symbol} {expiry_short} {strike_display} {option_type}"
         except:
             contract_name = f"{self.symbol} {self.expiry} {self.strike} {self.right}"
         
