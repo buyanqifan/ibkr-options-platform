@@ -109,6 +109,15 @@ layout = dbc.Container([
                     dbc.Input(id="bbg-leverage", type="number", 
                              value=1.0, step=0.1, min=1.0, className="mb-3"),
                     
+                    # Use Synthetic Data Option
+                    dcc.Checklist(
+                        id="bbg-use-synthetic",
+                        options=[{"label": " Use Random Synthetic Data (for testing without IBKR connection)", "value": True}],
+                        value=[],
+                        inline=True,
+                        className="mb-3",
+                    ),
+                    
                     html.Hr(),
                     html.H6("Wheel Parameters", className="fw-bold mb-2"),
                     
@@ -218,14 +227,15 @@ layout = dbc.Container([
 
 
 @callback(
-    Output("binbin-results-store", "data"),
-    Output("binbin-results-container", "children"),
+    Output("bbg-results", "data"),
     Output("binbin-mag7-analysis", "children"),
+    Output("bbg-run-output", "children"),
     Input("bbg-run-btn", "n_clicks"),
     State("bbg-start", "value"),
     State("bbg-end", "value"),
     State("bbg-capital", "value"),
     State("bbg-leverage", "value"),
+    State("bbg-use-synthetic", "value"),  # NEW
     State("bbg-dte-min", "value"),
     State("bbg-dte-max", "value"),
     State("bbg-put-delta", "value"),
@@ -239,7 +249,7 @@ layout = dbc.Container([
     prevent_initial_call=True,
 )
 def run_binbin_backtest(
-    n_clicks, start_date, end_date, capital, leverage,
+    n_clicks, start_date, end_date, capital, leverage, use_synthetic,
     dte_min, dte_max, put_delta, call_delta, max_positions, rebalance_threshold,
     profit_target, stop_loss, disable_profit_target, disable_stop_loss
 ):
@@ -265,6 +275,7 @@ def run_binbin_backtest(
         "end_date": end_date,
         "initial_capital": capital or 150000,
         "max_leverage": leverage or 1.0,
+        "use_synthetic_data": bool(use_synthetic and True in use_synthetic),  # NEW
         "dte_min": dte_min or 30,
         "dte_max": dte_max or 45,
         "delta_target": 0.30,  # Not used by Wheel, but required by base class
