@@ -74,6 +74,10 @@ class WheelStrategy(BaseStrategy):
         self._current_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._peak_value = self.initial_capital
         self._trough_value = self.initial_capital
+        
+        # Check if profit target/stop loss are disabled (special value 999999 means disabled)
+        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
+        self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999
 
     @property
     def name(self) -> str:

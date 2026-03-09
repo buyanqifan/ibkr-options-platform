@@ -72,11 +72,39 @@ layout = html.Div([
                     ]),
 
                     dbc.Label("Profit Target (% of premium)"),
-                    dbc.Input(id="bt-profit-target", type="number", value=50, size="sm", className="mb-2"),  # Take profit at 50%
+                    dbc.Row([
+                        dbc.Col(
+                            dbc.Input(id="bt-profit-target", type="number", value=50, step=10, size="sm"),
+                            width=8
+                        ),
+                        dbc.Col(
+                            dbc.FormCheck(
+                                id="bt-disable-profit-target",
+                                label="Disable",
+                                value=False,
+                                className="mt-2"
+                            ),
+                            width=4
+                        ),
+                    ], className="mb-2"),
 
                     dbc.Label("Stop Loss (% of premium)"),
-                    dbc.Input(id="bt-stop-loss", type="number", value=200, size="sm", className="mb-3"),  # Stop loss at 200%
-                    
+                    dbc.Row([
+                        dbc.Col(
+                            dbc.Input(id="bt-stop-loss", type="number", value=200, step=50, size="sm"),
+                            width=8
+                        ),
+                        dbc.Col(
+                            dbc.FormCheck(
+                                id="bt-disable-stop-loss",
+                                label="Disable",
+                                value=False,
+                                className="mt-2"
+                            ),
+                            width=4
+                        ),
+                    ], className="mb-3"),
+
                     # Max Positions (visible for all strategies)
                     html.Hr(),
                     html.H6("Position Management", className="fw-bold mb-2"),
@@ -203,12 +231,15 @@ def toggle_delta_config(strategy):
     State("bt-call-delta", "value"),
     State("bt-max-positions", "value"),
     State("bt-benchmarks", "value"),
+    State("bt-disable-profit-target", "value"),
+    State("bt-disable-stop-loss", "value"),
     prevent_initial_call=True,
 )
 def run_backtest(
     n_clicks, strategy, symbol, start_date, end_date,
     capital, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
-    put_delta, call_delta, max_positions, benchmarks
+    put_delta, call_delta, max_positions, benchmarks,
+    disable_profit_target, disable_stop_loss
 ):
     if not symbol or not start_date or not end_date:
         return no_update, no_update
@@ -221,6 +252,10 @@ def run_backtest(
     engine = services["backtest_engine"]
     data_client = services.get("data_client")
 
+    # Use special value 999999 to disable profit target/stop loss
+    profit_target_value = 999999 if disable_profit_target else (profit_target or 50)
+    stop_loss_value = 999999 if disable_stop_loss else (stop_loss or 200)
+
     params = {
         "strategy": strategy,
         "symbol": symbol,
@@ -231,8 +266,8 @@ def run_backtest(
         "dte_min": dte_min or 30,
         "dte_max": dte_max or 45,
         "delta_target": delta or 0.30,
-        "profit_target_pct": profit_target or 50,
-        "stop_loss_pct": stop_loss or 200,
+        "profit_target_pct": profit_target_value,
+        "stop_loss_pct": stop_loss_value,
         # Wheel strategy specific parameters
         "put_delta": put_delta or 0.30,
         "call_delta": call_delta or 0.30,

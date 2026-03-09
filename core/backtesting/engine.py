@@ -111,23 +111,31 @@ class BacktestEngine:
                         min_dte=0,
                     )
                 else:  # CC phase
-                    # Covered Call phase: use normal profit target/stop loss
+                    # Covered Call phase: use normal profit target/stop loss (unless disabled by user)
+                    # Check if user explicitly disabled profit target/stop loss
+                    profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
+                    stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
+                    
                     closed = simulator.check_exits(
                         bar_date,
                         underlying_price,
                         iv,
-                        strategy.profit_target_pct,
-                        strategy.stop_loss_pct,
+                        profit_target_to_use,
+                        stop_loss_to_use,
                         min_dte=0,
                     )
             else:
                 # Normal strategies use configured profit target and stop loss
+                # Unless user explicitly disabled them
+                profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
+                stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
+                
                 closed = simulator.check_exits(
                     bar_date,
                     underlying_price,
                     iv,
-                    strategy.profit_target_pct,
-                    strategy.stop_loss_pct,
+                    profit_target_to_use,
+                    stop_loss_to_use,
                     min_dte=0,
                 )
             for trade in closed:
