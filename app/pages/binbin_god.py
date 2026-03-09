@@ -148,7 +148,12 @@ layout = dbc.Container([
                              value=10, min=1, max=50, step=1, size="sm", className="mb-2"),
                     
                     # Rebalance Threshold
-                    dbc.Label("Rebalance Threshold (%)", title="Switch symbols if better opportunity is X% higher scored"),
+                    html.Div([
+                        dbc.Label("Rebalance Threshold (%)"),
+                        html.I(className="bi bi-question-circle ms-1", 
+                              title="Switch symbols if better opportunity is X% higher scored",
+                              style={"cursor": "pointer"}),
+                    ]),
                     dbc.Input(id="bbg-rebalance-threshold", type="number", 
                              value=15, step=5, size="sm", 
                              className="mb-3"),
