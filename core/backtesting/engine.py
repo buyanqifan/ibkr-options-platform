@@ -97,15 +97,29 @@ class BacktestEngine:
             # Check exits and release margin
             # For Wheel strategy SP phase, skip profit target/stop loss - only check assignment at expiry
             if strategy.name == "wheel":
-                # Wheel SP phase: only exit on assignment or expiry (no profit target/stop loss)
-                closed = simulator.check_exits(
-                    bar_date,
-                    underlying_price,
-                    iv,
-                    profit_target_pct=999999,  # Effectively disable profit target
-                    stop_loss_pct=999999,      # Effectively disable stop loss
-                    min_dte=0,
-                )
+                # Check which phase the Wheel strategy is in
+                wheel_phase = getattr(strategy, 'phase', 'SP')  # Default to SP if not found
+                
+                if wheel_phase == "SP":
+                    # Sell Put phase: disable profit target/stop loss (want assignment)
+                    closed = simulator.check_exits(
+                        bar_date,
+                        underlying_price,
+                        iv,
+                        profit_target_pct=999999,  # Disable profit target
+                        stop_loss_pct=999999,      # Disable stop loss
+                        min_dte=0,
+                    )
+                else:  # CC phase
+                    # Covered Call phase: use normal profit target/stop loss
+                    closed = simulator.check_exits(
+                        bar_date,
+                        underlying_price,
+                        iv,
+                        strategy.profit_target_pct,
+                        strategy.stop_loss_pct,
+                        min_dte=0,
+                    )
             else:
                 # Normal strategies use configured profit target and stop loss
                 closed = simulator.check_exits(
