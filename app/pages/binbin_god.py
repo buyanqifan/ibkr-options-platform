@@ -175,7 +175,8 @@ layout = dbc.Container([
                                 options=[{"label": " Disable", "value": True}],
                                 value=[],
                                 inline=True,
-                                className="mt-2"
+                                className="mt-2",
+                                style={"color": "#fff"}  # White text for visibility
                             ),
                             width=4
                         ),
@@ -195,11 +196,12 @@ layout = dbc.Container([
                                 options=[{"label": " Disable", "value": True}],
                                 value=[],
                                 inline=True,
-                                className="mt-2"
+                                className="mt-2",
+                                style={"color": "#fff"}  # White text for visibility
                             ),
-                            width=4
-                        ),
-                    ], className="mb-3"),
+
+                        ],
+                        className="mb-3"),
                     
                     # Run Button
                     dbc.Button([

@@ -93,6 +93,7 @@ layout = html.Div([
                                 value=[],
                                 inline=True,
                                 className="mt-2",
+                                style={"color": "#fff"}  # White text for visibility
                             ),
                             width=4
                         ),
@@ -111,6 +112,7 @@ layout = html.Div([
                                 value=[],
                                 inline=True,
                                 className="mt-2",
+                                style={"color": "#fff"}  # White text for visibility
                             ),
                             width=4
                         ),
