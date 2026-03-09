@@ -45,10 +45,11 @@ layout = html.Div([
                     dbc.Input(id="bt-symbol", value="NVDA", className="mb-3"),
 
                     # Use Synthetic Data Option
-                    dbc.FormCheck(
+                    dcc.Checklist(
                         id="bt-use-synthetic",
-                        label="Use Random Synthetic Data (for testing without IBKR connection)",
-                        value=False,
+                        options=[{"label": " Use Random Synthetic Data (for testing without IBKR connection)", "value": True}],
+                        value=[],
+                        inline=True,
                         className="mb-3",
                     ),
 
@@ -280,8 +281,8 @@ def run_backtest(
         "delta_target": delta or 0.30,
         "profit_target_pct": profit_target_value,
         "stop_loss_pct": stop_loss_value,
-        # Synthetic data option
-        "use_synthetic_data": use_synthetic if use_synthetic else False,
+        # Synthetic data option - Checklist returns list, check if True is in the list
+        "use_synthetic_data": bool(use_synthetic and True in use_synthetic),
         # Wheel strategy specific parameters
         "put_delta": put_delta or 0.30,
         "call_delta": call_delta or 0.30,
