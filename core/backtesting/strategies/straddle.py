@@ -1,4 +1,4 @@
-"""Straddle and Strangle strategies (short)."""
+"""Short Straddle strategy."""
 
 from core.backtesting.strategies.base import BaseStrategy, Signal
 from core.backtesting.pricing import OptionsPricer
@@ -7,6 +7,12 @@ from datetime import datetime, timedelta
 
 class StraddleStrategy(BaseStrategy):
     """Short straddle: sell ATM put + sell ATM call."""
+
+    def __init__(self, params: dict):
+        super().__init__(params)
+        # Check if profit target/stop loss are disabled (special value 999999 means disabled)
+        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
+        self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999
 
     @property
     def name(self) -> str:
@@ -88,6 +94,9 @@ class StrangleStrategy(BaseStrategy):
         super().__init__(params)
         self.put_delta = params.get("put_delta_target", 0.20)
         self.call_delta = params.get("call_delta_target", 0.20)
+        # Check if profit target/stop loss are disabled (special value 999999 means disabled)
+        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
+        self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999
 
     def generate_signals(
         self,
