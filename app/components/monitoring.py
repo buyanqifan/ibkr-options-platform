@@ -360,9 +360,6 @@ def create_monitoring_dashboard(performance_data: Dict[str, Any]) -> html.Div:
         # Current strategy state
         create_strategy_state_card(current_state),
         
-        # Detailed performance summary
-        create_performance_summary_card(performance_metrics),
-        
         # Additional monitoring sections
         dbc.Row([
             dbc.Col([
