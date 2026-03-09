@@ -103,10 +103,22 @@ class IBKRDataClient:
         symbol: str,
         duration: str = "1 Y",
         bar_size: str = "1 day",
-        what_to_show: str = "TRADES",
+        what_to_show: str = "ADJUSTED_LAST",  # Changed from "TRADES" to use split-adjusted prices
         use_rth: bool = True,
     ) -> list[dict]:
-        """Fetch historical OHLCV bars. Checks cache first."""
+        """Fetch historical OHLCV bars with split/dividend adjustments.
+        
+        Args:
+            symbol: Stock symbol (e.g., 'NVDA')
+            duration: Lookback period (e.g., '1 Y', '2 Y')
+            bar_size: Bar interval (e.g., '1 day', '1 hour')
+            what_to_show: Data type - uses ADJUSTED_LAST for split-adjusted prices
+                         Other options: TRADES (raw), BID, ASK, etc.
+            use_rth: Only regular trading hours
+            
+        Returns:
+            List of OHLCV bars with adjusted prices
+        """
         cached = self._cache.get_bars(symbol, bar_size)
         if cached:
             return cached
