@@ -380,7 +380,11 @@ class BacktestEngine:
     def _generate_synthetic_data(
         self, symbol: str, start_date: str, end_date: str
     ) -> list[dict]:
-        """Generate synthetic price data using geometric Brownian motion."""
+        """Generate synthetic price data using geometric Brownian motion.
+        
+        Uses realistic market parameters for better backtest realism.
+        Different date ranges will produce different (but reproducible) price paths.
+        """
         from utils.date_utils import get_trading_days
         sd = datetime.strptime(start_date, "%Y-%m-%d").date()
         ed = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -389,7 +393,10 @@ class BacktestEngine:
         if not trading_days:
             return []
 
-        np.random.seed(42)
+        # Use date-based seed for reproducibility with variation across different periods
+        # This ensures same date range always produces same results, but different ranges differ
+        date_seed = int(start_date.replace("-", "")) + int(end_date.replace("-", ""))
+        np.random.seed(date_seed)
         
         # Use realistic starting prices for common symbols (as of 2026)
         # These are approximate real-world prices for better backtest realism
@@ -405,29 +412,63 @@ class BacktestEngine:
         
         S0 = SYMBOL_START_PRICES.get(symbol.upper(), 150.0)  # Default to $150 if unknown
         
-        mu = 0.08 / 252  # daily drift
-        sigma = 0.25 / np.sqrt(252)  # daily vol
+        mu = 0.08 / 252  # daily drift (8% annual return)
+        sigma = 0.25 / np.sqrt(252)  # daily vol (25% annual vol)
 
+        # Generate daily close prices using GBM
         prices = [S0]
         for _ in range(len(trading_days) - 1):
             ret = np.random.normal(mu, sigma)
             prices.append(prices[-1] * (1 + ret))
 
+        # Generate OHLCV bars with realistic intraday dynamics
         bars = []
         for i, d in enumerate(trading_days):
-            p = prices[i]
-            daily_range = p * 0.02 * np.random.random()
+            prev_close = prices[i-1] if i > 0 else S0
+            curr_close = prices[i]
+            
+            # Generate realistic open price (gap from previous close)
+            gap = np.random.normal(0, sigma * 0.3)  # Small gap effect
+            open_price = prev_close * (1 + gap)
+            
+            # Generate high/low with asymmetric range
+            daily_vol = sigma * np.random.lognormal(0, 0.5)  # Volatility clustering
+            high_price = max(open_price, curr_close) * (1 + abs(np.random.normal(0, daily_vol)))
+            low_price = min(open_price, curr_close) * (1 - abs(np.random.normal(0, daily_vol)))
+            
+            # Ensure logical consistency: low <= open,close <= high
+            low_price = min(low_price, open_price, curr_close)
+            high_price = max(high_price, open_price, curr_close)
+            
+            # Generate volume based on symbol characteristics
+            base_volume = self._get_base_volume_for_symbol(symbol)
+            volume_shock = np.random.lognormal(0, 0.5)  # Volume varies day to day
+            volume = int(base_volume * volume_shock)
+            
             bars.append({
                 "date": d.isoformat(),
-                "open": round(p - daily_range / 2, 2),
-                "high": round(p + daily_range, 2),
-                "low": round(p - daily_range, 2),
-                "close": round(p, 2),
-                "volume": int(np.random.uniform(1e6, 5e6)),
-                "average": round(p, 2),
-                "barCount": 1000,
+                "open": round(open_price, 2),
+                "high": round(high_price, 2),
+                "low": round(low_price, 2),
+                "close": round(curr_close, 2),
+                "volume": volume,
+                "average": round((open_price + high_price + low_price + curr_close) / 4, 2),
+                "barCount": int(np.random.uniform(800, 1200)),
             })
         return bars
+    
+    def _get_base_volume_for_symbol(self, symbol: str) -> int:
+        """Get typical daily volume for a symbol."""
+        VOLUME_MAP = {
+            "NVDA": 50_000_000,   # Very high volume tech stock
+            "AAPL": 60_000_000,   # Highest volume
+            "MSFT": 30_000_000,
+            "TSLA": 80_000_000,   # Extremely high volume
+            "GOOGL": 25_000_000,
+            "AMZN": 40_000_000,
+            "META": 20_000_000,
+        }
+        return VOLUME_MAP.get(symbol.upper(), 10_000_000)  # Default 10M
 
     def _rolling_hv(self, prices: list[float], window: int = 20) -> list[float]:
         """Calculate rolling historical volatility (annualized)."""
