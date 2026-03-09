@@ -6,6 +6,13 @@ from datetime import datetime, timedelta
 
 
 class SellPutStrategy(BaseStrategy):
+    """Sell Put strategy with full configuration support."""
+
+    def __init__(self, params: dict):
+        super().__init__(params)
+        # Check if profit target/stop loss are disabled (special value 999999 means disabled)
+        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
+        self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999
 
     @property
     def name(self) -> str:
