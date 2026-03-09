@@ -1,0 +1,24 @@
+# Optional: HTTPS Configuration with Let's Encrypt
+# 
+# To enable HTTPS:
+# 1. Install certbot: sudo apt-get install certbot python3-certbot-nginx
+# 2. Get certificate: sudo certbot certonly --standalone -d yourdomain.com
+# 3. Copy this file: cp docker-compose.ssl.yml docker-compose.override.yml
+# 4. Edit SSL_CERT_PATH and SSL_KEY_PATH to point to your certificates
+# 5. Run: docker compose up -d
+#
+# Note: For production use, consider using nginx/caddy as reverse proxy
+
+services:
+  app:
+    environment:
+      # Enable HTTPS in Dash (requires cert files)
+      APP_SSL_CERT_PATH: /app/ssl/fullchain.pem
+      APP_SSL_KEY_PATH: /app/ssl/privkey.pem
+    volumes:
+      - app-data:/app/data
+      # Mount your SSL certificates
+      - /path/to/your/certificates:/app/ssl:ro  # Update this path!
+
+# Alternative: Use nginx reverse proxy for HTTPS
+# See: https://dash.plotly.com/deployment-in-production
