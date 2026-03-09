@@ -12,6 +12,7 @@ from core.backtesting.strategies.iron_condor import IronCondorStrategy
 from core.backtesting.strategies.spreads import BullPutSpreadStrategy, BearCallSpreadStrategy
 from core.backtesting.strategies.straddle import StraddleStrategy, StrangleStrategy
 from core.backtesting.strategies.wheel import WheelStrategy
+from core.backtesting.strategies.binbin_god import BinbinGodStrategy  # New: Binbin God strategy
 from core.backtesting.position_manager import PositionManager
 from core.backtesting.cost_model import TradingCostModel  # New: Trading cost model
 from utils.logger import setup_logger
@@ -27,6 +28,7 @@ STRATEGY_MAP = {
     "straddle": StraddleStrategy,
     "strangle": StrangleStrategy,
     "wheel": WheelStrategy,
+    "binbin_god": BinbinGodStrategy,  # New: Binbin God strategy v0.1.0
 }
 
 

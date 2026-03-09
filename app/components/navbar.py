@@ -14,6 +14,7 @@ def create_navbar_items(lang="en"):
             "screener": "Screener",
             "options_chain": "Options Chain",
             "backtester": "Backtester",
+            "binbin_god": "Binbin God 🤖",  # New: Binbin God strategy
             "settings": "Settings",
         },
         "zh": {
@@ -22,6 +23,7 @@ def create_navbar_items(lang="en"):
             "screener": "选股器",
             "options_chain": "期权链",
             "backtester": "回测器",
+            "binbin_god": "彬彬神 🤖",  # 新：彬彬神策略
             "settings": "设置",
         }
     }
@@ -34,8 +36,9 @@ def create_navbar_items(lang="en"):
         dbc.NavItem(dbc.NavLink(nav_labels["screener"], href="/screener", active="exact")),
         dbc.NavItem(dbc.NavLink(nav_labels["options_chain"], href="/options-chain", active="exact")),
         dbc.NavItem(dbc.NavLink(nav_labels["backtester"], href="/backtester", active="exact")),
+        dbc.NavItem(dbc.NavLink(nav_labels["binbin_god"], href="/binbin-god", active="exact")),  # New link
         dbc.NavItem(dbc.NavLink(nav_labels["settings"], href="/settings", active="exact")),
-        
+
         # Language Selector
         dbc.NavItem(
             dbc.InputGroup(
