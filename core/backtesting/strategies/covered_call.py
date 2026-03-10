@@ -24,7 +24,7 @@ class CoveredCallStrategy(BaseStrategy):
     3. Track stock P&L when calls are assigned
     """
 
-   def __init__(self, params: dict):
+    def __init__(self, params: dict):
        super().__init__(params)
        self.stock_holding = StockHolding()
        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
@@ -32,10 +32,10 @@ class CoveredCallStrategy(BaseStrategy):
        self.logger= logging.getLogger(f"covered_call_{params.get('symbol', 'unknown')}")
 
     @property
-   def name(self) -> str:
+    def name(self) -> str:
         return "covered_call"
 
-   def initialize_stock_position(self, initial_price: float):
+    def initialize_stock_position(self, initial_price: float):
         """Initialize stock position at the start of backtest.
         
         This simulates buying the underlying stock before selling calls.
@@ -53,15 +53,15 @@ class CoveredCallStrategy(BaseStrategy):
                 f"(cost basis: ${shares_to_buy * initial_price:.2f})"
             )
 
-   def generate_signals(
-       self,
+    def generate_signals(
+        self,
         current_date: str,
         underlying_price: float,
         iv: float,
-       open_positions: list,
+        open_positions: list,
         position_mgr=None,
     ) -> list[Signal]:
-       max_pos = self.params.get("max_positions", 1)
+        max_pos = self.params.get("max_positions", 1)
         
         # Check if we already have an open call position
         cc_positions = [p for p in open_positions if p.trade_type == "COVERED_CALL"]
@@ -70,18 +70,18 @@ class CoveredCallStrategy(BaseStrategy):
         
         # Must own shares to sell covered calls!
         if self.stock_holding.shares <= 0:
-           self.logger.warning("No shares owned - cannot sell covered calls")
+            self.logger.warning("No shares owned - cannot sell covered calls")
             return []
         
         # Can only sell calls for shares we own (1 contract per 100 shares)
-       max_contracts = min(self.stock_holding.shares // 100, max_pos, 10)
+        max_contracts = min(self.stock_holding.shares // 100, max_pos, 10)
         if max_contracts <= 0:
             return []
         
         T = self.select_expiry_dte() / 365.0
         strike = self.select_strike(underlying_price, iv, T, "C")
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
-       delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
+        delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
         
         dte_days = int(self.select_expiry_dte())
         entry = datetime.strptime(current_date, "%Y-%m-%d")
@@ -98,22 +98,22 @@ class CoveredCallStrategy(BaseStrategy):
             expiry=expiry_str,
             quantity=quantity,
             iv=iv,
-           delta=delta,
+            delta=delta,
             premium=premium,
             underlying_price=underlying_price,
            margin_requirement=0.0,  # No additional margin - shares are collateral
         )]
 
-   def on_trade_closed(self, trade: dict):
+    def on_trade_closed(self, trade: dict):
         """Called when option position is closed."""
         exit_reason = trade.get("exit_reason", "")
-       option_pnl = trade.get("pnl", 0)
+        option_pnl = trade.get("pnl", 0)
         
         if exit_reason == "EXPIRY":
             # Call expired worthless - keep premium and shares
             premium_kept = abs(trade.get("entry_price", 0)) * abs(trade.get("quantity", 0)) * 100
-           self.stock_holding.total_premium_collected += premium_kept
-           self.logger.info(f"Call expired worthless, keeping ${premium_kept:.2f} premium")
+            self.stock_holding.total_premium_collected += premium_kept
+            self.logger.info(f"Call expired worthless, keeping ${premium_kept:.2f} premium")
             
         elif exit_reason == "ASSIGNMENT":
             # Call assigned - sell shares at strike price
@@ -128,19 +128,19 @@ class CoveredCallStrategy(BaseStrategy):
                 stock_pnl = stock_proceeds - stock_cost
                 
                 # Add option premium received
-               option_premium = trade.get("entry_price", 0) * shares_sold
+                option_premium = trade.get("entry_price", 0) * shares_sold
                 
                 # Total P&L from this assignment
                 total_pnl = stock_pnl + option_premium
                 
                 # Update holdings
-               self.stock_holding.shares -= shares_sold
+                self.stock_holding.shares -= shares_sold
                 if self.stock_holding.shares == 0:
-                   self.stock_holding.cost_basis = 0.0
+                    self.stock_holding.cost_basis = 0.0
                 
-               self.logger.info(
+                self.logger.info(
                     f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
                     f"Total=${total_pnl:+.2f} (sold {shares_sold} shares @ ${strike:.2f})"
                 )
             else:
-               self.logger.error(f"Assignment error: trying to sell {shares_sold} but only have {self.stock_holding.shares}")
+                self.logger.error(f"Assignment error: trying to sell {shares_sold} but only have {self.stock_holding.shares}")

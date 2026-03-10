@@ -83,8 +83,8 @@ class BacktestEngine:
         )
         
         # Run simulation
-       simulator = TradeSimulator()
-       daily_pnl = []
+        simulator = TradeSimulator()
+        daily_pnl = []
         last_entry_idx = -999
         total_commission = 0.0
         total_slippage = 0.0
@@ -247,7 +247,7 @@ class BacktestEngine:
             daily_interest = position_mgr.apply_daily_interest()
             
             # Daily mark-to-market
-           open_pnl = simulator.get_total_open_pnl()
+            open_pnl = simulator.get_total_open_pnl()
             
             # For Wheel strategy, also calculate unrealized P&L from stock holdings
             stock_unrealized_pnl = 0.0

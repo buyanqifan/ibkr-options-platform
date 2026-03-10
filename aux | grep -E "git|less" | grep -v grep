@@ -1,2 +1,0 @@
-[33md0bd32c[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m)[m feat: Add Max Positions configuration for all strategies in backtester page
-[33m97d93c7[m fix: Remove forced position sizing that caused unrealistic backtest results
