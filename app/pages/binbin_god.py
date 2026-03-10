@@ -192,16 +192,16 @@ layout = dbc.Container([
                         ),
                         dbc.Col(
                             dcc.Checklist(
-                                id="bbg-disable-stop-loss",
-                                options=[{"label": " Disable", "value": True}],
-                                value=[],
+                               id="bbg-disable-stop-loss",
+                               options=[{"label": " Disable", "value": True}],
+                               value=[],
                                 inline=True,
                                 className="mt-2",
                                 style={"color": "#fff"}  # White text for visibility
                             ),
-
-                        ],
-                        className="mb-3"),
+                           width=4
+                        ),
+                    ], className="mb-3"),
                     
                     # Run Button
                     dbc.Button([
