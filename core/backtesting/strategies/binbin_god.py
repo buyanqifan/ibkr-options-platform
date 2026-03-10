@@ -381,10 +381,23 @@ class BinbinGodStrategy(BaseStrategy):
             # Call assignment: we sold shares
             shares_sold = quantity * 100
             if shares_sold <= self.stock_holding.shares:
+                # Calculate realized stock P&L
+                stock_cost_basis = self.stock_holding.cost_basis * shares_sold
+                stock_proceeds = strike * shares_sold
+                stock_pnl = stock_proceeds - stock_cost_basis
+               
+                # Log complete P&L breakdown
+                option_pnl = position.get("pnl", 0)
+                total_trade_pnl = option_pnl + stock_pnl
+                logger.info(
+                    f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
+                    f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
+                    f"sold at ${strike:.2f}, {shares_sold} shares)"
+                )
+               
                 self.stock_holding.shares -= shares_sold
                 if self.stock_holding.shares == 0:
                     self.phase = "SP"  # Switch back to Sell Put phase
-                    logger.info(f"Call assigned: Sold {shares_sold} shares @ ${strike}, switching to SP phase")
             else:
                 logger.warning(f"Call assignment error: Trying to sell {shares_sold} shares but only have {self.stock_holding.shares}")
     

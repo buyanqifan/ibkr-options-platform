@@ -83,11 +83,19 @@ class BacktestEngine:
         )
         
         # Run simulation
-        simulator = TradeSimulator()
-        daily_pnl = []
-        last_entry_idx = -999  # Track cooldown between entries
-        total_commission = 0.0
-        total_slippage = 0.0
+       simulator = TradeSimulator()
+      daily_pnl = []
+       last_entry_idx = -999
+       total_commission= 0.0
+       total_slippage = 0.0
+        
+        # Initialize stock position for Covered Call strategy
+        # Must own shares before selling calls
+        if strategy.name == "covered_call" and bars:
+           first_price = bars[0]["close"]
+           if hasattr(strategy, 'initialize_stock_position'):
+               strategy.initialize_stock_position(first_price)
+               logger.info(f"Covered Call: Initialized with {strategy.stock_holding.shares} shares @ ${first_price:.2f}")
 
         for i, bar in enumerate(bars):
             bar_date = bar["date"][:10]  # YYYY-MM-DD
