@@ -209,6 +209,11 @@ class BinbinGodStrategy(BaseStrategy):
         """Generate signals for backtesting (standard interface).
         
         This method adapts the real-time generate_signal() to the backtesting interface.
+        
+        Key logic:
+        - Always re-select the best stock when entering SP phase
+        - If holding shares, continue using that stock for CC phase
+        - Can switch stocks between different SP cycles
         """
         from datetime import datetime
         
@@ -220,24 +225,64 @@ class BinbinGodStrategy(BaseStrategy):
         if len(wheel_positions) >= self.max_positions:
             return []
         
-        # Select best stock if MAG7_AUTO
-        if self.symbol == "MAG7_AUTO":
-            # Create minimal market_data for stock selection
-            market_data = {
-                'current_date': current_date,
-                'underlying_price': underlying_price,
-                'iv': iv,
-            }
-            actual_symbol = self._select_best_stock(market_data)
-        else:
-            actual_symbol = self.symbol
-        
-        # Generate signal based on phase
+        # Select best stock dynamically based on phase
         if self.phase == "SP":
+            # In SP phase: always re-select the best stock for new puts
+            if self.symbol == "MAG7_AUTO":
+                # Get all MAG7 data for scoring
+                mag7_data = getattr(self, 'mag7_data', {})
+                
+                # Build market_data with latest price for each stock
+                market_data = {}
+                for sym, bars in mag7_data.items():
+                    if bars and len(bars) > 0:
+                        # Find the bar closest to current_date
+                        current_bar = None
+                        for bar in bars:
+                            if bar["date"][:10] <= current_date:
+                                current_bar = bar
+                        if current_bar:
+                            market_data[sym] = {
+                                'current_date': current_date,
+                                'underlying_price': current_bar["close"],
+                                'iv': iv,
+                            }
+                
+                # Select best stock based on current metrics
+                actual_symbol = self._select_best_stock(market_data)
+                logger.info(f"SP phase: Selected {actual_symbol} for new put position")
+            else:
+                actual_symbol = self.symbol
+            
             return self._generate_backtest_put_signal(
                 actual_symbol, current_date, underlying_price, iv, position_mgr
             )
         else:  # CC phase
+            # In CC phase: use the stock we already hold shares of
+            # Don't switch stocks mid-cycle
+            if hasattr(self, '_current_cc_stock'):
+                actual_symbol = self._current_cc_stock
+            elif self.symbol == "MAG7_AUTO":
+                # Fallback: select a stock (shouldn't happen normally)
+                mag7_data = getattr(self, 'mag7_data', {})
+                market_data = {}
+                for sym, bars in mag7_data.items():
+                    if bars and len(bars) > 0:
+                        current_bar = None
+                        for bar in bars:
+                            if bar["date"][:10] <= current_date:
+                                current_bar = bar
+                        if current_bar:
+                            market_data[sym] = {
+                                'current_date': current_date,
+                                'underlying_price': current_bar["close"],
+                                'iv': iv,
+                            }
+                actual_symbol = self._select_best_stock(market_data)
+                self._current_cc_stock = actual_symbol
+            else:
+                actual_symbol = self.symbol
+            
             return self._generate_backtest_call_signal(
                 actual_symbol, current_date, underlying_price, iv, position_mgr
             )
@@ -613,7 +658,13 @@ class BinbinGodStrategy(BaseStrategy):
                 self.stock_holding.shares += shares_acquired
                 self.stock_holding.cost_basis = strike
                 self.phase = "CC"  # Switch to Covered Call phase
-                logger.info(f"Put assigned: Bought {shares_acquired} shares @ ${strike}, switching to CC phase")
+                
+                # IMPORTANT: Record which stock we're holding for CC phase
+                # The symbol comes from the trade (the stock underlying the option)
+                assigned_symbol = trade.get("symbol", "UNKNOWN")
+                self._current_cc_stock = assigned_symbol
+                
+                logger.info(f"Put assigned: Bought {shares_acquired} shares @ ${strike} on {assigned_symbol}, switching to CC phase")
             
             elif right == "C":
                 # Call assignment: we sold shares
@@ -639,6 +690,10 @@ class BinbinGodStrategy(BaseStrategy):
                     self.stock_holding.shares -= shares_sold
                     if self.stock_holding.shares == 0:
                         self.phase = "SP"  # Switch back to Sell Put phase
+                        
+                        # Clear the CC stock tracking since we no longer hold shares
+                        if hasattr(self, '_current_cc_stock'):
+                            del self._current_cc_stock
                 else:
                     logger.warning(f"Call assignment error: Trying to sell {shares_sold} shares but only have {self.stock_holding.shares}")
         
