@@ -59,19 +59,30 @@ class BacktestEngine:
         strategy = strategy_cls(params)
 
         # Fetch historical price data (or generate synthetic data)
-        # For BinbinGod strategy with MAG7_AUTO, fetch data for all MAG7 stocks
-        if strategy_name == "binbin_god" and symbol == "MAG7_AUTO":
+        # For BinbinGod strategy with auto stock selection, fetch data for all stocks in pool
+        if strategy_name == "binbin_god" and "AUTO" in symbol:
+            # Use stock_pool from params, or fallback to MAG7_STOCKS
             from core.backtesting.strategies.binbin_god import MAG7_STOCKS
-            # Fetch data for all MAG7 stocks (strategy will select dynamically)
-            mag7_data = {}
-            for mag7_symbol in MAG7_STOCKS:
-                mag7_data[mag7_symbol] = self._get_historical_data(
-                    mag7_symbol, start_date, end_date, use_synthetic=use_synthetic
+            stock_pool = params.get("stock_pool", MAG7_STOCKS)
+            
+            # Fetch data for all stocks in pool
+            pool_data = {}
+            for pool_symbol in stock_pool:
+                pool_data[pool_symbol] = self._get_historical_data(
+                    pool_symbol, start_date, end_date, use_synthetic=use_synthetic
                 )
-            # Use the first stock's data as primary (strategy will switch as needed)
-            bars = mag7_data[list(mag7_data.keys())[0]]
-            # Store all MAG7 data in strategy for dynamic selection
-            strategy.mag7_data = mag7_data
+            
+            # Filter out stocks with no data
+            valid_stocks = [s for s in stock_pool if pool_data.get(s)]
+            if not valid_stocks:
+                raise ValueError(f"No historical data for any stock in pool: {stock_pool}")
+            
+            # Use the first valid stock's data as primary (strategy will switch as needed)
+            bars = pool_data[valid_stocks[0]]
+            # Store all pool data in strategy for dynamic selection
+            strategy.mag7_data = pool_data
+            strategy.stock_pool = valid_stocks  # Update strategy's stock pool with validated symbols
+            logger.info(f"BinbinGod: Using stock pool {valid_stocks} with {symbol} symbol")
         else:
             bars = self._get_historical_data(symbol, start_date, end_date, use_synthetic=use_synthetic)
         

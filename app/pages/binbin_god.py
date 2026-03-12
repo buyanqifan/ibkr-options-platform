@@ -129,6 +129,34 @@ layout = dbc.Container([
                     html.Hr(),
                     html.H6("Wheel Parameters", className="fw-bold mb-2"),
                     
+                    # Stock Pool Selection
+                    dbc.Label("Stock Pool"),
+                    dbc.Row([
+                        dbc.Col([
+                            dcc.Dropdown(
+                                id="bbg-stock-pool",
+                                options=[
+                                    {"label": "MAG7 (Default)", "value": "MAG7"},
+                                    {"label": "Tech Giants (MAGAMG)", "value": "MAGAMG"},
+                                    {"label": "All 7 Stocks", "value": "CUSTOM"},
+                                ],
+                                value="MAG7",
+                                clearable=False,
+                            ),
+                        ], width=12),
+                    ], className="mb-2"),
+                    
+                    # Custom Stock Input (shown when CUSTOM is selected)
+                    html.Div([
+                        dbc.Label("Custom Stocks (comma separated)"),
+                        dbc.Input(id="bbg-custom-stocks", 
+                                 placeholder="e.g., MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
+                                 className="mb-2"),
+                    ], id="bbg-custom-stocks-container", style={"display": "none"}),
+                    
+                    html.Hr(),
+                    html.H6("Wheel Parameters", className="fw-bold mb-2"),
+                    
                     # DTE Range
                     dbc.Label("DTE Range (days)"),
                     dbc.Row([
@@ -248,6 +276,18 @@ layout = dbc.Container([
 ])
 
 
+# Callback to show/hide custom stocks input
+@callback(
+    Output("bbg-custom-stocks-container", "style"),
+    Input("bbg-stock-pool", "value"),
+)
+def toggle_custom_stocks_input(stock_pool):
+    """Show custom stocks input only when CUSTOM is selected."""
+    if stock_pool == "CUSTOM":
+        return {"display": "block"}
+    return {"display": "none"}
+
+
 @callback(
     Output("binbin-results-store", "data"),
     Output("binbin-mag7-analysis", "children"),
@@ -257,7 +297,9 @@ layout = dbc.Container([
     State("bbg-end", "value"),
     State("bbg-capital", "value"),
     State("bbg-leverage", "value"),
-    State("bbg-use-synthetic", "value"),  # NEW
+    State("bbg-use-synthetic", "value"),
+    State("bbg-stock-pool", "value"),
+    State("bbg-custom-stocks", "value"),
     State("bbg-dte-min", "value"),
     State("bbg-dte-max", "value"),
     State("bbg-put-delta", "value"),
@@ -272,8 +314,9 @@ layout = dbc.Container([
 )
 def run_binbin_backtest(
     n_clicks, start_date, end_date, capital, leverage, use_synthetic,
-    dte_min, dte_max, put_delta, call_delta, max_positions, rebalance_threshold,
-    profit_target, stop_loss, disable_profit_target, disable_stop_loss
+    stock_pool, custom_stocks, dte_min, dte_max, put_delta, call_delta, 
+    max_positions, rebalance_threshold, profit_target, stop_loss, 
+    disable_profit_target, disable_stop_loss
 ):
     """Run Binbin God strategy backtest."""
     if not start_date or not end_date:
@@ -290,23 +333,41 @@ def run_binbin_backtest(
     profit_target_value = 999999 if (disable_profit_target and True in disable_profit_target) else (profit_target or 50)
     stop_loss_value = 999999 if (disable_stop_loss and True in disable_stop_loss) else (stop_loss or 200)
     
+    # Resolve stock pool
+    if stock_pool == "MAG7":
+        stock_symbols = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
+        symbol = "MAG7_AUTO"
+    elif stock_pool == "MAGAMG":
+        stock_symbols = ["MSFT", "AAPL", "GOOGL", "AMZN"]  # MAGAMG: 4 major tech
+        symbol = "MAGAMG_AUTO"
+    elif stock_pool == "CUSTOM" and custom_stocks:
+        # Parse custom stocks
+        stock_symbols = [s.strip().upper() for s in custom_stocks.split(",") if s.strip()]
+        if not stock_symbols:
+            stock_symbols = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]  # Fallback
+        symbol = f"CUSTOM_{'_'.join(stock_symbols[:3])}"  # Truncate for display
+    else:
+        stock_symbols = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
+        symbol = "MAG7_AUTO"
+    
     params = {
         "strategy": "binbin_god",
-        "symbol": "MAG7_AUTO",  # Special symbol indicating auto-selection
+        "symbol": symbol,
+        "stock_pool": stock_symbols,  # Pass actual stock list to strategy
         "start_date": start_date,
         "end_date": end_date,
         "initial_capital": capital or 150000,
         "max_leverage": leverage or 1.0,
-        "use_synthetic_data": bool(use_synthetic and True in use_synthetic),  # NEW
+        "use_synthetic_data": bool(use_synthetic and True in use_synthetic),
         "dte_min": dte_min or 30,
         "dte_max": dte_max or 45,
-        "delta_target": 0.30,  # Not used by Wheel, but required by base class
+        "delta_target": 0.30,
         "profit_target_pct": profit_target_value,
         "stop_loss_pct": stop_loss_value,
         "put_delta": put_delta or 0.30,
         "call_delta": call_delta or 0.30,
         "max_positions": max_positions or 10,
-        "rebalance_threshold": (rebalance_threshold or 15) / 100.0,  # Convert to decimal
+        "rebalance_threshold": (rebalance_threshold or 15) / 100.0,
     }
     
     try:

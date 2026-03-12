@@ -100,7 +100,10 @@ class BinbinGodStrategy(BaseStrategy):
         self.phase = "SP"  # Start with Sell Put phase
         self.stock_holding = StockHolding()
         
-        # Storage for MAG7 analysis
+        # Stock pool for selection (default: MAG7)
+        self.stock_pool = config.get("stock_pool", MAG7_STOCKS.copy())
+        
+        # Storage for analysis
         self.mag7_analysis = {
             "ranked_stocks": [],
             "best_pick": None,
@@ -111,10 +114,13 @@ class BinbinGodStrategy(BaseStrategy):
         self._stop_loss_disabled = self.stop_loss_pct >= 999999
     
     def _score_stocks(self, market_data: Dict[str, Any]) -> List[StockScore]:
-        """Score all MAG7 stocks based on metrics."""
+        """Score all stocks in the pool based on metrics."""
         scores = []
         
-        for symbol in MAG7_STOCKS:
+        # Use configurable stock pool instead of hardcoded MAG7
+        stock_pool = getattr(self, 'stock_pool', MAG7_STOCKS)
+        
+        for symbol in stock_pool:
             # Get market data for this symbol
             if symbol not in market_data:
                 continue
