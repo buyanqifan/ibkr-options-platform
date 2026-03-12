@@ -256,23 +256,14 @@ class WheelStrategy(BaseStrategy):
         premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
 
-        # Position sizing using position manager if available
-        if position_mgr:
-            # Cash-secured put: reserve strike * 100 per contract
-            max_contracts = position_mgr.calculate_position_size(
-                margin_per_contract=strike * 100,
-                max_positions=self.params.get("max_positions", 10),  # Default 10 for better diversification
-            )
-            if max_contracts <= 0:
-                return []  # No signal if insufficient capital
-        else:
-            # Fallback to legacy calculation
-            available_capital = self.initial_capital * self.position_percentage
-            leveraged_capital = available_capital * self.max_leverage
-            max_contracts = int(leveraged_capital / (strike * 100))
-            max_contracts = min(max_contracts, self.params.get("max_positions", 10))  # Default 10
-            if max_contracts <= 0:
-                return []  # No signal if insufficient capital
+        # Position sizing using position manager
+        # Cash-secured put: reserve strike * 100 per contract
+        max_contracts = position_mgr.calculate_position_size(
+            margin_per_contract=strike * 100,
+            max_positions=self.params.get("max_positions", 10),  # Default 10 for better diversification
+        )
+        if max_contracts <= 0:
+            return []  # No signal if insufficient capital
         
         quantity = -max_contracts  # Sell
         
