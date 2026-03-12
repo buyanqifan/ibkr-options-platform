@@ -130,31 +130,35 @@ class BinbinGodStrategy(BaseStrategy):
             # Check if this is backtest mode (data is list of bars)
             if isinstance(data, list):
                 # Backtest mode: calculate metrics from price bars
-                if len(data) < 20:
-                    continue  # Need at least 20 days for calculations
+                # Use minimum 5 days for early dates in backtest
+                if len(data) < 5:
+                    continue  # Need at least 5 days for basic calculations
                 
                 # Extract latest bar
                 latest_bar = data[-1]
                 current_price = latest_bar["close"]
                 
-                # Calculate momentum from recent returns
+                # Calculate momentum from recent returns (different for each stock)
                 prev_20_price = data[-20]["close"] if len(data) >= 20 else data[0]["close"]
                 momentum = ((current_price - prev_20_price) / prev_20_price) * 100
                 
-                # Use IV as proxy (assume 50% rank for simplicity)
-                iv_rank = 50.0
-                
-                # Stability proxy (use recent volatility)
+                # Calculate IV proxy from recent volatility (unique per stock)
                 prices = [bar["close"] for bar in data[-30:]]
                 returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-                if returns:
+                if returns and len(returns) > 1:
                     import statistics
-                    stability = 100 - (statistics.stdev(returns) * 100)  # Lower vol = higher stability
+                    # Higher volatility = higher IV (use as IV proxy)
+                    vol = statistics.stdev(returns)
+                    iv_rank = min(100, max(0, vol * 200))  # Scale volatility to 0-100
+                    stability = 100 - (vol * 100)  # Lower vol = higher stability
                 else:
+                    iv_rank = 50.0
                     stability = 50.0
                 
-                # PE ratio (use placeholder for now)
-                pe_ratio = 25.0
+                # PE ratio: estimate from price trend (simplified proxy)
+                # Higher recent return = assumed lower PE (growth stock)
+                # Normalize: -20% to +50% return maps to PE 50 to 15
+                pe_ratio = max(5, min(60, 35 - momentum * 0.3))
                 
             else:
                 # Real-time mode: use provided fundamentals
@@ -234,29 +238,31 @@ class BinbinGodStrategy(BaseStrategy):
         # Select best stock dynamically based on phase
         if self.phase == "SP":
             # In SP phase: always re-select the best stock for new puts
-            if self.symbol == "MAG7_AUTO":
-                # Get all MAG7 data for scoring
-                mag7_data = getattr(self, 'mag7_data', {})
+            if "AUTO" in self.symbol:
+                # Get all stock pool data for scoring
+                pool_data = getattr(self, 'mag7_data', {})
+                stock_pool = getattr(self, 'stock_pool', MAG7_STOCKS)
                 
-                # Build market_data with latest price for each stock
+                # Build market_data with FULL bars data for each stock
+                # _score_stocks expects: market_data[symbol] = list of bars (backtest mode)
                 market_data = {}
-                for sym, bars in mag7_data.items():
+                for sym in stock_pool:
+                    bars = pool_data.get(sym, [])
                     if bars and len(bars) > 0:
-                        # Find the bar closest to current_date
-                        current_bar = None
-                        for bar in bars:
-                            if bar["date"][:10] <= current_date:
-                                current_bar = bar
-                        if current_bar:
-                            market_data[sym] = {
-                                'current_date': current_date,
-                                'underlying_price': current_bar["close"],
-                                'iv': iv,
-                            }
+                        # Filter bars up to current_date
+                        filtered_bars = [bar for bar in bars if bar["date"][:10] <= current_date]
+                        if filtered_bars:
+                            # Pass full bars list for scoring (backtest mode)
+                            market_data[sym] = filtered_bars
                 
                 # Select best stock based on current metrics
-                actual_symbol = self._select_best_stock(market_data)
-                logger.info(f"SP phase: Selected {actual_symbol} for new put position")
+                if market_data:
+                    actual_symbol = self._select_best_stock(market_data)
+                    logger.info(f"SP phase: Selected {actual_symbol} for new put position")
+                else:
+                    # Fallback: use first stock in pool
+                    actual_symbol = stock_pool[0] if stock_pool else "MSFT"
+                    logger.warning(f"No market data available, using fallback: {actual_symbol}")
             else:
                 actual_symbol = self.symbol
             
