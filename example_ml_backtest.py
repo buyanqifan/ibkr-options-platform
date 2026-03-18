@@ -57,9 +57,10 @@ def run_backtest_with_ml(symbol="AAPL", use_ml=True):
         # 打印结果
         metrics = results["metrics"]
         print(f"\n回测结果:")
-        print(f"  总收益率: {metrics.get('total_return', 0):.2f}%")
+        print(f"  总收益率: {metrics.get('total_return_pct', 0):.2f}%")
         print(f"  夏普比率: {metrics.get('sharpe_ratio', 0):.2f}")
-        print(f"  最大回撤: {metrics.get('max_drawdown', 0):.2f}%")
+        print(f"  最大回撤: {metrics.get('max_drawdown_pct', 0):.2f}%")
+        print(f"  胜率: {metrics.get('win_rate', 0):.1f}%")
         print(f"  交易次数: {len(results.get('trades', []))}")
         
         return results
@@ -90,8 +91,8 @@ def compare_ml_vs_hv():
         print("对比结果")
         print("="*60)
         
-        hv_return = results_hv["metrics"].get("total_return", 0)
-        ml_return = results_ml["metrics"].get("total_return", 0)
+        hv_return = results_hv["metrics"].get("total_return_pct", 0)
+        ml_return = results_ml["metrics"].get("total_return_pct", 0)
         
         print(f"历史波动率 (HV) 收益率: {hv_return:.2f}%")
         print(f"ML预测收益率: {ml_return:.2f}%")
