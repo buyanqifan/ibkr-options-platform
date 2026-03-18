@@ -368,15 +368,15 @@ class DeltaOptimizerML:
             premium = OptionsPricer.call_price(context.current_price, strike, time_to_expiry, iv)
         
         # Calculate risk metrics
+        assignment_risk = 0.0
+        protection_value = 0.0
+        
         if right == "P" and context.cost_basis > 0:
             # For puts: risk if assigned at strike below cost
             assignment_risk = max(0, context.cost_basis - strike) / context.cost_basis
         elif right == "C" and context.cost_basis > 0:
             # For calls: protection if price drops below cost
             protection_value = max(0, strike - context.cost_basis) / context.cost_basis
-        else:
-            assignment_risk = 0.0
-            protection_value = 0.0
         
         # Risk-adjusted score: prefer higher premiums with lower risk
         risk_score = premium * (1.0 - assignment_risk) * (1.0 + protection_value)
