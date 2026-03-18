@@ -197,8 +197,7 @@ layout = dbc.Container([
                               style={"cursor": "pointer"}),
                         dbc.Input(id="bbg-ml-adoption-rate", type="range", 
                                  min=0.0, max=1.0, step=0.1, value=0.6,
-                                 className="form-range mb-2",
-                                 tooltip="ML trust level"),
+                                 className="form-range mb-2"),
                         dbc.Row([
                             dbc.Col(html.Small("Traditional", className="text-muted"), width=4),
                             dbc.Col(html.Small("Balanced", className="text-muted"), width=4),
