@@ -55,18 +55,35 @@ def main():
         return
     
     # Train model
-    predictor = VolatilityPredictor()
-    predictor.model.target_horizon = args.horizon
+    # Try XGBoost first, fallback to Simple model
+    try:
+        from core.ml.models.volatility_xgb import VolatilityXGBModel
+        model = VolatilityXGBModel(target_horizon=args.horizon)
+        print("Using XGBoost model")
+    except ImportError as e:
+        print(f"XGBoost not available ({e}), using Simple RandomForest model")
+        from core.ml.models.volatility_simple import SimpleVolatilityModel
+        model = SimpleVolatilityModel(target_horizon=args.horizon)
     
-    metrics = predictor.train_and_save(
-        bars,
-        test_size=0.2,
-        cv_folds=5
-    )
+    # Convert bars to DataFrame
+    import pandas as pd
+    df = pd.DataFrame(bars)
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.set_index('date')
+    
+    # Train
+    metrics = model.train(df, test_size=0.2, cv_folds=5)
+    
+    # Save model
+    import os
+    model_dir = "data/models"
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, "volatility_model.pkl")
+    model.save(model_path)
     
     print("\n" + "=" * 50)
     print("Training complete!")
-    print(f"Model saved to: {predictor.model_path}")
+    print(f"Model saved to: {model_path}")
     print(f"CV RMSE: {metrics['cv_rmse_mean']:.3f} (+/- {metrics['cv_rmse_std']:.3f})")
     print(f"Test RMSE: {metrics['test_rmse']:.3f}")
     print(f"Test MAE: {metrics['test_mae']:.3f}")
