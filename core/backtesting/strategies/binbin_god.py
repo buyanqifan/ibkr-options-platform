@@ -39,7 +39,8 @@ class StockScore:
     pe_ratio: float
     iv_rank: float
     momentum: float
-    stability: float
+    technical_score: float  # RSI + MA position (replaces stability)
+    liquidity_score: float  # Volume-based liquidity
     total_score: float
     
     def to_dict(self) -> dict:
@@ -48,7 +49,8 @@ class StockScore:
             "pe_ratio": self.pe_ratio,
             "iv_rank": self.iv_rank,
             "momentum": self.momentum,
-            "stability": self.stability,
+            "technical_score": self.technical_score,
+            "liquidity_score": self.liquidity_score,
             "total_score": round(self.total_score, 2),
         }
 
@@ -116,13 +118,21 @@ class BinbinGodStrategy(BaseStrategy):
                 logger.warning(f"ML Delta optimization not available: {e}")
                 self.ml_delta_optimization = False
         
-        # Scoring weights
+        # Scoring weights - optimized to avoid correlation
+        # IV Rank is most important for options premium (35%)
+        # Technical factors provide trend confirmation (25%)
+        # Momentum and Value provide balance (20% each)
         self.weights = {
-            "pe_ratio": 0.20,
-            "iv_rank": 0.40,
-            "momentum": 0.20,
-            "stability": 0.20,
+            "iv_rank": 0.35,       # Higher IV = better premium income
+            "technical": 0.25,     # RSI + MA position (trend quality)
+            "momentum": 0.20,      # Price trend strength
+            "pe_score": 0.20,      # Value factor (inverse of momentum proxy)
         }
+        
+        # Selection memory: avoid frequent switching
+        self._last_selected_stock = None
+        self._selection_count = 0
+        self._min_hold_cycles = 3  # Minimum cycles before switching
         
         # Phase tracking
         self.phase = "SP"  # Start with Sell Put phase
@@ -158,65 +168,102 @@ class BinbinGodStrategy(BaseStrategy):
             # Check if this is backtest mode (data is list of bars)
             if isinstance(data, list):
                 # Backtest mode: calculate metrics from price bars
-                # Use minimum 5 days for early dates in backtest
-                if len(data) < 5:
-                    continue  # Need at least 5 days for basic calculations
+                # Use minimum 20 days for technical indicators
+                if len(data) < 20:
+                    continue  # Need at least 20 days for meaningful calculations
                 
                 # Extract latest bar
                 latest_bar = data[-1]
                 current_price = latest_bar["close"]
                 
-                # Calculate momentum from recent returns (different for each stock)
-                # Normalize to 0-100 scale for fair comparison with other metrics
-                prev_20_price = data[-20]["close"] if len(data) >= 20 else data[0]["close"]
+                # === 1. Momentum (20-day price change, normalized 0-100) ===
+                prev_20_price = data[-20]["close"]
                 raw_momentum = ((current_price - prev_20_price) / prev_20_price) * 100
-                # Normalize momentum: -20% to +50% -> 0 to 100
                 momentum = max(0, min(100, (raw_momentum + 20) / 70 * 100))
                 
-                # Calculate IV proxy from recent volatility (unique per stock)
-                prices = [bar["close"] for bar in data[-30:]]
-                returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+                # === 2. IV Rank (volatility-based, 30-day window) ===
+                prices_30 = [bar["close"] for bar in data[-30:]]
+                returns = [(prices_30[i] - prices_30[i-1]) / prices_30[i-1] 
+                          for i in range(1, len(prices_30))]
                 if returns and len(returns) > 1:
                     import statistics
-                    # Higher volatility = higher IV (use as IV proxy)
                     vol = statistics.stdev(returns)
-                    iv_rank = min(100, max(0, vol * 200))  # Scale volatility to 0-100
-                    stability = 100 - (vol * 100)  # Lower vol = higher stability
+                    iv_rank = min(100, max(0, vol * 200))
                 else:
                     iv_rank = 50.0
-                    stability = 50.0
                 
-                # PE ratio proxy: use inverse of momentum to avoid double-counting
-                # Lower momentum (value stocks) = lower PE (better value score)
-                # This creates diversification between growth and value factors
-                # High momentum stocks get high momentum score but lower PE score
-                # Low momentum stocks get low momentum score but higher PE score
-                pe_ratio = max(5, min(60, 35 + raw_momentum * 0.3))  # Inverted relationship
+                # === 3. Technical Score (RSI + MA Position) ===
+                # RSI: Prefer stocks not overbought (RSI < 70)
+                if len(data) >= 14:
+                    deltas = [data[i]["close"] - data[i-1]["close"] for i in range(-14, 0)]
+                    gains = [d if d > 0 else 0 for d in deltas]
+                    losses = [-d if d < 0 else 0 for d in deltas]
+                    avg_gain = sum(gains) / 14
+                    avg_loss = sum(losses) / 14
+                    rs = avg_gain / avg_loss if avg_loss > 0 else 100
+                    rsi = 100 - (100 / (1 + rs))
+                    # RSI score: 50-70 is ideal (trending but not overbought)
+                    # Score = 100 - |RSI - 60| * 2
+                    rsi_score = max(0, min(100, 100 - abs(rsi - 60) * 2))
+                else:
+                    rsi_score = 50.0
+                
+                # MA Position: Price vs 20-day SMA
+                sma_20 = sum(bar["close"] for bar in data[-20:]) / 20
+                ma_position = (current_price - sma_20) / sma_20 * 100  # % above/below MA
+                # Prefer stocks slightly above MA (0-10%)
+                ma_score = max(0, min(100, 50 + ma_position * 5))
+                
+                # Combined technical score
+                technical_score = (rsi_score * 0.6 + ma_score * 0.4)
+                
+                # === 4. Liquidity Score (volume-based) ===
+                if len(data) >= 10 and "volume" in data[-1]:
+                    recent_vol = sum(bar.get("volume", 0) for bar in data[-5:]) / 5
+                    prior_vol = sum(bar.get("volume", 0) for bar in data[-10:-5]) / 5
+                    if prior_vol > 0:
+                        vol_change = recent_vol / prior_vol
+                        # Higher recent volume = better liquidity
+                        liquidity_score = min(100, vol_change * 50)
+                    else:
+                        liquidity_score = 50.0
+                else:
+                    # Default for synthetic data without volume
+                    liquidity_score = 70.0
+                
+                # === 5. PE Ratio (value factor, inverse of momentum) ===
+                pe_ratio = max(5, min(60, 35 + raw_momentum * 0.3))
                 
             else:
                 # Real-time mode: use provided fundamentals
                 pe_ratio = data.get("fundamentals", {}).get("pe_ratio", 25.0)
                 iv_rank = data.get("options", {}).get("iv_rank", 50.0)
                 momentum = data.get("technical", {}).get("momentum_score", 50.0)
-                stability = data.get("technical", {}).get("stability_score", 50.0)
+                technical_score = data.get("technical", {}).get("technical_score", 50.0)
+                liquidity_score = data.get("technical", {}).get("liquidity_score", 70.0)
             
             # Normalize PE ratio (lower is better, invert the score)
             pe_score = max(0, min(100, 100 - pe_ratio))
             
             # Calculate weighted total score
             total_score = (
-                pe_score * self.weights["pe_ratio"] +
                 iv_rank * self.weights["iv_rank"] +
+                technical_score * self.weights["technical"] +
                 momentum * self.weights["momentum"] +
-                stability * self.weights["stability"]
+                pe_score * self.weights["pe_score"]
             )
+            
+            # Apply liquidity penalty for very low liquidity
+            if liquidity_score < 30:
+                total_score *= 0.8  # 20% penalty for low liquidity
             
             scores.append(StockScore(
                 symbol=symbol,
                 pe_ratio=pe_ratio,
                 iv_rank=iv_rank,
                 momentum=momentum,
-                stability=stability,
+                technical_score=technical_score,
+                liquidity_score=liquidity_score,
                 total_score=total_score,
             ))
         
@@ -225,7 +272,11 @@ class BinbinGodStrategy(BaseStrategy):
         return scores
     
     def _select_best_stock(self, market_data: Dict[str, Any]) -> str:
-        """Select the best stock from MAG7 based on scoring."""
+        """Select the best stock from MAG7 based on scoring with memory.
+        
+        Implements a minimum hold period to avoid excessive switching.
+        Will stick with previous selection unless a significantly better option exists.
+        """
         scores = self._score_stocks(market_data)
         
         if not scores:
@@ -237,8 +288,41 @@ class BinbinGodStrategy(BaseStrategy):
         self.mag7_analysis["best_pick"] = scores[0].to_dict()
         
         best_symbol = scores[0].symbol
-        logger.info(f"Selected {best_symbol} with score {scores[0].total_score:.1f}")
+        best_score = scores[0].total_score
         
+        # Selection memory: avoid frequent switching
+        if self._last_selected_stock is not None:
+            self._selection_count += 1
+            
+            # Find previous stock's current score
+            prev_stock_score = None
+            for s in scores:
+                if s.symbol == self._last_selected_stock:
+                    prev_stock_score = s.total_score
+                    break
+            
+            # Only switch if:
+            # 1. Held for minimum cycles, OR
+            # 2. New stock is significantly better (>10% score improvement)
+            if prev_stock_score is not None:
+                score_improvement = (best_score - prev_stock_score) / prev_stock_score * 100
+                
+                if self._selection_count < self._min_hold_cycles and score_improvement < 10:
+                    # Stick with previous selection
+                    logger.info(
+                        f"Keeping {self._last_selected_stock} (score: {prev_stock_score:.1f}) "
+                        f"vs {best_symbol} (score: {best_score:.1f}), "
+                        f"improvement: {score_improvement:.1f}%"
+                    )
+                    return self._last_selected_stock
+        
+        # Update selection memory
+        if self._last_selected_stock != best_symbol:
+            logger.info(f"Switching from {self._last_selected_stock} to {best_symbol}")
+            self._selection_count = 0
+        self._last_selected_stock = best_symbol
+        
+        logger.info(f"Selected {best_symbol} with score {best_score:.1f}")
         return best_symbol
     
     def generate_signals(
