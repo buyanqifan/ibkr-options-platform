@@ -167,8 +167,11 @@ class BinbinGodStrategy(BaseStrategy):
                 current_price = latest_bar["close"]
                 
                 # Calculate momentum from recent returns (different for each stock)
+                # Normalize to 0-100 scale for fair comparison with other metrics
                 prev_20_price = data[-20]["close"] if len(data) >= 20 else data[0]["close"]
-                momentum = ((current_price - prev_20_price) / prev_20_price) * 100
+                raw_momentum = ((current_price - prev_20_price) / prev_20_price) * 100
+                # Normalize momentum: -20% to +50% -> 0 to 100
+                momentum = max(0, min(100, (raw_momentum + 20) / 70 * 100))
                 
                 # Calculate IV proxy from recent volatility (unique per stock)
                 prices = [bar["close"] for bar in data[-30:]]
@@ -183,10 +186,12 @@ class BinbinGodStrategy(BaseStrategy):
                     iv_rank = 50.0
                     stability = 50.0
                 
-                # PE ratio: estimate from price trend (simplified proxy)
-                # Higher recent return = assumed lower PE (growth stock)
-                # Normalize: -20% to +50% return maps to PE 50 to 15
-                pe_ratio = max(5, min(60, 35 - momentum * 0.3))
+                # PE ratio proxy: use inverse of momentum to avoid double-counting
+                # Lower momentum (value stocks) = lower PE (better value score)
+                # This creates diversification between growth and value factors
+                # High momentum stocks get high momentum score but lower PE score
+                # Low momentum stocks get low momentum score but higher PE score
+                pe_ratio = max(5, min(60, 35 + raw_momentum * 0.3))  # Inverted relationship
                 
             else:
                 # Real-time mode: use provided fundamentals
