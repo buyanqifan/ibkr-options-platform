@@ -176,6 +176,50 @@ layout = dbc.Container([
                     dbc.Input(id="bbg-call-delta", type="number", 
                              value=0.30, step=0.05, size="sm", className="mb-2"),
                     
+                    html.Hr(),
+                    html.H6("ML Delta Optimization", className="fw-bold mb-2 text-primary"),
+                    
+                    # ML Delta Optimization Toggle
+                    dbc.Label("Enable ML Delta Optimization"),
+                    dbc.Switch(
+                        id="bbg-ml-optimization",
+                        value=False,
+                        label="Enable ML-powered adaptive delta selection",
+                        className="mb-3",
+                        style={"display": "flex", "alignItems": "center"}
+                    ),
+                    
+                    # ML Adoption Rate (shown when ML is enabled)
+                    html.Div([
+                        dbc.Label("ML Adoption Rate"),
+                        html.I(className="bi bi-info-circle ms-1", 
+                              title="How much to trust ML vs traditional approach (0.0 = traditional only, 1.0 = full ML)",
+                              style={"cursor": "pointer"}),
+                        dbc.Input(id="bbg-ml-adoption-rate", type="range", 
+                                 min=0.0, max=1.0, step=0.1, value=0.6,
+                                 className="form-range mb-2",
+                                 tooltip="ML trust level"),
+                        dbc.Row([
+                            dbc.Col(html.Small("Traditional", className="text-muted"), width=4),
+                            dbc.Col(html.Small("Balanced", className="text-muted"), width=4),
+                            dbc.Col(html.Small("ML", className="text-muted"), width=4),
+                        ]),
+                        dbc.Input(id="bbg-ml-adoption-rate-text", type="number", 
+                                 min=0.0, max=1.0, step=0.1, value=0.6, size="sm",
+                                 className="mb-2"),
+                    ], id="bbg-ml-adoption-container", style={"display": "none"}),
+                    
+                    # CC Optimization Settings (shown with ML)
+                    html.Div([
+                        dbc.Label("CC Optimization"),
+                        dbc.Switch(
+                            id="bbg-cc-optimization",
+                            value=True,
+                            label="Enable CC optimization for loss positions",
+                            className="mb-3"
+                        ),
+                    ], id="bbg-cc-optimization-container", style={"display": "none"}),
+                    
                     # Max Positions
                     dbc.Label("Max Positions"),
                     dbc.Input(id="bbg-max-positions", type="number", 
@@ -289,6 +333,42 @@ def toggle_custom_stocks_input(stock_pool):
     return {"display": "none"}
 
 
+# Callback to show/hide ML optimization controls
+@callback(
+    Output("bbg-ml-adoption-container", "style"),
+    Output("bbg-cc-optimization-container", "style"),
+    Input("bbg-ml-optimization", "value"),
+)
+def toggle_ml_controls(ml_optimization_enabled):
+    """Show/hide ML optimization controls based on toggle."""
+    if ml_optimization_enabled:
+        return {"display": "block"}, {"display": "block"}
+    return {"display": "none"}, {"display": "none"}
+
+
+# Callback to sync ML adoption rate slider and text input
+@callback(
+    Output("bbg-ml-adoption-rate-text", "value"),
+    Input("bbg-ml-adoption-rate", "value"),
+)
+def update_ml_adoption_rate_text(rate):
+    """Update text input when range slider changes."""
+    return rate
+
+
+@callback(
+    Output("bbg-ml-adoption-rate", "value"),
+    Input("bbg-ml-adoption-rate-text", "value"),
+)
+def update_ml_adoption_rate_slider(rate_text):
+    """Update range slider when text input changes."""
+    try:
+        rate = float(rate_text)
+        return max(0.0, min(1.0, rate))  # Clamp to 0-1 range
+    except (ValueError, TypeError):
+        return 0.6  # Default value
+
+
 @callback(
     Output("binbin-results-store", "data"),
     Output("binbin-mag7-analysis", "children"),
@@ -311,13 +391,17 @@ def toggle_custom_stocks_input(stock_pool):
     State("bbg-stop-loss", "value"),
     State("bbg-disable-profit-target", "value"),
     State("bbg-disable-stop-loss", "value"),
+    State("bbg-ml-optimization", "value"),
+    State("bbg-ml-adoption-rate-text", "value"),
+    State("bbg-cc-optimization", "value"),
     prevent_initial_call=True,
 )
 def run_binbin_backtest(
     n_clicks, start_date, end_date, capital, leverage, use_synthetic,
     stock_pool, custom_stocks, dte_min, dte_max, put_delta, call_delta, 
     max_positions, rebalance_threshold, profit_target, stop_loss, 
-    disable_profit_target, disable_stop_loss
+    disable_profit_target, disable_stop_loss,
+    ml_optimization, ml_adoption_rate, cc_optimization
 ):
     """Run Binbin God strategy backtest."""
     if not start_date or not end_date:
@@ -369,6 +453,13 @@ def run_binbin_backtest(
         "call_delta": call_delta or 0.30,
         "max_positions": max_positions or 10,
         "rebalance_threshold": (rebalance_threshold or 15) / 100.0,
+        # ML Delta Optimization parameters
+        "ml_delta_optimization": ml_optimization or False,
+        "ml_adoption_rate": ml_adoption_rate or 0.6,
+        "cc_optimization_enabled": cc_optimization if cc_optimization is not None else True,
+        "cc_min_delta_cost": 0.15,
+        "cc_cost_basis_threshold": 0.05,
+        "cc_min_strike_premium": 0.02,
     }
     
     try:

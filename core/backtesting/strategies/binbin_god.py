@@ -88,6 +88,34 @@ class BinbinGodStrategy(BaseStrategy):
         self.put_delta = config.get("put_delta", 0.30)
         self.call_delta = config.get("call_delta", 0.30)
         
+        # CC optimization parameters
+        self.cc_optimization_enabled = config.get("cc_optimization_enabled", True)
+        self.cc_min_delta_cost = config.get("cc_min_delta_cost", 0.15)  # Min delta when cost > price
+        self.cc_cost_basis_threshold = config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
+        self.cc_min_strike_premium = config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
+        
+        # ML delta optimization parameters
+        self.ml_delta_optimization = config.get("ml_delta_optimization", False)
+        self.ml_adoption_rate = config.get("ml_adoption_rate", 0.5)  # 0.0 = static, 1.0 = full ML
+        self.ml_integration = None
+        
+        if self.ml_delta_optimization:
+            try:
+                from core.ml.delta_strategy_integration import BinGodDeltaIntegration, AdaptiveDeltaStrategy
+                self.ml_integration = BinGodDeltaIntegration(
+                    ml_optimization_enabled=True,
+                    fallback_delta=self.call_delta,
+                    config=config.get("ml_config")
+                )
+                self.adaptive_strategy = AdaptiveDeltaStrategy(
+                    ml_integration=self.ml_integration,
+                    adoption_rate=self.ml_adoption_rate
+                )
+                logger.info("ML Delta optimizer initialized")
+            except ImportError as e:
+                logger.warning(f"ML Delta optimization not available: {e}")
+                self.ml_delta_optimization = False
+        
         # Scoring weights
         self.weights = {
             "pe_ratio": 0.20,
@@ -381,10 +409,67 @@ class BinbinGodStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
         
-        # Use call-specific delta
+        # Check if we need CC optimization
+        call_delta_target = self.call_delta
+        additional_constraints = {}
+        
+        # ML Delta optimization
+        ml_result = None
+        if self.ml_delta_optimization and self.ml_integration:
+            try:
+                ml_result = self.ml_integration.optimize_call_delta(
+                    symbol=symbol,
+                    current_price=underlying_price,
+                    cost_basis=self.stock_holding.cost_basis,
+                    bars=[],  # Will be populated by real-time interface
+                    options_data=[],  # Will be populated by real-time interface
+                    iv=iv
+                )
+                logger.info(f"ML optimized delta: {ml_result.optimal_delta:.3f} (confidence: {ml_result.confidence:.2f})")
+            except Exception as e:
+                logger.warning(f"ML optimization failed: {e}")
+                ml_result = None
+        
+        if self.cc_optimization_enabled and self.stock_holding.cost_basis > 0:
+            # Check if current price is below cost basis (loss position)
+            price_cost_ratio = underlying_price / self.stock_holding.cost_basis
+            
+            if price_cost_ratio < (1 - self.cc_cost_basis_threshold):
+                # We're in a loss position, optimize for higher strike price
+                logger.info(
+                    f"CC optimization: Stock price ${underlying_price:.2f} below cost basis "
+                    f"${self.stock_holding.cost_basis:.2f} (ratio: {price_cost_ratio:.2f}). "
+                )
+                
+                # Combine CC optimization with ML if available
+                if ml_result and ml_result.confidence > 0.7:
+                    # Use ML result with CC protective adjustments
+                    call_delta_target = max(self.cc_min_delta_cost, ml_result.optimal_delta)
+                    logger.info(f"Combined ML + CC optimization: delta = {call_delta_target:.3f}")
+                else:
+                    # Traditional CC optimization
+                    call_delta_target = self.cc_min_delta_cost
+                    
+                # Add minimum strike constraint: try to get strike close to cost basis
+                min_strike_desired = self.stock_holding.cost_basis * (1 - self.cc_min_strike_premium)
+                additional_constraints["min_strike"] = min_strike_desired
+                logger.info(f"CC optimization: Setting minimum strike target to ${min_strike_desired:.2f}")
+        
+        # Apply ML adaptive strategy if available
+        if self.ml_delta_optimization and self.ml_integration and ml_result:
+            # Use adaptive strategy to combine traditional and ML approaches
+            final_delta = self.adaptive_strategy.select_call_delta(
+                traditional_delta=call_delta_target,
+                ml_result=ml_result
+            )
+            logger.info(f"Adaptive final delta: {final_delta:.3f}")
+        else:
+            final_delta = call_delta_target
+        
+        # Use optimized call-specific delta
         original_delta = self.delta_target
-        self.delta_target = self.call_delta
-        strike = self.select_strike(underlying_price, iv, T, "C")
+        self.delta_target = final_delta
+        strike = self.select_strike_with_constraints(underlying_price, iv, T, "C", additional_constraints)
         self.delta_target = original_delta
         
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
@@ -530,8 +615,27 @@ class BinbinGodStrategy(BaseStrategy):
         if max_contracts <= 0:
             return None
         
-        # Filter for calls with target DTE and delta
+        # Filter for calls with target DTE and delta (with optimization if needed)
         suitable_contracts = []
+        
+        # Determine target delta range based on optimization
+        if self.cc_optimization_enabled and self.stock_holding.cost_basis > 0:
+            # Check if current price is below cost basis (loss position)
+            current_price = bars[-1]["close"] if bars else underlying_price
+            price_cost_ratio = current_price / self.stock_holding.cost_basis
+            
+            if price_cost_ratio < (1 - self.cc_cost_basis_threshold):
+                # Use reduced delta range for optimization
+                min_delta = self.cc_min_delta_cost
+                max_delta = 0.35  # Keep upper bound reasonable
+                logger.info(
+                    f"Real-time CC optimization: Stock price ${current_price:.2f} below cost basis "
+                    f"${self.stock_holding.cost_basis:.2f}, using delta range [{min_delta:.2f}, {max_delta:.2f}]"
+                )
+            else:
+                min_delta, max_delta = 0.25, 0.35  # Normal range
+        else:
+            min_delta, max_delta = 0.25, 0.35  # Normal range
         
         for contract in contracts:
             if contract.get("right", "") != "C":
@@ -550,9 +654,10 @@ class BinbinGodStrategy(BaseStrategy):
             if not (self.dte_min <= dte <= self.dte_max):
                 continue
             
-            # Check delta (absolute value)
+            # Check delta (absolute value) with dynamic range
             delta = abs(contract.get("delta", 0))
-            if 0.25 <= delta <= 0.35:  # Allow some flexibility around target
+            if min_delta <= delta <= max_delta:
+                # Use original call_delta as reference for sorting, even with optimization
                 suitable_contracts.append((contract, abs(delta - self.call_delta)))
         
         if not suitable_contracts:
@@ -711,6 +816,74 @@ class BinbinGodStrategy(BaseStrategy):
         
         # Return additional stock P&L for engine to add to cumulative_pnl
         return additional_stock_pnl
+    
+    def select_strike_with_constraints(
+        self,
+        underlying_price: float,
+        iv: float,
+        T: float,
+        right: str,
+        constraints: Dict[str, Any] = None,
+    ) -> float:
+        """Select strike price with additional constraints."""
+        from core.backtesting.pricing import OptionsPricer
+        
+        if constraints is None:
+            constraints = {}
+        
+        # Binary search for the strike that gives target delta
+        if right == "P":
+            target_delta = -abs(self.delta_target)
+            # For put options: when S > K (OTM), delta approaches 0
+            # When S < K (ITM), delta approaches -1
+            # So to get delta near -0.3 (slightly OTM), we want K slightly less than S
+            low = underlying_price * 0.9  # e.g. 135 for S=150
+            high = underlying_price * 1.05  # e.g. 157.5 for S=150
+        else:
+            target_delta = abs(self.delta_target)
+            # For call options: when S > K (ITM), delta approaches 1
+            # When S < K (OTM), delta approaches 0
+            # So to get delta near 0.3 (slightly OTM for covered calls), we want K > S
+            low = underlying_price * 0.8  # Wider range for better convergence
+            high = underlying_price * 1.2
+            
+            # Apply minimum strike constraint if provided
+            if "min_strike" in constraints:
+                min_strike = constraints["min_strike"]
+                low = max(low, min_strike)
+                logger.info(f"Applying minimum strike constraint: strike >= ${min_strike:.2f}")
+                
+                # If minimum strike is very high, we may need to adjust target delta
+                # to ensure we find a valid strike
+                test_delta = OptionsPricer.delta(underlying_price, min_strike, T, iv, right)
+                logger.info(f"Test delta at minimum strike ${min_strike:.2f}: {test_delta:.3f}")
+
+        for _ in range(50):
+            mid = (low + high) / 2
+            d = OptionsPricer.delta(underlying_price, mid, T, iv, right)
+            if right == "P":
+                # For puts: increasing strike makes delta more negative
+                # So if d < target_delta (too negative), decrease strike (high = mid)
+                # If d > target_delta (too positive), increase strike (low = mid)
+                if d < target_delta:
+                    high = mid
+                else:
+                    low = mid
+            else:
+                # For calls: increasing strike makes delta decrease (more negative)
+                # So if d > target_delta (too high), increase strike (low = mid)
+                # If d < target_delta (too low), decrease strike (high = mid)
+                if d > target_delta:
+                    low = mid
+                else:
+                    high = mid
+            if abs(d - target_delta) < 0.005:
+                break
+
+        # Round to nearest 0.5 or 1.0
+        if underlying_price > 100:
+            return round(mid)
+        return round(mid * 2) / 2
     
     def get_mag7_analysis(self) -> Dict[str, Any]:
         """Get MAG7 analysis results."""
