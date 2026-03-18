@@ -34,7 +34,14 @@ class PerformanceMetrics:
         wins = [p for p in pnls if p > 0]
         losses = [p for p in pnls if p <= 0]
 
-        total_pnl = sum(pnls)
+        # Calculate total P&L from daily_pnl (includes option P&L + stock P&L)
+        # This ensures Wheel/BinbinGod strategies' stock P&L is properly counted
+        if daily_pnl:
+            final_cumulative_pnl = daily_pnl[-1]["cumulative_pnl"]
+            total_pnl = final_cumulative_pnl  # Use final cumulative P&L (includes all realized + unrealized)
+        else:
+            total_pnl = sum(pnls)  # Fallback to trades only
+        
         total_return_pct = (total_pnl / initial_capital) * 100
 
         # Annualized return
