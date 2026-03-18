@@ -361,10 +361,12 @@ def run_backtest(
     
     # Trade timeline chart
     underlying_prices = result.get("underlying_prices", [])
+    selection_history = strategy_performance.get("selection_history", []) if strategy_performance else []
     trade_timeline = dcc.Graph(figure=create_trade_timeline_chart(
         trades=trades,
         daily_pnl=daily_pnl,
         underlying_prices=underlying_prices,
+        selection_history=selection_history,
         title="Trade Timeline: Entry/Exit Points & Performance"
     ))
 

@@ -273,6 +273,7 @@ def create_trade_timeline_chart(
     trades: list[dict],
     daily_pnl: list[dict],
     underlying_prices: list[dict] | None = None,
+    selection_history: list[dict] | None = None,
     title: str = "Trade Timeline and Performance",
 ) -> go.Figure:
     """Create a comprehensive trade timeline chart showing entry/exit points and performance.
@@ -281,6 +282,7 @@ def create_trade_timeline_chart(
         trades: List of trade dictionaries with entry/exit info
         daily_pnl: List of daily P&L data
         underlying_prices: Optional list of underlying price data
+        selection_history: Optional list of stock selection changes for binbin_god
         title: Chart title
     """
     if not trades and not daily_pnl:
@@ -406,6 +408,52 @@ def create_trade_timeline_chart(
             row=1, col=1
         )
     
+    # Add stock selection change markers (for binbin_god strategy)
+    selection_shapes = []
+    selection_annotations = []
+    if selection_history:
+        for i, sel in enumerate(selection_history):
+            sel_date = sel.get("date", "")
+            from_stock = sel.get("from", "")
+            to_stock = sel.get("to", "")
+            score = sel.get("score", 0)
+            
+            if sel_date:
+                # Add vertical line shape
+                selection_shapes.append(dict(
+                    type="line",
+                    xref="x",
+                    yref="paper",
+                    x0=sel_date,
+                    x1=sel_date,
+                    y0=0,
+                    y1=1,
+                    line=dict(
+                        color="#FFA726",
+                        width=2,
+                        dash="dash",
+                    ),
+                ))
+                
+                # Add annotation for selection change
+                selection_annotations.append(dict(
+                    x=sel_date,
+                    y=1,
+                    yref="paper",
+                    text=f"{from_stock} → {to_stock}",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1,
+                    arrowwidth=2,
+                    arrowcolor="#FFA726",
+                    ax=0,
+                    ay=-30,
+                    font=dict(color="#FFA726", size=10),
+                    bgcolor="rgba(0,0,0,0.7)",
+                    bordercolor="#FFA726",
+                    borderwidth=1,
+                ))
+    
     # Add P&L curve
     if daily_pnl:
         pnl_dates = [p["date"] for p in daily_pnl]
@@ -449,14 +497,22 @@ def create_trade_timeline_chart(
             )
     
     # Update layout
-    fig.update_layout(
-        title=title,
-        template="plotly_dark",
-        height=700,
-        margin=dict(l=50, r=50, t=50, b=30),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    )
+    layout_updates = {
+        "title": title,
+        "template": "plotly_dark",
+        "height": 700,
+        "margin": dict(l=50, r=50, t=50, b=30),
+        "showlegend": True,
+        "legend": dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    }
+    
+    # Add selection shapes and annotations if present
+    if selection_shapes:
+        layout_updates["shapes"] = selection_shapes
+    if selection_annotations:
+        layout_updates["annotations"] = selection_annotations
+    
+    fig.update_layout(**layout_updates)
     
     # Update axes
     fig.update_xaxes(title_text="Date", row=2, col=1)

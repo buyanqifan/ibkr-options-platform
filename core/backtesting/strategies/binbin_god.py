@@ -134,6 +134,9 @@ class BinbinGodStrategy(BaseStrategy):
         self._selection_count = 0
         self._min_hold_cycles = 3  # Minimum cycles before switching
         
+        # Selection history: track stock switches for visualization
+        self.selection_history = []  # List of {"date": date, "from": symbol, "to": symbol}
+        
         # Phase tracking
         self.phase = "SP"  # Start with Sell Put phase
         self.stock_holding = StockHolding()
@@ -271,11 +274,15 @@ class BinbinGodStrategy(BaseStrategy):
         scores.sort(key=lambda x: x.total_score, reverse=True)
         return scores
     
-    def _select_best_stock(self, market_data: Dict[str, Any]) -> str:
+    def _select_best_stock(self, market_data: Dict[str, Any], current_date: str = None) -> str:
         """Select the best stock from MAG7 based on scoring with memory.
         
         Implements a minimum hold period to avoid excessive switching.
         Will stick with previous selection unless a significantly better option exists.
+        
+        Args:
+            market_data: Market data for all stocks
+            current_date: Current backtest date for tracking selection history
         """
         scores = self._score_stocks(market_data)
         
@@ -318,6 +325,14 @@ class BinbinGodStrategy(BaseStrategy):
         
         # Update selection memory
         if self._last_selected_stock != best_symbol:
+            # Record the selection change
+            if current_date:
+                self.selection_history.append({
+                    "date": current_date,
+                    "from": self._last_selected_stock,
+                    "to": best_symbol,
+                    "score": best_score
+                })
             logger.info(f"Switching from {self._last_selected_stock} to {best_symbol}")
             self._selection_count = 0
         self._last_selected_stock = best_symbol
@@ -374,7 +389,7 @@ class BinbinGodStrategy(BaseStrategy):
                 
                 # Select best stock based on current metrics
                 if market_data:
-                    actual_symbol = self._select_best_stock(market_data)
+                    actual_symbol = self._select_best_stock(market_data, current_date)
                     logger.info(f"SP phase: Selected {actual_symbol} for new put position")
                 else:
                     # Fallback: use first stock in pool
@@ -407,7 +422,7 @@ class BinbinGodStrategy(BaseStrategy):
                                 'underlying_price': current_bar["close"],
                                 'iv': iv,
                             }
-                actual_symbol = self._select_best_stock(market_data)
+                actual_symbol = self._select_best_stock(market_data, current_date)
                 self._current_cc_stock = actual_symbol
             else:
                 actual_symbol = self.symbol
@@ -977,3 +992,15 @@ class BinbinGodStrategy(BaseStrategy):
     def get_mag7_analysis(self) -> Dict[str, Any]:
         """Get MAG7 analysis results."""
         return self.mag7_analysis
+    
+    def get_performance_report(self) -> Dict[str, Any]:
+        """Generate comprehensive performance report with selection history."""
+        return {
+            "strategy": "binbin_god",
+            "phase": self.phase,
+            "shares_held": self.stock_holding.shares,
+            "cost_basis": round(self.stock_holding.cost_basis, 2),
+            "total_premium_collected": round(self.stock_holding.total_premium_collected, 2),
+            "selection_history": self.selection_history,
+            "mag7_analysis": self.mag7_analysis,
+        }
