@@ -35,8 +35,9 @@ STRATEGY_MAP = {
 class BacktestEngine:
     """Run options strategy backtests using historical stock data + BS model pricing."""
 
-    def __init__(self, data_client=None):
+    def __init__(self, data_client=None, vol_predictor=None):
         self._client = data_client
+        self._vol_predictor = vol_predictor  # ML volatility predictor
 
     def run(self, params: dict) -> dict:
         """Execute a backtest and return results.
@@ -126,7 +127,20 @@ class BacktestEngine:
         for i, bar in enumerate(bars):
             bar_date = bar["date"][:10]  # YYYY-MM-DD
             underlying_price = bar["close"]
-            iv = hv[i] if i < len(hv) else 0.3
+            
+            # Use ML predictor for IV if available and ready
+            if self._vol_predictor and self._vol_predictor.is_ready() and i >= 60:
+                # Use ML predicted volatility
+                recent_bars = bars[max(0, i-60):i+1]
+                predicted_vol = self._vol_predictor.predict_from_bars(recent_bars)
+                if predicted_vol is not None:
+                    iv = predicted_vol / 100  # Convert % to decimal
+                    logger.debug(f"Using ML predicted IV: {iv:.3f}")
+                else:
+                    iv = hv[i] if i < len(hv) else 0.3
+            else:
+                # Fallback to historical volatility
+                iv = hv[i] if i < len(hv) else 0.3
 
             if iv <= 0.01:
                 iv = 0.3  # fallback

@@ -27,9 +27,18 @@ def _init_services() -> dict:
     # Lazy imports to avoid circular deps during page registration
     from core.screener.screener import StockScreener
     from core.backtesting.engine import BacktestEngine
+    from core.ml.inference.predictor import VolatilityPredictor
 
     screener = StockScreener(data_client)
-    backtest_engine = BacktestEngine(data_client)
+    
+    # Initialize ML volatility predictor (loads existing model if available)
+    vol_predictor = VolatilityPredictor()
+    if vol_predictor.is_ready():
+        logger.info("ML volatility predictor loaded successfully")
+    else:
+        logger.info("ML volatility predictor not available (model not trained)")
+    
+    backtest_engine = BacktestEngine(data_client, vol_predictor)
 
     return {
         "bridge": bridge,
