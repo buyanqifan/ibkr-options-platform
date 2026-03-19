@@ -21,6 +21,8 @@ from core.backtesting.strategies.covered_call import CoveredCallStrategy
 from core.backtesting.strategies.spreads import BullPutSpreadStrategy, BearCallSpreadStrategy
 from core.backtesting.strategies.iron_condor import IronCondorStrategy
 from core.backtesting.strategies.straddle import StraddleStrategy, StrangleStrategy
+from core.backtesting.strategies.wheel import WheelStrategy, StockHolding
+from core.backtesting.position_manager import PositionManager
 
 
 @pytest.fixture
@@ -528,3 +530,216 @@ class TestMLDeltaIntegration:
             assert result['call_simulations'] > 0
         except ImportError:
             pytest.skip("ML dependencies not available")
+
+
+class TestWheelStrategy:
+    """Tests for WheelStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = WheelStrategy(base_params)
+        assert strategy.name == 'wheel'
+    
+    def test_initial_phase_is_sp(self, base_params):
+        """Test that initial phase is Sell Put."""
+        strategy = WheelStrategy(base_params)
+        assert strategy.phase == 'SP'
+    
+    def test_generate_signals_sp_phase(self, base_params):
+        """Test signal generation in SP phase."""
+        strategy = WheelStrategy(base_params)
+        position_mgr = PositionManager(initial_capital=100000)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+            position_mgr=position_mgr,
+        )
+        
+        assert len(signals) == 1
+        assert signals[0].trade_type == 'WHEEL_PUT'
+        assert signals[0].right == 'P'
+        assert signals[0].quantity < 0
+    
+    def test_put_assignment_transitions_to_cc(self, base_params):
+        """Test that Put assignment transitions to CC phase."""
+        strategy = WheelStrategy(base_params)
+        
+        # Simulate Put assignment
+        trade = {
+            'exit_reason': 'ASSIGNMENT',
+            'trade_type': 'WHEEL_PUT',
+            'strike': 145.0,
+            'quantity': -1,
+            'entry_price': 2.5,
+        }
+        
+        strategy.on_trade_closed(trade)
+        
+        assert strategy.phase == 'CC'
+        assert strategy.stock_holding.shares == 100
+        assert strategy.stock_holding.cost_basis == 145.0
+    
+    def test_cc_signal_only_one_contract_per_call(self, base_params):
+        """Test that CC phase generates only 1 contract per signal."""
+        strategy = WheelStrategy(base_params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 500  # 5 contracts worth
+        strategy.stock_holding.cost_basis = 150.0
+        position_mgr = PositionManager(initial_capital=100000)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+            position_mgr=position_mgr,
+        )
+        
+        # Should only sell 1 contract per signal (not 5)
+        assert len(signals) == 1
+        assert abs(signals[0].quantity) == 1
+    
+    def test_no_cc_signal_when_shares_covered(self, base_params):
+        """Test that no CC signal when all shares already covered by existing Calls."""
+        strategy = WheelStrategy(base_params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 200  # 2 contracts worth
+        strategy.stock_holding.cost_basis = 150.0
+        
+        # Mock existing Call position covering all shares
+        from dataclasses import dataclass
+        @dataclass
+        class MockPosition:
+            trade_type = 'WHEEL_CALL'
+            quantity = -2  # 2 contracts sold, covering 200 shares
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[MockPosition()],
+        )
+        
+        # No new signal should be generated
+        assert len(signals) == 0
+    
+    def test_call_assignment_returns_correct_stock_pnl(self, base_params):
+        """Test that Call assignment returns correct stock PnL."""
+        strategy = WheelStrategy(base_params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 100
+        strategy.stock_holding.cost_basis = 145.0  # Bought at 145
+        
+        # Simulate Call assignment at 155
+        trade = {
+            'exit_reason': 'ASSIGNMENT',
+            'trade_type': 'WHEEL_CALL',
+            'strike': 155.0,
+            'quantity': -1,
+            'entry_price': 3.0,
+            'pnl': -200.0,  # Option PnL
+        }
+        
+        result = strategy.on_trade_closed(trade)
+        
+        # Stock PnL = (155 - 145) * 100 = +1000
+        assert result == 1000.0
+        assert strategy.stock_holding.shares == 0
+    
+    def test_call_assignment_with_no_shares_returns_zero(self, base_params):
+        """Test that Call assignment with no shares returns 0 (defensive check)."""
+        strategy = WheelStrategy(base_params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 0  # No shares!
+        strategy.stock_holding.cost_basis = 0.0
+        
+        trade = {
+            'exit_reason': 'ASSIGNMENT',
+            'trade_type': 'WHEEL_CALL',
+            'strike': 155.0,
+            'quantity': -1,
+            'entry_price': 3.0,
+            'pnl': -200.0,
+        }
+        
+        result = strategy.on_trade_closed(trade)
+        
+        # Should return 0 to avoid incorrect PnL
+        assert result == 0.0
+    
+    def test_call_assignment_partial_shares(self, base_params):
+        """Test Call assignment when shares_sold exceeds shares held."""
+        strategy = WheelStrategy(base_params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 100  # Only 100 shares
+        strategy.stock_holding.cost_basis = 150.0
+        
+        # Try to assign 2 contracts (200 shares)
+        trade = {
+            'exit_reason': 'ASSIGNMENT',
+            'trade_type': 'WHEEL_CALL',
+            'strike': 160.0,
+            'quantity': -2,  # 2 contracts = 200 shares
+            'entry_price': 3.0,
+            'pnl': -200.0,
+        }
+        
+        result = strategy.on_trade_closed(trade)
+        
+        # Should only calculate PnL for 100 shares (actual held)
+        # Stock PnL = (160 - 150) * 100 = +1000
+        assert result == 1000.0
+    
+    def test_phase_transition_back_to_sp(self, base_params):
+        """Test transition back to SP after all shares sold."""
+        strategy = WheelStrategy(base_params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 100
+        strategy.stock_holding.cost_basis = 150.0
+        
+        trade = {
+            'exit_reason': 'ASSIGNMENT',
+            'trade_type': 'WHEEL_CALL',
+            'strike': 155.0,
+            'quantity': -1,
+            'entry_price': 3.0,
+            'pnl': -200.0,
+        }
+        
+        strategy.on_trade_closed(trade)
+        
+        # Should transition back to SP
+        assert strategy.phase == 'SP'
+        assert strategy.stock_holding.cost_basis == 0.0
+    
+    def test_multiple_put_assignments_accumulate_shares(self, base_params):
+        """Test that multiple Put assignments accumulate shares correctly."""
+        strategy = WheelStrategy(base_params)
+        
+        # First Put assignment
+        trade1 = {
+            'exit_reason': 'ASSIGNMENT',
+            'trade_type': 'WHEEL_PUT',
+            'strike': 150.0,
+            'quantity': -1,
+            'entry_price': 2.5,
+        }
+        strategy.on_trade_closed(trade1)
+        
+        # Second Put assignment (before CC phase sold shares)
+        trade2 = {
+            'exit_reason': 'ASSIGNMENT',
+            'trade_type': 'WHEEL_PUT',
+            'strike': 145.0,
+            'quantity': -2,
+            'entry_price': 2.0,
+        }
+        strategy.on_trade_closed(trade2)
+        
+        # Should have 300 shares total (100 + 200)
+        assert strategy.stock_holding.shares == 300
+        # Cost basis should be weighted average: (100*150 + 200*145) / 300 = 146.67
+        assert strategy.stock_holding.cost_basis == pytest.approx(146.67, rel=0.01)
