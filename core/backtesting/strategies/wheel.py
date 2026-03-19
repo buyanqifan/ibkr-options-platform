@@ -133,7 +133,26 @@ class WheelStrategy(BaseStrategy):
                 quantity = abs(trade["quantity"])
                 shares_sold = quantity * 100
                 
+                # CRITICAL: Defensive check - if no shares held, this is an error
+                # This should not happen after the fix to generate_signals, but we guard against it
+                if self.stock_holding.shares <= 0 or self.stock_holding.cost_basis <= 0:
+                    self.logger.warning(
+                        f"Call assigned but no shares held! This indicates a bug. "
+                        f"shares={self.stock_holding.shares}, cost_basis={self.stock_holding.cost_basis:.2f}"
+                    )
+                    # Return 0 to avoid incorrect PnL
+                    return 0.0
+                
                 # Calculate stock P&L from this assignment
+                # Limit shares_sold to actual shares held to avoid negative positions
+                actual_shares_sold = min(shares_sold, self.stock_holding.shares)
+                if actual_shares_sold != shares_sold:
+                    self.logger.warning(
+                        f"Call assignment for {shares_sold} shares but only {self.stock_holding.shares} held. "
+                        f"Adjusting to {actual_shares_sold} shares."
+                    )
+                    shares_sold = actual_shares_sold
+                
                 stock_cost_basis = self.stock_holding.cost_basis * shares_sold
                 stock_proceeds = strike * shares_sold
                 stock_pnl = stock_proceeds - stock_cost_basis  # Realized stock P&L
@@ -222,6 +241,22 @@ class WheelStrategy(BaseStrategy):
         ]
         if len(wheel_positions) >= max_pos:
             return []
+        
+        # CRITICAL: For CC phase, check if we already have enough Call contracts
+        # Each Call contract locks 100 shares. We cannot sell more Calls than shares owned.
+        if self.phase == "CC":
+            # Count already sold Call contracts (negative quantity means sold)
+            existing_call_contracts = sum(
+                abs(p.quantity) for p in wheel_positions 
+                if p.trade_type == "WHEEL_CALL"
+            )
+            # Each contract covers 100 shares
+            shares_already_covered = existing_call_contracts * 100
+            shares_available = self.stock_holding.shares - shares_already_covered
+            
+            # If no shares available for more Calls, don't generate signal
+            if shares_available <= 0:
+                return []
 
         T = self.select_expiry_dte() / 365.0
         dte_days = int(self.select_expiry_dte())
@@ -309,9 +344,14 @@ class WheelStrategy(BaseStrategy):
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
 
         # Covered call: 1 contract per 100 shares owned
-        # No additional capital constraint needed - we already own the shares!
-        max_contracts = self.stock_holding.shares // 100
-        max_contracts = min(max_contracts, self.params.get("max_positions", 10))  # Default 10 for diversification
+        # But we must check existing open Call positions to avoid over-selling
+        # Note: This is a secondary check. The primary check is in generate_signals.
+        # This ensures we sell only 1 contract per signal (not all available at once)
+        max_contracts = 1  # Sell only 1 contract per signal for better diversification
+        
+        # Also verify we have enough shares
+        max_by_shares = self.stock_holding.shares // 100
+        max_contracts = min(max_contracts, max_by_shares, self.params.get("max_positions", 10))
         
         # Return empty if no shares to cover
         if max_contracts <= 0:
