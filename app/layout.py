@@ -13,6 +13,7 @@ _ROUTES = {
     "/screener": dash.page_registry["pages.screener"]["layout"],
     "/options-chain": dash.page_registry["pages.options_chain"]["layout"],
     "/backtester": dash.page_registry["pages.backtester"]["layout"],
+    "/backtest-history": dash.page_registry["pages.backtest_history"]["layout"],  # New: Backtest history
     "/binbin-god": dash.page_registry["pages.binbin_god"]["layout"],  # New: Binbin God strategy
     "/settings": dash.page_registry["pages.settings"]["layout"],
 }

@@ -207,6 +207,21 @@ layout = html.Div([
                         "Run Backtest", id="bt-run-btn",
                         color="primary", className="w-100", n_clicks=0,
                     ),
+                    
+                    # Save button (shown after successful backtest)
+                    html.Div(
+                        id="bt-save-container",
+                        children=[
+                            dbc.Button(
+                                "💾 Save Result", 
+                                id="bt-save-btn",
+                                color="success", 
+                                className="w-100 mt-2",
+                                n_clicks=0,
+                            ),
+                        ],
+                        className="d-none",  # Hidden by default
+                    ),
                 ]),
             ], className="shadow-sm"),
         ], md=3),
@@ -226,6 +241,7 @@ layout = html.Div([
     ]),
 
     dcc.Store(id="bt-results-store", data={}),
+    dcc.Store(id="bt-params-store", data={}),  # Store params for saving
 ])
 
 
@@ -264,7 +280,9 @@ def toggle_ml_delta_params(ml_delta_enabled):
 
 @callback(
     Output("bt-results-store", "data"),
+    Output("bt-params-store", "data"),
     Output("bt-results-container", "children"),
+    Output("bt-save-container", "className"),
     Input("bt-run-btn", "n_clicks"),
     State("bt-strategy", "value"),
     State("bt-symbol", "value"),
@@ -296,12 +314,12 @@ def run_backtest(
     ml_delta, ml_adoption_rate
 ):
     if not symbol or not start_date or not end_date:
-        return no_update, no_update
+        return no_update, no_update, no_update, no_update
     symbol = symbol.strip().upper()
 
     services = get_services()
     if not services:
-        return {}, html.P("Services not initialized", className="text-warning")
+        return {}, {}, html.P("Services not initialized", className="text-warning"), "d-none"
 
     engine = services["backtest_engine"]
     data_client = services.get("data_client")
@@ -355,10 +373,10 @@ def run_backtest(
         # Add benchmark data to result
         result["benchmark_data"] = benchmark_data
     except Exception as e:
-        return {}, html.P(f"Backtest error: {e}", className="text-danger")
+        return {}, {}, html.P(f"Backtest error: {e}", className="text-danger"), "d-none"
 
     if not result:
-        return {}, html.P("No results generated", className="text-muted")
+        return {}, {}, html.P("No results generated", className="text-muted"), "d-none"
 
     # Build results UI
     metrics = result.get("metrics", {})
@@ -489,4 +507,29 @@ def run_backtest(
                 create_phase_transition_log(phase_history),
             ]))
 
-    return result, content
+    # Show save button after successful backtest
+    return result, params, content, "d-block mt-2"
+
+
+@callback(
+    Output("bt-save-btn", "children"),
+    Output("bt-save-btn", "color"),
+    Output("bt-save-btn", "disabled"),
+    Input("bt-save-btn", "n_clicks"),
+    State("bt-results-store", "data"),
+    State("bt-params-store", "data"),
+    prevent_initial_call=True,
+)
+def save_backtest_result(n_clicks, result, params):
+    """Save the backtest result to database."""
+    if not n_clicks or not result or not params:
+        return "💾 Save Result", "success", False
+    
+    try:
+        from core.backtesting.storage import get_backtest_storage
+        storage = get_backtest_storage()
+        
+        backtest_id = storage.save_backtest(params, result)
+        return f"✅ Saved #{backtest_id}", "secondary", True
+    except Exception as e:
+        return f"❌ Error: {str(e)[:30]}", "danger", False
