@@ -75,14 +75,20 @@ class BinbinGodStrategy(BaseStrategy):
         return "binbin_god"
     
     def __init__(self, config: Dict[str, Any]):
-        super().__init__(config)
-        self.config = config
-        self.symbol = config.get("symbol", "MAG7_AUTO")
+        # Don't call super().__init__ to avoid double ML initialization
+        # Instead, manually set base class attributes
+        self.params = config
         self.dte_min = config.get("dte_min", 30)
         self.dte_max = config.get("dte_max", 45)
         self.delta_target = config.get("delta_target", 0.30)
         self.profit_target_pct = config.get("profit_target_pct", 50)
         self.stop_loss_pct = config.get("stop_loss_pct", 200)
+        self.initial_capital = config.get("initial_capital", 100000)
+        self.max_risk_per_trade = config.get("max_risk_per_trade", 0.02)
+        self.max_leverage = config.get("max_leverage", 1.0)
+        
+        self.config = config
+        self.symbol = config.get("symbol", "MAG7_AUTO")
         self.max_positions = config.get("max_positions", 10)
         self.use_synthetic_data = config.get("use_synthetic_data", False)
         
@@ -96,11 +102,13 @@ class BinbinGodStrategy(BaseStrategy):
         self.cc_cost_basis_threshold = config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
         self.cc_min_strike_premium = config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
         
-        # ML delta optimization parameters
+        # ML delta optimization parameters - use BaseStrategy's implementation
         self.ml_delta_optimization = config.get("ml_delta_optimization", False)
-        self.ml_adoption_rate = config.get("ml_adoption_rate", 0.5)  # 0.0 = static, 1.0 = full ML
+        self.ml_adoption_rate = config.get("ml_adoption_rate", 0.5)
         self.ml_integration = None
+        self.logger = logging.getLogger("binbin_god")
         
+        # Initialize ML integration if enabled (use BaseStrategy's pretrain_ml_model)
         if self.ml_delta_optimization:
             try:
                 from core.ml.delta_strategy_integration import BinGodDeltaIntegration, AdaptiveDeltaStrategy
@@ -113,9 +121,12 @@ class BinbinGodStrategy(BaseStrategy):
                     ml_integration=self.ml_integration,
                     adoption_rate=self.ml_adoption_rate
                 )
-                logger.info("ML Delta optimizer initialized")
+                self.logger.info("ML Delta optimizer initialized for BinbinGod")
             except ImportError as e:
-                logger.warning(f"ML Delta optimization not available: {e}")
+                self.logger.warning(f"ML Delta optimization not available: {e}")
+                self.ml_delta_optimization = False
+            except Exception as e:
+                self.logger.warning(f"ML Delta optimization initialization failed: {e}")
                 self.ml_delta_optimization = False
         
         # Scoring weights - optimized to avoid correlation
