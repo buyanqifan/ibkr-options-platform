@@ -329,6 +329,7 @@ def run_backtest(
     metrics = result.get("metrics", {})
     trades = result.get("trades", [])
     daily_pnl = result.get("daily_pnl", [])
+    strategy_performance = result.get("strategy_performance", {})
 
     # Metric cards
     total_ret = metrics.get("total_return_pct", 0)
@@ -406,7 +407,6 @@ def run_backtest(
     
     # Add monitoring dashboard for wheel strategy
     monitoring_section = html.Div()
-    strategy_performance = result.get("strategy_performance", {})
     if strategy_performance and params.get("strategy") == "wheel":
         monitoring_section = create_monitoring_dashboard(strategy_performance)
     
