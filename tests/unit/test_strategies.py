@@ -23,6 +23,7 @@ from core.backtesting.strategies.iron_condor import IronCondorStrategy
 from core.backtesting.strategies.straddle import StraddleStrategy, StrangleStrategy
 from core.backtesting.strategies.wheel import WheelStrategy, StockHolding
 from core.backtesting.position_manager import PositionManager
+from core.backtesting.strategies.binbin_god import BinbinGodStrategy
 
 
 @pytest.fixture
@@ -743,3 +744,95 @@ class TestWheelStrategy:
         assert strategy.stock_holding.shares == 300
         # Cost basis should be weighted average: (100*150 + 200*145) / 300 = 146.67
         assert strategy.stock_holding.cost_basis == pytest.approx(146.67, rel=0.01)
+
+
+class TestBinbinGodStrategy:
+    """Tests for BinbinGodStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        params = base_params.copy()
+        params['symbol'] = 'MAG7_AUTO'
+        strategy = BinbinGodStrategy(params)
+        assert strategy.name == 'binbin_god'
+    
+    def test_initial_phase_is_sp(self, base_params):
+        """Test that initial phase is Sell Put."""
+        params = base_params.copy()
+        params['symbol'] = 'MAG7_AUTO'
+        strategy = BinbinGodStrategy(params)
+        assert strategy.phase == 'SP'
+    
+    def test_strike_selection_normal_range(self, base_params):
+        """Test strike selection returns reasonable value within normal range."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        
+        # Normal case: strike should be OTM for call
+        underlying_price = 180.0
+        iv = 0.40
+        T = 30 / 365.0
+        
+        strike = strategy.select_strike_with_constraints(
+            underlying_price, iv, T, 'C', {}
+        )
+        
+        # Strike should be within reasonable range (80%-120% of underlying)
+        assert underlying_price * 0.8 <= strike <= underlying_price * 1.3
+    
+    def test_strike_selection_with_impossible_min_strike(self, base_params):
+        """Test that min_strike constraint is relaxed when impossible.
+        
+        This is the critical fix for the bug where strike=600+ when price=180.
+        When stock price drops far below cost basis, min_strike constraint
+        should be relaxed to allow valid strike selection.
+        """
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        
+        # Scenario: cost_basis=600 but price dropped to 180
+        underlying_price = 180.0
+        cost_basis = 600.0
+        iv = 0.40
+        T = 30 / 365.0
+        
+        # min_strike would be ~588 (cost_basis * 0.98)
+        # but high = 180 * 1.2 = 216
+        # So min_strike > high, constraint should be relaxed
+        min_strike = cost_basis * 0.98
+        constraints = {"min_strike": min_strike}
+        
+        strike = strategy.select_strike_with_constraints(
+            underlying_price, iv, T, 'C', constraints
+        )
+        
+        # Strike should be within reasonable range relative to CURRENT price
+        # NOT relative to cost_basis
+        assert underlying_price * 0.8 <= strike <= underlying_price * 1.3
+        # Strike should NOT be near cost_basis
+        assert strike < cost_basis * 0.5
+    
+    def test_strike_selection_with_valid_min_strike(self, base_params):
+        """Test that min_strike constraint is applied when valid."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        params['call_delta'] = 0.20
+        strategy = BinbinGodStrategy(params)
+        
+        # Scenario: price=180, cost_basis=150, min_strike=147
+        underlying_price = 180.0
+        iv = 0.40
+        T = 30 / 365.0
+        min_strike = 147.0  # Valid: within search range
+        
+        constraints = {"min_strike": min_strike}
+        strike = strategy.select_strike_with_constraints(
+            underlying_price, iv, T, 'C', constraints
+        )
+        
+        # Strike should be >= min_strike
+        assert strike >= min_strike
+        # And within reasonable range
+        assert strike <= underlying_price * 1.3

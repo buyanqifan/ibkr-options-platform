@@ -971,13 +971,27 @@ class BinbinGodStrategy(BaseStrategy):
             # Apply minimum strike constraint if provided
             if "min_strike" in constraints:
                 min_strike = constraints["min_strike"]
-                low = max(low, min_strike)
-                logger.info(f"Applying minimum strike constraint: strike >= ${min_strike:.2f}")
                 
-                # If minimum strike is very high, we may need to adjust target delta
-                # to ensure we find a valid strike
-                test_delta = OptionsPricer.delta(underlying_price, min_strike, T, iv, right)
-                logger.info(f"Test delta at minimum strike ${min_strike:.2f}: {test_delta:.3f}")
+                # CRITICAL FIX: Check if min_strike is within reasonable range
+                # If min_strike > high (underlying_price * 1.2), the constraint is impossible
+                # This happens when stock price drops significantly below cost basis
+                if min_strike > high:
+                    logger.warning(
+                        f"min_strike constraint (${min_strike:.2f}) exceeds reasonable range "
+                        f"(max ${high:.2f}). Stock price ${underlying_price:.2f} is far below "
+                        f"cost basis. Relaxing constraint to allow valid strike selection."
+                    )
+                    # Don't apply the constraint - let algorithm find best available strike
+                    # This is the correct behavior: we can't sell calls above cost basis
+                    # if the stock price is too low
+                else:
+                    low = max(low, min_strike)
+                    logger.info(f"Applying minimum strike constraint: strike >= ${min_strike:.2f}")
+                    
+                    # If minimum strike is very high, we may need to adjust target delta
+                    # to ensure we find a valid strike
+                    test_delta = OptionsPricer.delta(underlying_price, min_strike, T, iv, right)
+                    logger.info(f"Test delta at minimum strike ${min_strike:.2f}: {test_delta:.3f}")
 
         for _ in range(50):
             mid = (low + high) / 2
