@@ -407,6 +407,7 @@ def update_ml_adoption_rate_slider(rate_text):
     Output("binbin-results-store", "data"),
     Output("binbin-mag7-analysis", "children"),
     Output("binbin-results-container", "children"),
+    Output("bbg-loading-indicator", "style"),
     Input("bbg-run-btn", "n_clicks"),
     State("bbg-start", "value"),
     State("bbg-end", "value"),
@@ -439,11 +440,11 @@ def run_binbin_backtest(
 ):
     """Run Binbin God strategy backtest."""
     if not start_date or not end_date:
-        return no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update
     
     services = get_services()
     if not services:
-        return {}, html.P("Services not initialized", className="text-warning"), ""
+        return {}, html.Div(), html.P("Services not initialized", className="text-warning"), {"display": "none"}
     
     engine = services["backtest_engine"]
     
@@ -499,10 +500,10 @@ def run_binbin_backtest(
     try:
         result = engine.run(params)
     except Exception as e:
-        return {}, html.P(f"Backtest error: {e}", className="text-danger"), ""
+        return {}, html.Div(), html.P(f"Backtest error: {e}", className="text-danger"), {"display": "none"}
     
     if not result:
-        return {}, html.P("No results generated", className="text-muted"), ""
+        return {}, html.Div(), html.P("No results generated", className="text-muted"), {"display": "none"}
     
     # Build results UI (same structure as backtester.py)
     metrics = result.get("metrics", {})
@@ -670,19 +671,7 @@ def run_binbin_backtest(
                 create_phase_transition_log(phase_history),
             ]))
     
-    return result, content, no_update
+    # Hide loading indicator when backtest completes
+    # Return: result(store), mag7_analysis(display in header), content(main), loading_style
+    return result, mag7_section, content, {"display": "none"}
 
-# Clientside callback to show loading indicator immediately when button is clicked
-clientside_callback(
-    """
-    function(n_clicks) {
-        if (n_clicks > 0) {
-            return {'display': 'block'};
-        }
-        return {'display': 'none'};
-    }
-    """,
-    Output('bbg-loading-indicator', 'style'),
-    Input('bbg-run-btn', 'n_clicks'),
-    prevent_initial_call=True
-)
