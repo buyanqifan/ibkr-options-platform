@@ -13,9 +13,10 @@ def create_navbar_items(lang="en"):
             "market_data": "Market Data",
             "screener": "Screener",
             "options_chain": "Options Chain",
-            "backtester": "Backtester",
-            "backtest_history": "History",  # New: Backtest history
-            "binbin_god": "Binbin God 🤖",  # New: Binbin God strategy
+            "backtest": "Backtest",  # Parent menu
+            "backtester": "Strategy Backtest",
+            "backtest_history": "History",
+            "binbin_god": "Binbin God 🤖",
             "settings": "Settings",
         },
         "zh": {
@@ -23,23 +24,47 @@ def create_navbar_items(lang="en"):
             "market_data": "市场数据",
             "screener": "选股器",
             "options_chain": "期权链",
-            "backtester": "回测器",
-            "backtest_history": "历史记录",  # 新：历史记录
-            "binbin_god": "彬彬神 🤖",  # 新：彬彬神策略
+            "backtest": "回测",  # 父菜单
+            "backtester": "策略回测",
+            "backtest_history": "历史记录",
+            "binbin_god": "彬彬神 🤖",
             "settings": "设置",
         }
     }
     
     nav_labels = labels.get(lang, labels["en"])
     
+    # Create backtest submenu
+    backtest_menu = dbc.DropdownMenu(
+        [
+            dbc.DropdownMenuItem(
+                nav_labels["backtester"],
+                href="/backtester",
+                external_link=False,
+            ),
+            dbc.DropdownMenuItem(
+                nav_labels["backtest_history"],
+                href="/backtest-history",
+                external_link=False,
+            ),
+            dbc.DropdownMenuItem(
+                nav_labels["binbin_god"],
+                href="/binbin-god",
+                external_link=False,
+            ),
+        ],
+        label=nav_labels["backtest"],
+        nav=True,
+        in_navbar=True,
+        toggle_style={"color": "rgba(255,255,255,0.55)"},
+    )
+    
     return [
         dbc.NavItem(dbc.NavLink(nav_labels["dashboard"], href="/", active="exact")),
         dbc.NavItem(dbc.NavLink(nav_labels["market_data"], href="/market-data", active="exact")),
         dbc.NavItem(dbc.NavLink(nav_labels["screener"], href="/screener", active="exact")),
         dbc.NavItem(dbc.NavLink(nav_labels["options_chain"], href="/options-chain", active="exact")),
-        dbc.NavItem(dbc.NavLink(nav_labels["backtester"], href="/backtester", active="exact")),
-        dbc.NavItem(dbc.NavLink(nav_labels["backtest_history"], href="/backtest-history", active="exact")),  # New: History
-        dbc.NavItem(dbc.NavLink(nav_labels["binbin_god"], href="/binbin-god", active="exact")),  # New link
+        backtest_menu,  # Dropdown menu for backtest pages
         dbc.NavItem(dbc.NavLink(nav_labels["settings"], href="/settings", active="exact")),
 
         # Language Selector
