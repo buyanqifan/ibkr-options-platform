@@ -341,7 +341,8 @@ layout = dbc.Container([
     ]),
     
     # Custom CSS for loading animation
-    html.Style("""
+    dcc.Markdown('''
+    <style>
     .dash-loading {
         background-color: #1a1a2e !important;
     }
@@ -349,7 +350,8 @@ layout = dbc.Container([
         stroke: #4CAF50 !important;
         stroke-width: 4;
     }
-    """)
+    </style>
+    ''', dangerously_allow_html=True)
 ])
 
 
