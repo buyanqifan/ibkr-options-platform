@@ -14,10 +14,6 @@ services:
       IBC_ReadOnlyApi: 'no'
       IBC_ExistingSessionDetectedAction: primaryonly
       IBC_AutoRestart: 'yes'
-      # Auto accept license agreement dialog on startup
-      IBC_AcceptLicenseAgreement: 'yes'
-      # Auto accept moneybeat trade dialogs
-      IBC_AcceptMoneyBeatTradeDialogs: 'yes'
     networks:
       - trading-net
 
