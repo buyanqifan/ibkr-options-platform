@@ -278,8 +278,9 @@ class BacktestEngine:
             )
             for sig in signals:
                     # Use strategy-provided margin requirement if available
-                    if sig.margin_requirement is not None and sig.margin_requirement > 0:
-                        # Strategy has provided specific margin requirement (e.g., spreads, straddles)
+                    # Note: margin_requirement can be 0 for covered calls (shares already owned)
+                    if sig.margin_requirement is not None:
+                        # Strategy has provided specific margin requirement (e.g., spreads, straddles, covered calls)
                         margin_per_contract = sig.margin_requirement
                         logger.debug(
                             f"Using strategy-provided margin for {sig.trade_type}: "
@@ -290,8 +291,8 @@ class BacktestEngine:
                         if "PUT" in sig.trade_type:
                             # Cash-secured put or naked put
                             margin_per_contract = sig.strike * 100
-                        elif "CALL" in sig.trade_type and "COVERED" not in sig.trade_type:
-                            # Naked call
+                        elif "CALL" in sig.trade_type and "COVERED" not in sig.trade_type and "WHEEL" not in sig.trade_type:
+                            # Naked call (not covered call or wheel call)
                             margin_per_contract = underlying_price * 100
                         else:
                             # Covered calls or other: use premium as reference
