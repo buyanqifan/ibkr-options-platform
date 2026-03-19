@@ -415,12 +415,13 @@ class BacktestEngine:
                     f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
                 )
                 
-                # Release stock capital allocation
+                # Release all stock capital allocations (for BinbinGod, symbol may differ from params symbol)
+                released_count = 0
                 for pid, alloc in list(position_mgr.allocations.items()):
-                    if "_STOCK" in pid and alloc.symbol == symbol and not alloc.released:
-                        position_mgr.release_margin(pid, stock_pnl)
+                    if "_STOCK" in pid and not alloc.released:
+                        position_mgr.release_margin(pid, stock_pnl if released_count == 0 else 0)
                         logger.debug(f"Released stock capital at backtest end: {pid}")
-                        break
+                        released_count += 1
                 
                 # Reset stock holding
                 strategy.stock_holding.shares = 0
