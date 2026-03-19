@@ -836,3 +836,100 @@ class TestBinbinGodStrategy:
         assert strike >= min_strike
         # And within reasonable range
         assert strike <= underlying_price * 1.3
+    
+    def test_cc_signal_only_one_contract_per_call(self, base_params):
+        """Test that CC phase generates only 1 contract per signal."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 500  # 5 contracts worth
+        strategy.stock_holding.cost_basis = 150.0
+        
+        signals = strategy._generate_backtest_call_signal(
+            symbol='NVDA',
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            position_mgr=None,
+        )
+        
+        # Should only sell 1 contract per signal (not 5)
+        assert len(signals) == 1
+        assert abs(signals[0].quantity) == 1
+    
+    def test_no_cc_signal_when_shares_covered(self, base_params):
+        """Test that no CC signal when all shares already covered by existing Calls."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 200  # 2 contracts worth
+        strategy.stock_holding.cost_basis = 150.0
+        
+        # Mock existing Call position covering all shares
+        from dataclasses import dataclass
+        @dataclass
+        class MockPosition:
+            trade_type = 'BINBIN_CALL'
+            quantity = -2  # 2 contracts sold, covering 200 shares
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[MockPosition()],
+        )
+        
+        # No new signal should be generated
+        assert len(signals) == 0
+    
+    def test_call_assignment_with_no_shares_returns_zero(self, base_params):
+        """Test that Call assignment with no shares returns 0 (defensive check)."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 0  # No shares!
+        strategy.stock_holding.cost_basis = 0.0
+        
+        trade = {
+            'exit_reason': 'ASSIGNMENT',
+            'right': 'C',
+            'trade_type': 'BINBIN_CALL',
+            'strike': 155.0,
+            'quantity': -1,
+            'entry_price': 3.0,
+            'pnl': -200.0,
+        }
+        
+        result = strategy.on_trade_closed(trade)
+        
+        # Should return 0 to avoid incorrect PnL
+        assert result == 0.0
+    
+    def test_call_assignment_partial_shares(self, base_params):
+        """Test Call assignment when shares_sold exceeds shares held."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        strategy.phase = 'CC'
+        strategy.stock_holding.shares = 100  # Only 100 shares
+        strategy.stock_holding.cost_basis = 150.0
+        
+        # Try to assign 2 contracts (200 shares)
+        trade = {
+            'exit_reason': 'ASSIGNMENT',
+            'right': 'C',
+            'trade_type': 'BINBIN_CALL',
+            'strike': 160.0,
+            'quantity': -2,  # 2 contracts = 200 shares
+            'entry_price': 3.0,
+            'pnl': -200.0,
+        }
+        
+        result = strategy.on_trade_closed(trade)
+        
+        # Should only calculate PnL for 100 shares (actual held)
+        # Stock PnL = (160 - 150) * 100 = +1000
+        assert result == 1000.0

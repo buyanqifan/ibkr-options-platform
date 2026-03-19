@@ -438,8 +438,24 @@ class BinbinGodStrategy(BaseStrategy):
             else:
                 actual_symbol = self.symbol
             
+            # CRITICAL: Check if we already have Call positions covering shares
+            # This prevents over-selling calls beyond share holdings
+            existing_call_contracts = sum(
+                abs(p.quantity) for p in wheel_positions 
+                if p.trade_type == "BINBIN_CALL"
+            )
+            shares_already_covered = existing_call_contracts * 100
+            shares_available = self.stock_holding.shares - shares_already_covered
+            
+            if shares_available <= 0:
+                logger.info(
+                    f"All shares already covered by existing calls. "
+                    f"Shares: {self.stock_holding.shares}, Covered: {shares_already_covered}"
+                )
+                return []
+            
             return self._generate_backtest_call_signal(
-                actual_symbol, current_date, underlying_price, iv, position_mgr
+                actual_symbol, current_date, underlying_price, iv, position_mgr, shares_available
             )
     
     def _generate_backtest_put_signal(
@@ -505,13 +521,23 @@ class BinbinGodStrategy(BaseStrategy):
         underlying_price: float,
         iv: float,
         position_mgr=None,
+        shares_available: int = None,
     ) -> list[Signal]:
-        """Generate Covered Call signal for backtesting."""
+        """Generate Covered Call signal for backtesting.
+        
+        Args:
+            shares_available: Maximum shares that can be covered by new calls.
+                              If None, use all shares held.
+        """
         from datetime import timedelta
         from core.backtesting.pricing import OptionsPricer
         
+        # Determine shares available for covering new calls
+        if shares_available is None:
+            shares_available = self.stock_holding.shares
+        
         # Can only sell calls for shares we own
-        if self.stock_holding.shares <= 0:
+        if shares_available <= 0:
             # Fallback to SP phase
             self.phase = "SP"
             return self._generate_backtest_put_signal(
@@ -590,8 +616,11 @@ class BinbinGodStrategy(BaseStrategy):
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
         
-        # Covered call: 1 contract per 100 shares owned
-        max_contracts = min(self.stock_holding.shares // 100, self.max_positions)
+        # Covered call: Sell only 1 contract per signal for better diversification
+        # and to prevent over-selling beyond available shares
+        max_contracts = 1  # Sell only 1 contract per signal
+        max_by_shares = shares_available // 100
+        max_contracts = min(max_contracts, max_by_shares, self.max_positions)
         
         if max_contracts <= 0:
             return []
@@ -907,33 +936,50 @@ class BinbinGodStrategy(BaseStrategy):
             elif right == "C":
                 # Call assignment: we sold shares
                 shares_sold = quantity * 100
-                if shares_sold <= self.stock_holding.shares:
-                    # Calculate realized stock P&L
-                    stock_cost_basis = self.stock_holding.cost_basis * shares_sold
-                    stock_proceeds = strike * shares_sold
-                    stock_pnl = stock_proceeds - stock_cost_basis
-                    
-                    # IMPORTANT: Record stock P&L to be added to cumulative_pnl
-                    additional_stock_pnl = stock_pnl
-                   
-                    # Log complete P&L breakdown
-                    option_pnl = trade.get("pnl", 0)
-                    total_trade_pnl = option_pnl + stock_pnl
-                    logger.info(
-                        f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
-                        f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
-                        f"sold at ${strike:.2f}, {shares_sold} shares)"
+                
+                # CRITICAL: Defensive check - if no shares held, this is an error
+                # This should not happen after the fix to generate_signals, but we guard against it
+                if self.stock_holding.shares <= 0 or self.stock_holding.cost_basis <= 0:
+                    logger.warning(
+                        f"Call assigned but no shares held! This indicates a bug. "
+                        f"shares={self.stock_holding.shares}, cost_basis={self.stock_holding.cost_basis:.2f}"
                     )
-                   
-                    self.stock_holding.shares -= shares_sold
-                    if self.stock_holding.shares == 0:
-                        self.phase = "SP"  # Switch back to Sell Put phase
-                        
-                        # Clear the CC stock tracking since we no longer hold shares
-                        if hasattr(self, '_current_cc_stock'):
-                            del self._current_cc_stock
-                else:
-                    logger.warning(f"Call assignment error: Trying to sell {shares_sold} shares but only have {self.stock_holding.shares}")
+                    # Return 0 to avoid incorrect PnL
+                    return 0.0
+                
+                # Limit shares_sold to actual shares held to avoid negative positions
+                actual_shares_sold = min(shares_sold, self.stock_holding.shares)
+                if actual_shares_sold != shares_sold:
+                    logger.warning(
+                        f"Call assignment for {shares_sold} shares but only {self.stock_holding.shares} held. "
+                        f"Adjusting to {actual_shares_sold} shares."
+                    )
+                    shares_sold = actual_shares_sold
+                
+                # Calculate realized stock P&L
+                stock_cost_basis = self.stock_holding.cost_basis * shares_sold
+                stock_proceeds = strike * shares_sold
+                stock_pnl = stock_proceeds - stock_cost_basis
+                
+                # IMPORTANT: Record stock P&L to be added to cumulative_pnl
+                additional_stock_pnl = stock_pnl
+               
+                # Log complete P&L breakdown
+                option_pnl = trade.get("pnl", 0)
+                total_trade_pnl = option_pnl + stock_pnl
+                logger.info(
+                    f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
+                    f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
+                    f"sold at ${strike:.2f}, {shares_sold} shares)"
+                )
+               
+                self.stock_holding.shares -= shares_sold
+                if self.stock_holding.shares == 0:
+                    self.phase = "SP"  # Switch back to Sell Put phase
+                    
+                    # Clear the CC stock tracking since we no longer hold shares
+                    if hasattr(self, '_current_cc_stock'):
+                        del self._current_cc_stock
         
         # Return additional stock P&L for engine to add to cumulative_pnl
         return additional_stock_pnl
