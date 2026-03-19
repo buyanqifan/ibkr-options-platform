@@ -219,6 +219,45 @@ class BacktestEngine:
                 position_id = f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
                 position_mgr.release_margin(position_id, adjusted_pnl)  # Use adjusted P&L
                 
+                # Handle stock capital allocation for Wheel strategy
+                # When Put is assigned, we buy shares - the margin should be converted to stock capital
+                # This prevents double-counting of available capital
+                if trade.exit_reason == "ASSIGNMENT" and trade.trade_type in ("WHEEL_PUT", "BINBIN_PUT"):
+                    # Put assigned: allocate capital for stock position
+                    shares_acquired = abs(trade.quantity) * 100
+                    stock_cost = trade.strike * shares_acquired
+                    stock_position_id = f"{trade.symbol}_{bar_date}_STOCK"
+                    
+                    # Allocate stock capital (this is the money used to buy shares)
+                    position_mgr.allocate_margin(
+                        position_id=stock_position_id,
+                        strategy=strategy.name,
+                        symbol=trade.symbol,
+                        entry_date=bar_date,
+                        margin_amount=stock_cost,
+                    )
+                    logger.debug(
+                        f"Allocated stock capital: {stock_position_id} = ${stock_cost:.2f} "
+                        f"({shares_acquired} shares @ ${trade.strike:.2f})"
+                    )
+                
+                # When Call is assigned, we sell shares - release stock capital
+                if trade.exit_reason == "ASSIGNMENT" and trade.trade_type in ("WHEEL_CALL", "BINBIN_CALL"):
+                    # Call assigned: release stock capital
+                    shares_sold = abs(trade.quantity) * 100
+                    stock_cost_basis = getattr(strategy, 'stock_holding', None)
+                    
+                    if stock_cost_basis and hasattr(stock_cost_basis, 'cost_basis'):
+                        # Calculate stock capital to release
+                        stock_capital = stock_cost_basis.cost_basis * shares_sold
+                        
+                        # Find and release stock position
+                        for pid, alloc in list(position_mgr.allocations.items()):
+                            if "_STOCK" in pid and alloc.symbol == trade.symbol and not alloc.released:
+                                position_mgr.release_margin(pid, 0)  # Release with 0 P&L (stock P&L handled separately)
+                                logger.debug(f"Released stock capital: {pid}")
+                                break
+                
                 # Update trade record with capital information at exit
                 trade.capital_at_exit = position_mgr.net_capital  # Record total capital after closing
                 
@@ -361,6 +400,31 @@ class BacktestEngine:
                 simulator.closed_trades.extend(closed_trades)
             
             cumulative_pnl = sum(t.pnl for t in simulator.closed_trades)
+            
+            # Handle remaining stock position for Wheel/BinbinGod strategies
+            # At end of backtest, liquidate any remaining stock holdings
+            if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
+                shares = strategy.stock_holding.shares
+                cost_basis = strategy.stock_holding.cost_basis
+                
+                # Calculate realized P&L from stock liquidation
+                stock_pnl = (last_price - cost_basis) * shares
+                position_mgr.cumulative_pnl += stock_pnl
+                logger.info(
+                    f"Backtest end: Liquidated {shares} shares @ ${last_price:.2f} "
+                    f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
+                )
+                
+                # Release stock capital allocation
+                for pid, alloc in list(position_mgr.allocations.items()):
+                    if "_STOCK" in pid and alloc.symbol == symbol and not alloc.released:
+                        position_mgr.release_margin(pid, stock_pnl)
+                        logger.debug(f"Released stock capital at backtest end: {pid}")
+                        break
+                
+                # Reset stock holding
+                strategy.stock_holding.shares = 0
+                strategy.stock_holding.cost_basis = 0.0
 
         # Calculate metrics
         trades = [t.to_dict() for t in simulator.closed_trades]
