@@ -90,6 +90,22 @@ class BacktestEngine:
         if not bars:
             raise ValueError(f"No historical data for {symbol}")
 
+        # Pretrain ML model if enabled (use early portion of historical data)
+        if params.get("ml_delta_optimization", False) and hasattr(strategy, 'pretrain_ml_model'):
+            # Use first 30% of data for pretraining
+            pretrain_size = int(len(bars) * 0.3)
+            pretrain_bars = bars[:pretrain_size]
+            
+            if len(pretrain_bars) >= 60:
+                # Estimate IV for pretraining
+                pretrain_prices = [b["close"] for b in pretrain_bars]
+                pretrain_hv = self._rolling_hv(pretrain_prices, window=20)
+                avg_iv = np.mean([v for v in pretrain_hv if v > 0.01]) if pretrain_hv else 0.25
+                avg_iv = max(0.15, min(0.50, avg_iv))  # Clamp to reasonable range
+                
+                pretrain_stats = strategy.pretrain_ml_model(pretrain_bars, iv_estimate=avg_iv)
+                logger.info(f"ML Delta pretraining: {pretrain_stats}")
+
         # Estimate historical volatility for IV proxy
         prices = [b["close"] for b in bars]
         hv = self._rolling_hv(prices, window=20)

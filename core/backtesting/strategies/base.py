@@ -63,6 +63,66 @@ class BaseStrategy(ABC):
             except Exception as e:
                 self.logger.warning(f"ML Delta optimization initialization failed: {e}")
                 self.ml_delta_optimization = False
+    
+    def pretrain_ml_model(self, historical_bars: list, iv_estimate: float = 0.25) -> dict:
+        """
+        Pretrain ML model with historical data before backtesting.
+        
+        Should be called by the backtest engine before running the strategy.
+        
+        Args:
+            historical_bars: List of historical price bars
+            iv_estimate: Estimated implied volatility
+            
+        Returns:
+            Dict with pretraining statistics
+        """
+        if not self.ml_delta_optimization or not self.ml_integration:
+            return {"status": "skipped", "reason": "ml_not_enabled"}
+        
+        if not historical_bars or len(historical_bars) < 60:
+            return {"status": "skipped", "reason": "insufficient_data"}
+        
+        try:
+            # Access the optimizer from the integration
+            optimizer = self.ml_integration.optimizer
+            
+            if optimizer is None:
+                return {"status": "skipped", "reason": "no_optimizer"}
+            
+            symbol = self.params.get("symbol", "UNKNOWN")
+            
+            # Pretrain for both puts and calls
+            stats_put = optimizer.pretrain_with_history(
+                symbol=symbol,
+                historical_bars=historical_bars,
+                iv_estimate=iv_estimate,
+                right="P",
+                training_ratio=0.5  # Use 50% of history for pretraining
+            )
+            
+            stats_call = optimizer.pretrain_with_history(
+                symbol=symbol,
+                historical_bars=historical_bars,
+                iv_estimate=iv_estimate,
+                right="C",
+                training_ratio=0.5
+            )
+            
+            self.logger.info(f"ML model pretrained: Put={stats_put.get('total_simulations', 0)} sims, "
+                           f"Call={stats_call.get('total_simulations', 0)} sims")
+            
+            return {
+                "status": "success",
+                "put_simulations": stats_put.get("total_simulations", 0),
+                "call_simulations": stats_call.get("total_simulations", 0),
+                "regimes_tested": stats_put.get("regimes_tested", []),
+                "best_delta_by_regime": stats_put.get("best_delta_by_regime", {})
+            }
+            
+        except Exception as e:
+            self.logger.error(f"ML pretraining failed: {e}")
+            return {"status": "error", "message": str(e)}
 
     @property
     @abstractmethod

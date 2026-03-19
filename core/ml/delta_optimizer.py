@@ -115,6 +115,213 @@ class DeltaOptimizerML:
         self.q_table = {}
         logger.info("Initialized new ML Delta optimizer")
     
+    def pretrain_with_history(self, 
+                              symbol: str,
+                              historical_bars: List[Dict],
+                              iv_estimate: float = 0.25,
+                              right: str = "P",
+                              training_ratio: float = 0.3) -> Dict[str, Any]:
+        """
+        Pretrain the model using historical price data.
+        
+        This simulates trades across different market conditions and delta values
+        to build initial Q-table knowledge before live trading.
+        
+        Args:
+            symbol: Stock symbol
+            historical_bars: List of historical price bars with 'date', 'close', 'high', 'low'
+            iv_estimate: Estimated implied volatility for option pricing
+            right: Option type ('P' for put, 'C' for call)
+            training_ratio: Fraction of data to use for training (0.0-1.0)
+            
+        Returns:
+            Dict with training statistics
+        """
+        if len(historical_bars) < 60:
+            logger.warning(f"Insufficient history for pretraining: {len(historical_bars)} bars")
+            return {"status": "skipped", "reason": "insufficient_data"}
+        
+        logger.info(f"Starting pretraining for {symbol} with {len(historical_bars)} bars...")
+        
+        # Use portion of data for training
+        train_size = int(len(historical_bars) * training_ratio)
+        train_bars = historical_bars[-train_size:]
+        
+        # Candidate deltas to test
+        candidate_deltas = np.arange(0.10, 0.40, 0.05)
+        
+        # Default DTE for simulation
+        dte = 30
+        T = dte / 365.0
+        
+        stats = {
+            "total_simulations": 0,
+            "regimes_tested": set(),
+            "best_delta_by_regime": {}
+        }
+        
+        # Slide through historical data simulating trades
+        for i in range(len(train_bars) - dte - 1):
+            entry_bar = train_bars[i]
+            exit_bar = train_bars[min(i + dte, len(train_bars) - 1)]
+            
+            entry_price = entry_bar['close']
+            exit_price = exit_bar['close']
+            entry_date = entry_bar.get('date', str(i))
+            
+            # Determine market regime at entry
+            lookback = min(30, i)
+            recent_bars = train_bars[max(0, i-lookback):i+1]
+            
+            volatility = self._calculate_simple_volatility(recent_bars)
+            momentum_5d = (entry_price - train_bars[max(0, i-5)]['close']) / train_bars[max(0, i-5)]['close']
+            momentum_20d = (entry_price - train_bars[max(0, i-20)]['close']) / train_bars[max(0, i-20)]['close'] if i >= 20 else momentum_5d
+            
+            regime = self._determine_market_regime(volatility, momentum_5d, momentum_20d)
+            stats["regimes_tested"].add(regime)
+            
+            # Create market context
+            context = MarketContext(
+                symbol=symbol,
+                current_price=entry_price,
+                cost_basis=entry_price,  # Assume entry at current price
+                volatility_20d=volatility,
+                volatility_30d=volatility,
+                momentum_5d=momentum_5d,
+                momentum_20d=momentum_20d,
+                pe_ratio=25.0,
+                iv_rank=50.0,
+                market_regime=regime,
+                days_to_earnings=30,
+                option_liquidity=0.5
+            )
+            
+            # Test each delta and record performance
+            for delta in candidate_deltas:
+                # Simulate trade outcome
+                pnl, assigned = self._simulate_option_trade(
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    delta=delta,
+                    right=right,
+                    iv=iv_estimate,
+                    T=T
+                )
+                
+                # Update Q-table with simulated result
+                self.update_performance(
+                    delta=delta,
+                    symbol=symbol,
+                    context=context,
+                    actual_pnl=pnl,
+                    actual_assignment=assigned
+                )
+                
+                stats["total_simulations"] += 1
+        
+        # Convert set to list for JSON serialization
+        stats["regimes_tested"] = list(stats["regimes_tested"])
+        
+        # Calculate best delta by regime from accumulated data
+        for regime in stats["regimes_tested"]:
+            best_delta, avg_pnl = self._find_best_delta_for_regime(symbol, regime)
+            stats["best_delta_by_regime"][regime] = {
+                "delta": best_delta,
+                "avg_pnl": avg_pnl
+            }
+        
+        self.last_retrain = datetime.now()
+        logger.info(f"Pretraining complete: {stats['total_simulations']} simulations, "
+                   f"regimes: {stats['regimes_tested']}")
+        
+        return stats
+    
+    def _calculate_simple_volatility(self, bars: List[Dict]) -> float:
+        """Calculate simple historical volatility from price bars."""
+        if len(bars) < 2:
+            return 0.25
+        
+        prices = [b['close'] for b in bars]
+        returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+        
+        if not returns:
+            return 0.25
+        
+        # Annualized volatility
+        std = np.std(returns)
+        return std * np.sqrt(252)
+    
+    def _simulate_option_trade(self,
+                               entry_price: float,
+                               exit_price: float,
+                               delta: float,
+                               right: str,
+                               iv: float,
+                               T: float) -> Tuple[float, bool]:
+        """
+        Simulate an option trade outcome.
+        
+        Returns:
+            Tuple of (pnl, was_assigned)
+        """
+        # Calculate strike based on delta
+        if right == "P":
+            strike = entry_price * (1 - delta)  # OTM put
+        else:
+            strike = entry_price * (1 + delta)  # OTM call
+        
+        # Calculate entry premium using Black-Scholes approximation
+        if right == "P":
+            entry_premium = OptionsPricer.put_price(entry_price, strike, T, iv)
+        else:
+            entry_premium = OptionsPricer.call_price(entry_price, strike, T, iv)
+        
+        # Determine if assigned (ITM at expiry)
+        if right == "P":
+            assigned = exit_price < strike
+            if assigned:
+                # Assignment: buy stock at strike, current value is exit_price
+                stock_pnl = exit_price - strike  # Negative if below strike
+                pnl = entry_premium + stock_pnl  # Premium + stock loss
+            else:
+                # Expires worthless: keep full premium
+                pnl = entry_premium
+        else:
+            assigned = exit_price > strike
+            if assigned:
+                # Assignment: sell stock at strike, could have sold at exit_price
+                stock_pnl = strike - exit_price  # Negative if above strike
+                pnl = entry_premium + stock_pnl
+            else:
+                pnl = entry_premium
+        
+        # Normalize to percentage of strike
+        pnl_pct = pnl / strike
+        
+        return pnl_pct, assigned
+    
+    def _find_best_delta_for_regime(self, symbol: str, regime: str) -> Tuple[float, float]:
+        """Find the best performing delta for a given regime."""
+        delta_performance = {}
+        
+        for key, performances in self.model['delta_performance'].items():
+            if f"{symbol}_" in key and regime in key:
+                # Extract delta from key
+                parts = key.split('_')
+                if len(parts) >= 2:
+                    try:
+                        delta = float(parts[1])
+                        avg_pnl = np.mean(performances) if performances else 0
+                        delta_performance[delta] = avg_pnl
+                    except (ValueError, IndexError):
+                        continue
+        
+        if delta_performance:
+            best_delta = max(delta_performance, key=delta_performance.get)
+            return best_delta, delta_performance[best_delta]
+        
+        return 0.30, 0.0  # Default
+    
     def extract_market_context(self, 
                              symbol: str,
                              current_price: float,
