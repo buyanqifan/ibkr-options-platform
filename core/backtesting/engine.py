@@ -251,9 +251,9 @@ class BacktestEngine:
                         # Calculate stock capital to release
                         stock_capital = stock_cost_basis.cost_basis * shares_sold
                         
-                        # Find and release stock position
+                        # Find and release stock position (release first unreleased stock allocation)
                         for pid, alloc in list(position_mgr.allocations.items()):
-                            if "_STOCK" in pid and alloc.symbol == trade.symbol and not alloc.released:
+                            if "_STOCK" in pid and not alloc.released:
                                 position_mgr.release_margin(pid, 0)  # Release with 0 P&L (stock P&L handled separately)
                                 logger.debug(f"Released stock capital: {pid}")
                                 break

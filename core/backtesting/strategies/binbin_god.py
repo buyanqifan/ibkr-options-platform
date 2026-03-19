@@ -887,8 +887,14 @@ class BinbinGodStrategy(BaseStrategy):
             if right == "P":
                 # Put assignment: we bought shares
                 shares_acquired = quantity * 100
+                
+                # Calculate weighted average cost basis (same logic as wheel.py)
+                total_stock_cost = self.stock_holding.shares * self.stock_holding.cost_basis
+                total_stock_cost += shares_acquired * strike
                 self.stock_holding.shares += shares_acquired
-                self.stock_holding.cost_basis = strike
+                if self.stock_holding.shares > 0:
+                    self.stock_holding.cost_basis = total_stock_cost / self.stock_holding.shares
+                
                 self.phase = "CC"  # Switch to Covered Call phase
                 
                 # IMPORTANT: Record which stock we're holding for CC phase
