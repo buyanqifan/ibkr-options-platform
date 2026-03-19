@@ -754,8 +754,27 @@ class BinbinGodStrategy(BaseStrategy):
             self.phase = "SP"
             return None
         
+        # CRITICAL: Check existing Call positions to prevent over-selling
+        # Count existing call contracts from portfolio
+        existing_call_contracts = 0
+        for pos in portfolio.get("positions", []):
+            if pos.get("trade_type") == "BINBIN_CALL" or (
+                pos.get("right") == "C" and pos.get("quantity", 0) < 0
+            ):
+                existing_call_contracts += abs(pos.get("quantity", 0))
+        
+        shares_already_covered = existing_call_contracts * 100
+        shares_available = self.stock_holding.shares - shares_already_covered
+        
+        if shares_available <= 0:
+            logger.info(
+                f"All shares already covered by existing calls. "
+                f"Shares: {self.stock_holding.shares}, Covered: {shares_already_covered}"
+            )
+            return None
+        
         # Calculate how many call contracts we can sell (1 contract per 100 shares)
-        max_contracts = self.stock_holding.shares // 100
+        max_contracts = shares_available // 100
         if max_contracts <= 0:
             return None
         
@@ -877,26 +896,45 @@ class BinbinGodStrategy(BaseStrategy):
         elif right == "C":
             # Call assignment: we sold shares
             shares_sold = quantity * 100
-            if shares_sold <= self.stock_holding.shares:
-                # Calculate realized stock P&L
-                stock_cost_basis = self.stock_holding.cost_basis * shares_sold
-                stock_proceeds = strike * shares_sold
-                stock_pnl = stock_proceeds - stock_cost_basis
-               
-                # Log complete P&L breakdown
-                option_pnl = position.get("pnl", 0)
-                total_trade_pnl = option_pnl + stock_pnl
-                logger.info(
-                    f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
-                    f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
-                    f"sold at ${strike:.2f}, {shares_sold} shares)"
+            
+            # CRITICAL: Defensive check - if no shares held, this is an error
+            if self.stock_holding.shares <= 0 or self.stock_holding.cost_basis <= 0:
+                logger.warning(
+                    f"Call assigned but no shares held! This indicates a bug. "
+                    f"shares={self.stock_holding.shares}, cost_basis={self.stock_holding.cost_basis:.2f}"
                 )
-               
-                self.stock_holding.shares -= shares_sold
-                if self.stock_holding.shares == 0:
-                    self.phase = "SP"  # Switch back to Sell Put phase
-            else:
-                logger.warning(f"Call assignment error: Trying to sell {shares_sold} shares but only have {self.stock_holding.shares}")
+                return
+            
+            # Limit shares_sold to actual shares held
+            actual_shares_sold = min(shares_sold, self.stock_holding.shares)
+            if actual_shares_sold != shares_sold:
+                logger.warning(
+                    f"Call assignment for {shares_sold} shares but only {self.stock_holding.shares} held. "
+                    f"Adjusting to {actual_shares_sold} shares."
+                )
+                shares_sold = actual_shares_sold
+            
+            # Calculate realized stock P&L
+            stock_cost_basis = self.stock_holding.cost_basis * shares_sold
+            stock_proceeds = strike * shares_sold
+            stock_pnl = stock_proceeds - stock_cost_basis
+           
+            # Log complete P&L breakdown
+            option_pnl = position.get("pnl", 0)
+            total_trade_pnl = option_pnl + stock_pnl
+            logger.info(
+                f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
+                f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
+                f"sold at ${strike:.2f}, {shares_sold} shares)"
+            )
+           
+            self.stock_holding.shares -= shares_sold
+            if self.stock_holding.shares == 0:
+                self.phase = "SP"  # Switch back to Sell Put phase
+                
+                # Clear the CC stock tracking since we no longer hold shares
+                if hasattr(self, '_current_cc_stock'):
+                    del self._current_cc_stock
     
     def on_trade_closed(self, trade: dict):
         """Called by engine when a trade is closed. Updates internal state and tracks performance.
