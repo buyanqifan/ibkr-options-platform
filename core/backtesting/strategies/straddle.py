@@ -104,6 +104,7 @@ class StrangleStrategy(BaseStrategy):
         underlying_price: float,
         iv: float,
         open_positions: list,
+        position_mgr=None,
     ) -> list[Signal]:
         max_pos = self.params.get("max_positions", 1)
         if len(open_positions) >= max_pos:

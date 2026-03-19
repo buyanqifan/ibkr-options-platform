@@ -59,8 +59,8 @@ class BullPutSpreadStrategy(BaseStrategy):
             if num_spreads <= 0:
                 return []  # No signal if insufficient capital
         else:
-            # Fallback to legacy calculation
-            available_capital = self.initial_capital * self.position_percentage
+            # Fallback to legacy calculation - use initial_capital with leverage
+            available_capital = self.initial_capital
             leveraged_capital = available_capital * self.max_leverage
             
             net_credit = short_premium - long_premium
@@ -145,8 +145,8 @@ class BearCallSpreadStrategy(BaseStrategy):
                 max_positions=min(max_pos, 10),
             )
         else:
-            # Fallback to legacy calculation
-            available_capital = self.initial_capital * self.position_percentage
+            # Fallback to legacy calculation - use initial_capital with leverage
+            available_capital = self.initial_capital
             leveraged_capital = available_capital * self.max_leverage
             
             net_credit = short_premium - long_premium
@@ -164,7 +164,7 @@ class BearCallSpreadStrategy(BaseStrategy):
             Signal(symbol=symbol, trade_type="BEAR_CALL_SHORT", right="C",
                    strike=short_strike, expiry=expiry_str, quantity=-quantity,
                    iv=iv, delta=short_delta, premium=short_premium,
-                   margin_requirement=margin_per_spread),  # Margin for the spread
+                   margin_requirement=estimated_margin_per_spread),  # Margin for the spread
             Signal(symbol=symbol, trade_type="BEAR_CALL_LONG", right="C",
                    strike=long_strike, expiry=expiry_str, quantity=quantity,
                    iv=iv, delta=0, premium=long_premium,

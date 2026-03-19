@@ -16,6 +16,11 @@ class IronCondorStrategy(BaseStrategy):
         self.put_delta = params.get("put_delta_target", 0.16)
         self.call_delta = params.get("call_delta_target", 0.16)
         self.wing_width = params.get("wing_width", 5.0)
+        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
+        self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999
+        # Check if profit target/stop loss are disabled (special value 999999 means disabled)
+        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
+        self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999
 
     def generate_signals(
         self,
@@ -85,8 +90,8 @@ class IronCondorStrategy(BaseStrategy):
                 max_positions=min(max_pos, 5),  # Cap at 5 spreads
             )
         else:
-            # Fallback to legacy calculation
-            available_capital = self.initial_capital * self.position_percentage
+            # Fallback to legacy calculation - use initial_capital with leverage
+            available_capital = self.initial_capital
             leveraged_capital = available_capital * self.max_leverage
             
             max_spread_width = self.wing_width

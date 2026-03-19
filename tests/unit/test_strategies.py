@@ -1,0 +1,530 @@
+"""
+Unit tests for Options Strategies.
+
+Tests cover:
+- BaseStrategy functionality
+- SellPutStrategy
+- CoveredCallStrategy
+- Spread strategies
+- IronCondorStrategy
+- Straddle/Strangle strategies
+- ML Delta optimization integration
+"""
+
+import pytest
+import numpy as np
+from datetime import datetime, timedelta
+
+from core.backtesting.strategies.base import BaseStrategy, Signal
+from core.backtesting.strategies.sell_put import SellPutStrategy
+from core.backtesting.strategies.covered_call import CoveredCallStrategy
+from core.backtesting.strategies.spreads import BullPutSpreadStrategy, BearCallSpreadStrategy
+from core.backtesting.strategies.iron_condor import IronCondorStrategy
+from core.backtesting.strategies.straddle import StraddleStrategy, StrangleStrategy
+
+
+@pytest.fixture
+def base_params():
+    """Base parameters for strategies."""
+    return {
+        'symbol': 'NVDA',
+        'initial_capital': 100000,
+        'dte_min': 30,
+        'dte_max': 45,
+        'delta_target': 0.30,
+        'profit_target_pct': 50,
+        'stop_loss_pct': 200,
+        'max_positions': 5,
+    }
+
+
+@pytest.fixture
+def ml_params(base_params):
+    """Parameters with ML Delta optimization enabled."""
+    params = base_params.copy()
+    params['ml_delta_optimization'] = True
+    params['ml_adoption_rate'] = 0.5
+    return params
+
+
+class TestBaseStrategy:
+    """Tests for BaseStrategy class."""
+    
+    def test_initialization(self, base_params):
+        """Test base strategy initialization."""
+        strategy = SellPutStrategy(base_params)
+        
+        assert strategy.params == base_params
+        assert strategy.dte_min == 30
+        assert strategy.dte_max == 45
+        assert strategy.delta_target == 0.30
+    
+    def test_select_expiry_dte(self, base_params):
+        """Test DTE selection."""
+        strategy = SellPutStrategy(base_params)
+        dte = strategy.select_expiry_dte()
+        
+        assert dte == 37.5  # Average of 30 and 45
+    
+    def test_select_strike_put(self, base_params):
+        """Test strike selection for put."""
+        strategy = SellPutStrategy(base_params)
+        
+        underlying_price = 150.0
+        iv = 0.25
+        T = 30 / 365.0
+        
+        strike = strategy.select_strike(underlying_price, iv, T, 'P')
+        
+        # For 0.30 delta put, strike should be below current price
+        assert strike < underlying_price
+        assert strike > underlying_price * 0.85  # Not too far OTM
+    
+    def test_select_strike_call(self, base_params):
+        """Test strike selection for call."""
+        strategy = SellPutStrategy(base_params)
+        
+        underlying_price = 150.0
+        iv = 0.25
+        T = 30 / 365.0
+        
+        strike = strategy.select_strike(underlying_price, iv, T, 'C')
+        
+        # For 0.30 delta call, strike should be above current price
+        assert strike > underlying_price
+        assert strike < underlying_price * 1.15  # Not too far OTM
+    
+    def test_ml_optimization_disabled_by_default(self, base_params):
+        """Test that ML optimization is disabled by default."""
+        strategy = SellPutStrategy(base_params)
+        
+        assert strategy.ml_delta_optimization is False
+        assert strategy.ml_integration is None
+
+
+class TestSellPutStrategy:
+    """Tests for SellPutStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = SellPutStrategy(base_params)
+        assert strategy.name == 'sell_put'
+    
+    def test_generate_signals_basic(self, base_params):
+        """Test basic signal generation."""
+        strategy = SellPutStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 1
+        assert signals[0].trade_type == 'SELL_PUT'
+        assert signals[0].right == 'P'
+        assert signals[0].quantity < 0  # Sell (negative)
+    
+    def test_generate_signals_max_positions(self, base_params):
+        """Test that signals stop at max positions."""
+        base_params['max_positions'] = 1
+        strategy = SellPutStrategy(base_params)
+        
+        # Simulate existing position
+        from dataclasses import dataclass
+        @dataclass
+        class MockPosition:
+            trade_type = 'SELL_PUT'
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[MockPosition()],
+        )
+        
+        assert len(signals) == 0  # Should not generate new signal
+    
+    def test_ml_optimization_enabled(self, ml_params):
+        """Test ML optimization integration."""
+        try:
+            strategy = SellPutStrategy(ml_params)
+            
+            if strategy.ml_delta_optimization:
+                assert strategy.ml_integration is not None
+                assert hasattr(strategy, 'get_optimized_delta')
+            else:
+                # ML initialization may fail due to dependencies
+                assert strategy.ml_integration is None
+        except ImportError:
+            pytest.skip("ML dependencies not available")
+    
+    def test_profit_target_disabled(self, base_params):
+        """Test profit target disabled flag."""
+        base_params['profit_target_pct'] = 999999
+        strategy = SellPutStrategy(base_params)
+        
+        assert strategy._profit_target_disabled is True
+    
+    def test_stop_loss_disabled(self, base_params):
+        """Test stop loss disabled flag."""
+        base_params['stop_loss_pct'] = 999999
+        strategy = SellPutStrategy(base_params)
+        
+        assert strategy._stop_loss_disabled is True
+
+
+class TestCoveredCallStrategy:
+    """Tests for CoveredCallStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = CoveredCallStrategy(base_params)
+        assert strategy.name == 'covered_call'
+    
+    def test_initialize_stock_position(self, base_params):
+        """Test stock position initialization."""
+        strategy = CoveredCallStrategy(base_params)
+        strategy.initialize_stock_position(150.0)
+        
+        assert strategy.stock_holding.shares > 0
+        assert strategy.stock_holding.cost_basis == 150.0
+    
+    def test_no_signals_without_shares(self, base_params):
+        """Test that no signals generated without shares."""
+        strategy = CoveredCallStrategy(base_params)
+        # Don't initialize shares
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 0
+    
+    def test_generate_signals_with_shares(self, base_params):
+        """Test signal generation with shares."""
+        strategy = CoveredCallStrategy(base_params)
+        strategy.initialize_stock_position(150.0)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 1
+        assert signals[0].trade_type == 'COVERED_CALL'
+        assert signals[0].right == 'C'
+    
+    def test_on_trade_closed_expiry(self, base_params):
+        """Test trade closed with expiry."""
+        strategy = CoveredCallStrategy(base_params)
+        strategy.initialize_stock_position(150.0)
+        
+        trade = {
+            'exit_reason': 'EXPIRY',
+            'entry_price': 2.0,
+            'quantity': -1,
+        }
+        
+        result = strategy.on_trade_closed(trade)
+        
+        assert result == 0.0  # No additional stock P&L
+        assert strategy.stock_holding.total_premium_collected > 0
+
+
+class TestBullPutSpreadStrategy:
+    """Tests for BullPutSpreadStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = BullPutSpreadStrategy(base_params)
+        assert strategy.name == 'bull_put_spread'
+    
+    def test_generate_signals(self, base_params):
+        """Test signal generation."""
+        strategy = BullPutSpreadStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 2  # Short and long leg
+        assert signals[0].trade_type == 'BULL_PUT_SHORT'
+        assert signals[1].trade_type == 'BULL_PUT_LONG'
+        assert signals[0].strike > signals[1].strike
+    
+    def test_spread_width(self, base_params):
+        """Test spread width configuration."""
+        base_params['spread_width'] = 10.0
+        strategy = BullPutSpreadStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        spread = signals[0].strike - signals[1].strike
+        assert spread == pytest.approx(10.0, rel=0.1)
+
+
+class TestBearCallSpreadStrategy:
+    """Tests for BearCallSpreadStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = BearCallSpreadStrategy(base_params)
+        assert strategy.name == 'bear_call_spread'
+    
+    def test_generate_signals(self, base_params):
+        """Test signal generation."""
+        strategy = BearCallSpreadStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 2
+        assert signals[0].trade_type == 'BEAR_CALL_SHORT'
+        assert signals[1].trade_type == 'BEAR_CALL_LONG'
+        assert signals[1].strike > signals[0].strike
+
+
+class TestIronCondorStrategy:
+    """Tests for IronCondorStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = IronCondorStrategy(base_params)
+        assert strategy.name == 'iron_condor'
+    
+    def test_generate_signals(self, base_params):
+        """Test signal generation."""
+        strategy = IronCondorStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 4  # 4 legs
+        
+        # Check leg types
+        leg_types = [s.trade_type for s in signals]
+        assert 'IRON_CONDOR_SP' in leg_types
+        assert 'IRON_CONDOR_LP' in leg_types
+        assert 'IRON_CONDOR_SC' in leg_types
+        assert 'IRON_CONDOR_LC' in leg_types
+    
+    def test_put_side_structure(self, base_params):
+        """Test put side structure."""
+        strategy = IronCondorStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        put_signals = [s for s in signals if s.right == 'P']
+        assert len(put_signals) == 2
+        
+        short_put = [s for s in put_signals if s.quantity < 0][0]
+        long_put = [s for s in put_signals if s.quantity > 0][0]
+        
+        assert short_put.strike > long_put.strike
+    
+    def test_call_side_structure(self, base_params):
+        """Test call side structure."""
+        strategy = IronCondorStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        call_signals = [s for s in signals if s.right == 'C']
+        assert len(call_signals) == 2
+        
+        short_call = [s for s in call_signals if s.quantity < 0][0]
+        long_call = [s for s in call_signals if s.quantity > 0][0]
+        
+        assert long_call.strike > short_call.strike
+
+
+class TestStraddleStrategy:
+    """Tests for StraddleStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = StraddleStrategy(base_params)
+        assert strategy.name == 'straddle'
+    
+    def test_generate_signals(self, base_params):
+        """Test signal generation."""
+        strategy = StraddleStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 2
+        assert signals[0].trade_type == 'STRADDLE_PUT'
+        assert signals[1].trade_type == 'STRADDLE_CALL'
+        
+        # Both should be ATM
+        assert signals[0].strike == signals[1].strike
+
+
+class TestStrangleStrategy:
+    """Tests for StrangleStrategy."""
+    
+    def test_name(self, base_params):
+        """Test strategy name."""
+        strategy = StrangleStrategy(base_params)
+        assert strategy.name == 'strangle'
+    
+    def test_generate_signals(self, base_params):
+        """Test signal generation."""
+        strategy = StrangleStrategy(base_params)
+        
+        signals = strategy.generate_signals(
+            current_date='2024-01-15',
+            underlying_price=150.0,
+            iv=0.25,
+            open_positions=[],
+        )
+        
+        assert len(signals) == 2
+        assert signals[0].trade_type == 'STRANGLE_PUT'
+        assert signals[1].trade_type == 'STRANGLE_CALL'
+        
+        # Put strike should be below call strike
+        assert signals[0].strike < signals[1].strike
+
+
+class TestSignal:
+    """Tests for Signal dataclass."""
+    
+    def test_signal_creation(self):
+        """Test signal creation."""
+        signal = Signal(
+            symbol='NVDA',
+            trade_type='SELL_PUT',
+            right='P',
+            strike=145.0,
+            expiry='20240215',
+            quantity=-1,
+            iv=0.25,
+            delta=-0.30,
+            premium=2.5,
+        )
+        
+        assert signal.symbol == 'NVDA'
+        assert signal.trade_type == 'SELL_PUT'
+        assert signal.right == 'P'
+        assert signal.strike == 145.0
+        assert signal.quantity == -1
+    
+    def test_signal_defaults(self):
+        """Test signal default values."""
+        signal = Signal(
+            symbol='NVDA',
+            trade_type='SELL_PUT',
+            right='P',
+            strike=145.0,
+            expiry='20240215',
+            quantity=-1,
+            iv=0.25,
+            delta=-0.30,
+            premium=2.5,
+        )
+        
+        assert signal.underlying_price == 0.0
+        assert signal.margin_requirement is None
+
+
+class TestMLDeltaIntegration:
+    """Tests for ML Delta integration in strategies."""
+    
+    def test_get_optimized_delta_without_ml(self, base_params):
+        """Test get_optimized_delta returns default when ML disabled."""
+        strategy = SellPutStrategy(base_params)
+        
+        delta = strategy.get_optimized_delta(
+            underlying_price=150.0,
+            iv=0.25,
+            right='P',
+        )
+        
+        assert delta == strategy.delta_target
+    
+    def test_pretrain_ml_model_disabled(self, base_params):
+        """Test pretrain_ml_model when ML disabled."""
+        strategy = SellPutStrategy(base_params)
+        
+        bars = [{'date': f'2024-01-{i:02d}', 'close': 100 + i} for i in range(1, 100)]
+        
+        result = strategy.pretrain_ml_model(bars)
+        
+        assert result['status'] == 'skipped'
+        assert result['reason'] == 'ml_not_enabled'
+    
+    def test_pretrain_ml_model_insufficient_data(self, ml_params):
+        """Test pretrain_ml_model with insufficient data."""
+        try:
+            strategy = SellPutStrategy(ml_params)
+            
+            if not strategy.ml_delta_optimization:
+                pytest.skip("ML not available")
+            
+            bars = [{'date': f'2024-01-{i:02d}', 'close': 100} for i in range(1, 30)]
+            
+            result = strategy.pretrain_ml_model(bars)
+            
+            assert result['status'] == 'skipped'
+            assert result['reason'] == 'insufficient_data'
+        except ImportError:
+            pytest.skip("ML dependencies not available")
+    
+    def test_pretrain_ml_model_success(self, ml_params):
+        """Test successful pretrain_ml_model."""
+        try:
+            strategy = SellPutStrategy(ml_params)
+            
+            if not strategy.ml_delta_optimization:
+                pytest.skip("ML not available")
+            
+            # Generate sample data
+            np.random.seed(42)
+            prices = 150 * np.cumprod(1 + np.random.normal(0, 0.02, 150))
+            bars = [{'date': f'2024-{i//30+1:02d}-{i%30+1:02d}', 'close': p} for i, p in enumerate(prices)]
+            
+            result = strategy.pretrain_ml_model(bars, iv_estimate=0.25)
+            
+            assert result['status'] == 'success'
+            assert result['put_simulations'] > 0
+            assert result['call_simulations'] > 0
+        except ImportError:
+            pytest.skip("ML dependencies not available")
