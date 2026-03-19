@@ -35,19 +35,33 @@ class IronCondorStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
-        # Short put (OTM)
-        saved = self.delta_target
-        self.delta_target = self.put_delta
-        short_put_strike = self.select_strike(underlying_price, iv, T, "P")
-        self.delta_target = saved
+        # Short put (OTM) - with ML optimization if enabled
+        if self.ml_delta_optimization:
+            optimized_put_delta = self.get_optimized_delta(underlying_price, iv, "P")
+            original_delta = self.delta_target
+            self.delta_target = optimized_put_delta
+            short_put_strike = self.select_strike(underlying_price, iv, T, "P")
+            self.delta_target = original_delta
+        else:
+            saved = self.delta_target
+            self.delta_target = self.put_delta
+            short_put_strike = self.select_strike(underlying_price, iv, T, "P")
+            self.delta_target = saved
         short_put_premium = OptionsPricer.put_price(underlying_price, short_put_strike, T, iv)
         short_put_delta = OptionsPricer.delta(underlying_price, short_put_strike, T, iv, "P")
 
-        # Short call (OTM)
-        saved = self.delta_target
-        self.delta_target = self.call_delta
-        short_call_strike = self.select_strike(underlying_price, iv, T, "C")
-        self.delta_target = saved
+        # Short call (OTM) - with ML optimization if enabled
+        if self.ml_delta_optimization:
+            optimized_call_delta = self.get_optimized_delta(underlying_price, iv, "C")
+            original_delta = self.delta_target
+            self.delta_target = optimized_call_delta
+            short_call_strike = self.select_strike(underlying_price, iv, T, "C")
+            self.delta_target = original_delta
+        else:
+            saved = self.delta_target
+            self.delta_target = self.call_delta
+            short_call_strike = self.select_strike(underlying_price, iv, T, "C")
+            self.delta_target = saved
         short_call_premium = OptionsPricer.call_price(underlying_price, short_call_strike, T, iv)
         short_call_delta = OptionsPricer.delta(underlying_price, short_call_strike, T, iv, "C")
 

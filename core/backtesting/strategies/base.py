@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
+import logging
 
 
 @dataclass
@@ -35,6 +36,33 @@ class BaseStrategy(ABC):
         self.max_risk_per_trade = params.get("max_risk_per_trade", 0.02)  # 2% risk per trade
         # Position management: max_leverage only (position_percentage removed)
         self.max_leverage = params.get("max_leverage", 1.0)  # No leverage by default
+        
+        # ML Delta optimization parameters
+        self.ml_delta_optimization = params.get("ml_delta_optimization", False)
+        self.ml_adoption_rate = params.get("ml_adoption_rate", 0.5)
+        self.ml_integration = None
+        self.logger = logging.getLogger(f"strategy_{self.__class__.__name__}")
+        
+        # Initialize ML integration if enabled
+        if self.ml_delta_optimization:
+            try:
+                from core.ml.delta_strategy_integration import BinGodDeltaIntegration, AdaptiveDeltaStrategy
+                self.ml_integration = BinGodDeltaIntegration(
+                    ml_optimization_enabled=True,
+                    fallback_delta=self.delta_target,
+                    config=params.get("ml_config")
+                )
+                self.adaptive_strategy = AdaptiveDeltaStrategy(
+                    ml_integration=self.ml_integration,
+                    adoption_rate=self.ml_adoption_rate
+                )
+                self.logger.info("ML Delta optimizer initialized for strategy")
+            except ImportError as e:
+                self.logger.warning(f"ML Delta optimization not available: {e}")
+                self.ml_delta_optimization = False
+            except Exception as e:
+                self.logger.warning(f"ML Delta optimization initialization failed: {e}")
+                self.ml_delta_optimization = False
 
     @property
     @abstractmethod
@@ -115,6 +143,70 @@ class BaseStrategy(ABC):
         if underlying_price > 100:
             return round(mid)
         return round(mid * 2) / 2
+
+    def get_optimized_delta(self, underlying_price: float, iv: float, right: str, 
+                            cost_basis: float = 0.0) -> float:
+        """Get delta value, using ML optimization if enabled.
+        
+        Args:
+            underlying_price: Current underlying price
+            iv: Implied volatility
+            right: Option type ('P' for put, 'C' for call)
+            cost_basis: Cost basis for position (relevant for covered calls)
+            
+        Returns:
+            float: Optimized delta value
+        """
+        if not self.ml_delta_optimization or not self.ml_integration:
+            return self.delta_target
+        
+        try:
+            # Use ML integration to get optimized delta
+            T = self.select_expiry_dte() / 365.0
+            
+            if right == "P":
+                ml_result = self.ml_integration.optimize_put_delta(
+                    symbol=self.params.get("symbol", ""),
+                    current_price=underlying_price,
+                    cost_basis=cost_basis,
+                    bars=[],
+                    options_data=[],
+                    iv=iv,
+                    time_to_expiry=T
+                )
+            else:
+                ml_result = self.ml_integration.optimize_call_delta(
+                    symbol=self.params.get("symbol", ""),
+                    current_price=underlying_price,
+                    cost_basis=cost_basis,
+                    bars=[],
+                    options_data=[],
+                    iv=iv,
+                    time_to_expiry=T
+                )
+            
+            # Use adaptive strategy to combine traditional and ML deltas
+            if hasattr(self, 'adaptive_strategy') and ml_result:
+                final_delta = self.adaptive_strategy.select_put_delta(
+                    traditional_delta=self.delta_target,
+                    ml_result=ml_result
+                ) if right == "P" else self.adaptive_strategy.select_call_delta(
+                    traditional_delta=self.delta_target,
+                    ml_result=ml_result
+                )
+                self.logger.info(
+                    f"ML optimized {right} delta: traditional={self.delta_target:.3f}, "
+                    f"ml={ml_result.optimal_delta:.3f}, final={final_delta:.3f}"
+                )
+                return final_delta
+            elif ml_result and ml_result.confidence > 0.7:
+                self.logger.info(f"ML delta (high confidence): {ml_result.optimal_delta:.3f}")
+                return ml_result.optimal_delta
+                
+        except Exception as e:
+            self.logger.warning(f"ML delta optimization failed, using traditional: {e}")
+        
+        return self.delta_target
 
     def select_expiry_dte(self) -> float:
         """Return target DTE in the middle of the range."""

@@ -33,7 +33,13 @@ class BullPutSpreadStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
+        # Get optimized delta for short put (ML or traditional)
+        optimized_delta = self.get_optimized_delta(underlying_price, iv, "P")
+        original_delta = self.delta_target
+        self.delta_target = optimized_delta
         short_strike = self.select_strike(underlying_price, iv, T, "P")
+        self.delta_target = original_delta  # Restore original
+        
         long_strike = short_strike - self.spread_width
 
         short_premium = OptionsPricer.put_price(underlying_price, short_strike, T, iv)
@@ -115,7 +121,13 @@ class BearCallSpreadStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
+        # Get optimized delta for short call (ML or traditional)
+        optimized_delta = self.get_optimized_delta(underlying_price, iv, "C")
+        original_delta = self.delta_target
+        self.delta_target = optimized_delta
         short_strike = self.select_strike(underlying_price, iv, T, "C")
+        self.delta_target = original_delta  # Restore original
+        
         long_strike = short_strike + self.spread_width
 
         short_premium = OptionsPricer.call_price(underlying_price, short_strike, T, iv)

@@ -133,6 +133,24 @@ layout = html.Div([
                     dbc.Label("Max Positions"),
                     dbc.Input(id="bt-max-positions", type="number", value=5, min=1, max=50, step=1, size="sm", className="mb-3"),  # Default 5 for diversification
                     
+                    # ML Delta Optimization
+                    html.Hr(),
+                    html.H6("ML Delta Optimization", className="fw-bold mb-2"),
+                    
+                    dcc.Checklist(
+                        id="bt-ml-delta",
+                        options=[{"label": " Enable ML Delta Optimization", "value": True}],
+                        value=[],
+                        inline=True,
+                        className="mb-2",
+                        style={"color": "#fff"},
+                    ),
+                    
+                    html.Div(id="ml-delta-params-container", children=[
+                        dbc.Label("ML Adoption Rate (0.0-1.0)"),
+                        dbc.Input(id="bt-ml-adoption-rate", type="number", value=0.5, step=0.1, min=0.0, max=1.0, size="sm", className="mb-3"),
+                    ], className="d-none"),
+                    
                     # Benchmark Comparison
                     html.Hr(),
                     html.H6("Benchmark Comparison", className="fw-bold mb-2"),
@@ -234,6 +252,17 @@ def toggle_delta_config(strategy):
 
 
 @callback(
+    Output("ml-delta-params-container", "className"),
+    Input("bt-ml-delta", "value"),
+)
+def toggle_ml_delta_params(ml_delta_enabled):
+    """Show/hide ML delta parameters when ML optimization is enabled."""
+    if ml_delta_enabled and True in ml_delta_enabled:
+        return "d-block"
+    return "d-none"
+
+
+@callback(
     Output("bt-results-store", "data"),
     Output("bt-results-container", "children"),
     Input("bt-run-btn", "n_clicks"),
@@ -255,13 +284,16 @@ def toggle_delta_config(strategy):
     State("bt-disable-profit-target", "value"),
     State("bt-disable-stop-loss", "value"),
     State("bt-use-synthetic", "value"),
+    State("bt-ml-delta", "value"),
+    State("bt-ml-adoption-rate", "value"),
     prevent_initial_call=True,
 )
 def run_backtest(
     n_clicks, strategy, symbol, start_date, end_date,
     capital, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
     put_delta, call_delta, max_positions, benchmarks,
-    disable_profit_target, disable_stop_loss, use_synthetic
+    disable_profit_target, disable_stop_loss, use_synthetic,
+    ml_delta, ml_adoption_rate
 ):
     if not symbol or not start_date or not end_date:
         return no_update, no_update
@@ -297,6 +329,9 @@ def run_backtest(
         "put_delta": put_delta or 0.30,
         "call_delta": call_delta or 0.30,
         "max_positions": max_positions or 10,  # Default 10 for diversification
+        # ML Delta optimization parameters
+        "ml_delta_optimization": bool(ml_delta and True in ml_delta),
+        "ml_adoption_rate": ml_adoption_rate or 0.5,
     }
 
     # Get benchmark data if requested

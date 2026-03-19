@@ -79,7 +79,16 @@ class CoveredCallStrategy(BaseStrategy):
             return []
         
         T = self.select_expiry_dte() / 365.0
+        
+        # Get optimized delta (ML or traditional) - use cost basis for ML optimization
+        cost_basis = self.stock_holding.cost_basis if self.stock_holding.cost_basis > 0 else underlying_price
+        optimized_delta = self.get_optimized_delta(underlying_price, iv, "C", cost_basis)
+        original_delta = self.delta_target
+        self.delta_target = optimized_delta
+        
         strike = self.select_strike(underlying_price, iv, T, "C")
+        self.delta_target = original_delta  # Restore original
+        
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
         

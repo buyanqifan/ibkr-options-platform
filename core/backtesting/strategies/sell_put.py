@@ -31,7 +31,15 @@ class SellPutStrategy(BaseStrategy):
             return []
 
         T = self.select_expiry_dte() / 365.0
+        
+        # Get optimized delta (ML or traditional)
+        optimized_delta = self.get_optimized_delta(underlying_price, iv, "P")
+        original_delta = self.delta_target
+        self.delta_target = optimized_delta
+        
         strike = self.select_strike(underlying_price, iv, T, "P")
+        self.delta_target = original_delta  # Restore original
+        
         premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
 

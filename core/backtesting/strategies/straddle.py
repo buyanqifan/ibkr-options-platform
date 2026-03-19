@@ -115,17 +115,31 @@ class StrangleStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
-        # OTM put
-        saved = self.delta_target
-        self.delta_target = self.put_delta
-        put_strike = self.select_strike(underlying_price, iv, T, "P")
-        self.delta_target = saved
+        # OTM put - with ML optimization if enabled
+        if self.ml_delta_optimization:
+            optimized_put_delta = self.get_optimized_delta(underlying_price, iv, "P")
+            original_delta = self.delta_target
+            self.delta_target = optimized_put_delta
+            put_strike = self.select_strike(underlying_price, iv, T, "P")
+            self.delta_target = original_delta
+        else:
+            saved = self.delta_target
+            self.delta_target = self.put_delta
+            put_strike = self.select_strike(underlying_price, iv, T, "P")
+            self.delta_target = saved
 
-        # OTM call
-        saved = self.delta_target
-        self.delta_target = self.call_delta
-        call_strike = self.select_strike(underlying_price, iv, T, "C")
-        self.delta_target = saved
+        # OTM call - with ML optimization if enabled
+        if self.ml_delta_optimization:
+            optimized_call_delta = self.get_optimized_delta(underlying_price, iv, "C")
+            original_delta = self.delta_target
+            self.delta_target = optimized_call_delta
+            call_strike = self.select_strike(underlying_price, iv, T, "C")
+            self.delta_target = original_delta
+        else:
+            saved = self.delta_target
+            self.delta_target = self.call_delta
+            call_strike = self.select_strike(underlying_price, iv, T, "C")
+            self.delta_target = saved
 
         put_premium = OptionsPricer.put_price(underlying_price, put_strike, T, iv)
         call_premium = OptionsPricer.call_price(underlying_price, call_strike, T, iv)
