@@ -1,7 +1,7 @@
 """Binbin God Strategy Backtester Page - MAG7 intelligent Wheel strategy."""
 
 import dash
-from dash import html, dcc, callback, Output, Input, State, no_update
+from dash import html, dcc, callback, Output, Input, State, no_update, clientside_callback
 import dash_bootstrap_components as dbc
 import pandas as pd
 from app.components.tables import metric_card, create_data_table
@@ -288,6 +288,9 @@ layout = dbc.Container([
                         ),
                     ], className="mb-3"),
                     
+                    # Loading status display
+                    html.Div(id="bbg-loading-status", className="mb-3"),
+                    
                     # Run Button
                     dbc.Button([
                         html.I(className="bi bi-play-fill me-2"),
@@ -301,22 +304,52 @@ layout = dbc.Container([
         dbc.Col([
             create_mag7_analysis_placeholder(),
             
-            # Results Container
-            html.Div(id="binbin-results-container", children=[
+            # Loading status indicator
+            html.Div(id="bbg-loading-indicator", style={"display": "none"}, children=[
                 dbc.Card([
                     dbc.CardBody([
                         html.Div([
-                            html.I(className="bi bi-graph-up me-2"),
-                            "Run a backtest to see results",
-                        ], className="text-center text-muted py-5"),
+                            html.I(className="bi bi-hourglass-split me-2", style={"fontSize": "2rem"}),
+                            html.H4("Running BinbinGod Backtest...", className="mt-2"),
+                            html.P("This may take 30-60 seconds for MAG7 analysis", className="text-muted"),
+                            dbc.Progress(value=100, striped=True, animated=True, className="mt-3"),
+                        ], className="text-center py-4"),
+                    ]),
+                ], className="bg-dark border-success"),
+            ], className="mb-3"),
+            
+            # Results Container with loading animation
+            dcc.Loading(
+                id="binbin-loading",
+                type="circle",
+                children=html.Div(id="binbin-results-container", children=[
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.I(className="bi bi-graph-up me-2"),
+                                "Run a backtest to see results",
+                            ], className="text-center text-muted py-5"),
+                        ]),
                     ]),
                 ]),
-            ]),
+                overlay_style={"visibility": "visible", "opacity": 0.9, "backgroundColor": "#1a1a2e"},
+            ),
             
             # Hidden store for results data
             dcc.Store(id="binbin-results-store", data={}),
         ], md=8),
     ]),
+    
+    # Custom CSS for loading animation
+    html.Style("""
+    .dash-loading {
+        background-color: #1a1a2e !important;
+    }
+    .dash-spinner circle {
+        stroke: #4CAF50 !important;
+        stroke-width: 4;
+    }
+    """)
 ])
 
 
@@ -637,3 +670,17 @@ def run_binbin_backtest(
     
     return result, content, no_update
 
+# Clientside callback to show loading indicator immediately when button is clicked
+clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks > 0) {
+            return {'display': 'block'};
+        }
+        return {'display': 'none'};
+    }
+    """,
+    Output('bbg-loading-indicator', 'style'),
+    Input('bbg-run-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
