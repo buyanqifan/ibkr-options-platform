@@ -1,7 +1,10 @@
 """Reusable chart components for Plotly Dash."""
 
+import logging
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+logger = logging.getLogger(__name__)
 
 
 def create_candlestick_chart(
