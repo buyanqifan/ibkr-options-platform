@@ -408,18 +408,25 @@ class MLExitOptimizer:
             self.model = None
     
     @staticmethod
-    def prepare_training_data(trades_history: list[dict], market_data: dict) -> pd.DataFrame:
+    def prepare_training_data(
+        trades_history: list[dict],
+        market_data: dict,
+        use_real_greeks: bool = True
+    ) -> pd.DataFrame:
         """Prepare training data from historical trades.
         
         Args:
             trades_history: List of completed trade dictionaries
             market_data: Historical market data for feature calculation
+            use_real_greeks: If True, calculate real Greeks using Black-Scholes
             
         Returns:
             DataFrame with features and outcome labels
         """
         if not trades_history:
             return pd.DataFrame()
+        
+        from core.ml.market_data import MarketDataCalculator
         
         training_data = []
         
@@ -435,28 +442,55 @@ class MLExitOptimizer:
             # Get market data at entry
             market_at_entry = market_data.get(symbol, {}).get(entry_date, {})
             
-            # Calculate features (simplified version - would need full data)
+            # Calculate Greeks if enabled
+            if use_real_greeks:
+                greeks = MarketDataCalculator.calculate_option_greeks_for_trade(
+                    trade=trade,
+                    market_data=market_at_entry,
+                    current_date=entry_date
+                )
+                delta = abs(greeks.get('delta', 0.3))
+                gamma = greeks.get('gamma', 0.05)
+                vega = greeks.get('vega', 0.2)
+            else:
+                # Fallback to estimates
+                delta = abs(trade.get('delta_at_entry', 0.3))
+                gamma = 0.05
+                vega = 0.2
+            
+            # Calculate features with real data
             features = {
+                # Volatility - now with real IV Rank
                 'iv_rank': market_at_entry.get('iv_rank', 50),
-                'historical_volatility': market_at_entry.get('hv', 0.3) * 100,
+                'historical_volatility': market_at_entry.get('historical_volatility', 30),
                 'iv_percentile': market_at_entry.get('iv_percentile', 50),
+                
+                # Time
                 'dte': trade.get('days_to_expiry', 30),
                 'dte_percent': 1.0,  # At entry
-                'theta_decay': trade.get('premium', 0) * 0.05 / trade.get('days_to_expiry', 30),
+                'theta_decay': trade.get('premium', 0) * 0.05 / max(trade.get('days_to_expiry', 30), 1),
+                
+                # Price - now with real momentum
                 'underlying_price': trade.get('underlying_entry', 0),
                 'price_momentum_5d': market_at_entry.get('momentum_5d', 0),
                 'price_momentum_10d': market_at_entry.get('momentum_10d', 0),
                 'price_vs_ma20': market_at_entry.get('vs_ma20', 0),
                 'price_vs_ma50': market_at_entry.get('vs_ma50', 0),
-                'delta': abs(trade.get('delta_at_entry', 0.3)),
-                'gamma': 0.05,  # Would need to calculate
-                'vega': 0.2,    # Would need to calculate
+                
+                # Option - now with real Greeks
+                'delta': delta,
+                'gamma': gamma,
+                'vega': vega,
                 'delta_change_ratio': 1.0,  # At entry
+                
+                # P&L
                 'current_pnl_pct': 0,  # At entry
                 'days_held': 0,  # At entry
                 'premium_received': trade.get('premium', 0) * 100,
                 'strike_distance_pct': trade.get('strike_distance_pct', 0),
-                'market_regime': 1 if 20 <= market_at_entry.get('iv_rank', 50) <= 50 else (0 if market_at_entry.get('iv_rank', 50) < 20 else 2),
+                
+                # Regime
+                'market_regime': market_at_entry.get('market_regime', 1),
             }
             
             # Label: 1 = profitable trade, 0 = loss

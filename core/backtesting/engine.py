@@ -500,23 +500,42 @@ class BacktestEngine:
         # Train ML exit optimizer if enabled and we have trades
         if ml_exit_optimizer and trades:
             try:
-                # Prepare training data from this backtest
-                market_data_for_training = {
-                    symbol: {
-                        bar["date"][:10]: {
-                            'price': bar["close"],
-                            'hv': hv[i] if i < len(hv) else 0.3,
-                            'iv_rank': 50,  # Would need real IV rank calculation
-                            'momentum_5d': 0,  # Would calculate from price history
-                            'momentum_10d': 0,
-                            'vs_ma20': 0,
-                            'vs_ma50': 0,
-                        }
-                        for i, bar in enumerate(bars)
-                    }
-                }
+                from core.ml.market_data import MarketDataCalculator
                 
-                training_df = MLExitOptimizer.prepare_training_data(trades, market_data_for_training)
+                # Prepare training data from this backtest with real market data
+                market_data_for_training = {}
+                
+                # Build complete market data for each day
+                for i, bar in enumerate(bars):
+                    date_str = bar["date"][:10]
+                    
+                    # Build IV data if available (would come from IBKR in live trading)
+                    iv_data = {
+                        'current_iv': hv[i] if i < len(hv) else 0.3,
+                        'iv_52w_high': max(hv[:i+1]) * 1.2 if i > 0 else 0.4,
+                        'iv_52w_low': min(hv[:i+1]) * 0.8 if i > 0 else 0.2,
+                        'historical_ivs': hv[:i+1] if i > 0 else [0.3],
+                    }
+                    
+                    # Calculate real market metrics
+                    market_snapshot = MarketDataCalculator.build_market_data_snapshot(
+                        prices=prices,
+                        current_idx=i,
+                        iv_data=iv_data,
+                        risk_free_rate=0.05
+                    )
+                    
+                    market_data_for_training[date_str] = market_snapshot
+                
+                # Prepare complete market data structure
+                market_data_for_training = {symbol: market_data_for_training}
+                
+                # Prepare training data with real Greeks and momentum
+                training_df = MLExitOptimizer.prepare_training_data(
+                    trades,
+                    market_data_for_training,
+                    use_real_greeks=True  # Use Black-Scholes Greeks
+                )
                 
                 if len(training_df) > 10:
                     # Train model
