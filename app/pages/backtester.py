@@ -212,7 +212,26 @@ layout = html.Div([
                             "border": "1px solid rgba(255, 255, 255, 0.2)",
                         },
                     ),
-                    
+
+                    # ML Position Optimization
+                    html.Hr(),
+                    html.H6("ML Position Optimization", className="fw-bold mb-2"),
+
+                    dcc.Checklist(
+                        id="bt-ml-position",
+                        options=[{"label": " Enable ML Position Sizing", "value": True}],
+                        value=[],
+                        inline=True,
+                        className="mb-2",
+                        style={
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.08)",
+                            "padding": "10px 14px",
+                            "borderRadius": "4px",
+                            "border": "1px solid rgba(255, 255, 255, 0.2)",
+                        },
+                    ),
+
                     # Benchmark Comparison
                     html.Hr(),
                     html.H6("Benchmark Comparison", className="fw-bold mb-2"),
@@ -290,6 +309,24 @@ layout = html.Div([
                         ],
                         className="d-none",  # Hidden by default
                     ),
+                    
+                    # Export button (shown after successful backtest)
+                    html.Div(
+                        id="bt-export-container",
+                        children=[
+                            dbc.Button(
+                                "📤 Export for AI Analysis", 
+                                id="bt-export-btn",
+                                color="info", 
+                                className="w-100 mt-2",
+                                n_clicks=0,
+                            ),
+                        ],
+                        className="d-none",  # Hidden by default
+                    ),
+                    
+                    # Download component
+                    dcc.Download(id="bt-download"),
                 ]),
             ], className="shadow-sm"),
         ], md=3),
@@ -390,6 +427,7 @@ def toggle_ml_dte_with_delta(ml_delta_enabled):
     Output("bt-params-store", "data"),
     Output("bt-results-container", "children"),
     Output("bt-save-container", "className"),
+    Output("bt-export-container", "className"),
     Input("bt-run-btn", "n_clicks"),
     State("bt-strategy", "value"),
     State("bt-symbol", "value"),
@@ -413,6 +451,7 @@ def toggle_ml_dte_with_delta(ml_delta_enabled):
     State("bt-ml-delta", "value"),
     State("bt-ml-dte", "value"),
     State("bt-ml-adoption-rate", "value"),
+    State("bt-ml-position", "value"),
     prevent_initial_call=True,
 )
 def run_backtest(
@@ -420,15 +459,15 @@ def run_backtest(
     capital, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
     put_delta, call_delta, max_positions, benchmarks,
     disable_profit_target, disable_stop_loss, use_synthetic,
-    ml_exit, ml_delta, ml_dte, ml_adoption_rate
+    ml_exit, ml_delta, ml_dte, ml_adoption_rate, ml_position
 ):
     if not symbol or not start_date or not end_date:
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
     symbol = symbol.strip().upper()
 
     services = get_services()
     if not services:
-        return {}, {}, html.P("Services not initialized", className="text-warning"), "d-none"
+        return {}, {}, html.P("Services not initialized", className="text-warning"), "d-none", "d-none"
 
     engine = services["backtest_engine"]
     data_client = services.get("data_client")
@@ -462,6 +501,8 @@ def run_backtest(
         "ml_adoption_rate": ml_adoption_rate or 0.5,
         # ML Exit optimization parameters
         "ml_exit_optimization": bool(ml_exit and True in ml_exit),
+        # ML Position optimization parameters
+        "ml_position_optimization": bool(ml_position and True in ml_position),
     }
 
     # Get benchmark data if requested

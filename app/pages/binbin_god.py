@@ -248,6 +248,20 @@ layout = dbc.Container([
                         }
                     ),
 
+                    # ML Position Optimization Toggle
+                    dbc.Label("Enable ML Position Sizing"),
+                    dbc.Switch(
+                        id="bbg-ml-position-optimization",
+                        value=False,
+                        label="Enable ML-powered dynamic position sizing based on market conditions",
+                        className="mb-3",
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "color": "#e0e0e0",
+                        }
+                    ),
+
                     # ML Adoption Rate (shown when ML is enabled)
                     html.Div([
                         dbc.Label("ML Adoption Rate"),
@@ -491,8 +505,9 @@ def toggle_custom_stocks_input(stock_pool):
     Input("bbg-ml-optimization", "value"),
     Input("bbg-ml-dte-optimization", "value"),
     Input("bbg-ml-roll-optimization", "value"),
+    Input("bbg-ml-position-optimization", "value"),
 )
-def toggle_ml_controls(ml_delta_enabled, ml_dte_enabled, ml_roll_enabled):
+def toggle_ml_controls(ml_delta_enabled, ml_dte_enabled, ml_roll_enabled, ml_position_enabled):
     """Show/hide ML optimization controls and hide traditional params when ML is enabled.
 
     When any ML optimization is enabled:
@@ -500,7 +515,7 @@ def toggle_ml_controls(ml_delta_enabled, ml_dte_enabled, ml_roll_enabled):
     - Hide traditional DTE range (ML will optimize DTE)
     - Hide traditional Delta targets (ML will optimize Delta)
     """
-    ml_any_enabled = ml_delta_enabled or ml_dte_enabled or ml_roll_enabled
+    ml_any_enabled = ml_delta_enabled or ml_dte_enabled or ml_roll_enabled or ml_position_enabled
 
     if ml_any_enabled:
         # Show ML controls
@@ -575,6 +590,7 @@ def update_ml_adoption_rate_slider(rate_text):
     State("bbg-ml-optimization", "value"),
     State("bbg-ml-dte-optimization", "value"),
     State("bbg-ml-roll-optimization", "value"),
+    State("bbg-ml-position-optimization", "value"),
     State("bbg-ml-adoption-rate-text", "value"),
     State("bbg-cc-optimization", "value"),
     prevent_initial_call=True,
@@ -584,7 +600,7 @@ def run_binbin_backtest(
     stock_pool, custom_stocks, dte_min, dte_max, put_delta, call_delta,
     max_positions, rebalance_threshold, profit_target, stop_loss,
     disable_profit_target, disable_stop_loss,
-    ml_optimization, ml_dte_optimization, ml_roll_optimization, ml_adoption_rate, cc_optimization
+    ml_optimization, ml_dte_optimization, ml_roll_optimization, ml_position_optimization, ml_adoption_rate, cc_optimization
 ):
     """Run Binbin God strategy backtest."""
     if not start_date or not end_date:
@@ -640,6 +656,7 @@ def run_binbin_backtest(
         "ml_delta_optimization": ml_optimization or False,
         "ml_dte_optimization": ml_dte_optimization or False,
         "ml_roll_optimization": ml_roll_optimization or False,
+        "ml_position_optimization": ml_position_optimization or False,
         "ml_adoption_rate": ml_adoption_rate or 0.6,
         "cc_optimization_enabled": cc_optimization if cc_optimization is not None else True,
         "cc_min_delta_cost": 0.15,
