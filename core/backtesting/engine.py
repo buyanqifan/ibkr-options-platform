@@ -141,7 +141,14 @@ class BacktestEngine:
                 logger.info(f"Covered Call: Initialized with {strategy.stock_holding.shares} shares @ ${first_price:.2f}")
 
         for i, bar in enumerate(bars):
-            bar_date = bar["date"][:10]  # YYYY-MM-DD
+            # Ensure bar_date is string in YYYY-MM-DD format
+            bar_date_raw = bar["date"]
+            if hasattr(bar_date_raw, 'isoformat'):
+                # It's a datetime/date object
+                bar_date = bar_date_raw.isoformat()[:10]
+            else:
+                # It's already a string
+                bar_date = str(bar_date_raw)[:10]
             underlying_price = bar["close"]
             
             # Use ML predictor for IV if available and ready

@@ -399,8 +399,12 @@ class BinbinGodStrategy(BaseStrategy):
                 for sym in stock_pool:
                     bars = pool_data.get(sym, [])
                     if bars and len(bars) > 0:
-                        # Filter bars up to current_date
-                        filtered_bars = [bar for bar in bars if bar["date"][:10] <= current_date]
+                        # Filter bars up to current_date (ensure date is string for comparison)
+                        filtered_bars = []
+                        for bar in bars:
+                            bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
+                            if bar_date_str <= current_date:
+                                filtered_bars.append(bar)
                         if filtered_bars:
                             # Pass full bars list for scoring (backtest mode)
                             market_data[sym] = filtered_bars
@@ -432,8 +436,10 @@ class BinbinGodStrategy(BaseStrategy):
                     if bars and len(bars) > 0:
                         current_bar = None
                         for bar in bars:
-                            if bar["date"][:10] <= current_date:
+                            bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
+                            if bar_date_str <= current_date:
                                 current_bar = bar
+                                break  # Get the latest bar
                         if current_bar:
                             market_data[sym] = {
                                 'current_date': current_date,
