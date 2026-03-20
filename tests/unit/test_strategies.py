@@ -693,6 +693,192 @@ class TestWheelStrategy:
         # Should only calculate PnL for 100 shares (actual held)
         # Stock PnL = (160 - 150) * 100 = +1000
         assert result == 1000.0
+
+
+class TestStrategyPerformanceReportCompatibility:
+    """Test that strategy performance reports match UI component expectations."""
+
+    def test_wheel_performance_report_has_required_structure(self, base_params):
+        """Wheel strategy should return nested structure for UI components."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = WheelStrategy(params)
+        
+        report = strategy.get_performance_report()
+        
+        # Top-level fields
+        assert 'strategy' in report
+        assert report['strategy'] == 'wheel'
+        
+        # Nested current_state for monitoring dashboard
+        assert 'current_state' in report
+        current_state = report['current_state']
+        assert 'phase' in current_state
+        assert 'shares_held' in current_state
+        assert 'cost_basis' in current_state
+        assert 'total_premium_collected' in current_state
+        
+        # Nested performance_metrics for monitoring dashboard
+        assert 'performance_metrics' in report
+        
+        # Trade and phase history
+        assert 'trade_history' in report
+        assert 'phase_history' in report
+
+    def test_binbin_god_performance_report_has_required_structure(self, base_params):
+        """BinbinGod strategy should return both nested and flat fields for UI compatibility."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        
+        report = strategy.get_performance_report()
+        
+        # Top-level fields
+        assert 'strategy' in report
+        assert report['strategy'] == 'binbin_god'
+        assert 'phase' in report
+        assert 'shares_held' in report
+        assert 'cost_basis' in report
+        
+        # Nested current_state (for compatibility with Wheel monitoring dashboard)
+        assert 'current_state' in report
+        current_state = report['current_state']
+        assert 'phase' in current_state
+        assert 'shares_held' in current_state
+        assert 'cost_basis' in current_state
+        
+        # Nested performance_metrics
+        assert 'performance_metrics' in report
+        perf = report['performance_metrics']
+        assert 'total_trades' in perf
+        assert 'win_rate' in perf
+        assert 'total_pnl' in perf
+        
+        # trade_history and phase_history
+        assert 'trade_history' in report
+        assert 'phase_history' in report
+
+    def test_holdings_data_extraction_from_wheel_report(self, base_params):
+        """Page should correctly extract holdings_data from Wheel's nested structure."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = WheelStrategy(params)
+        
+        # Simulate some state
+        strategy.stock_holding.shares = 200
+        strategy.stock_holding.cost_basis = 150.0
+        
+        strategy_performance = strategy.get_performance_report()
+        
+        # Page extraction logic (from backtester.py)
+        current_state = strategy_performance.get("current_state", {})
+        holdings_data = {
+            "shares_held": strategy_performance.get("shares_held") or current_state.get("shares_held", 0),
+            "cost_basis": strategy_performance.get("cost_basis") or current_state.get("cost_basis", 0),
+            "options_held": strategy_performance.get("open_positions", []),
+        }
+        
+        # Verify extraction
+        assert holdings_data["shares_held"] == 200
+        assert holdings_data["cost_basis"] == 150.0
+        assert holdings_data["options_held"] == []
+
+    def test_holdings_data_extraction_from_binbin_god_report(self, base_params):
+        """Page should correctly extract holdings_data from BinbinGod's structure."""
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        
+        # Simulate some state
+        strategy.stock_holding.shares = 100
+        strategy.stock_holding.cost_basis = 145.0
+        strategy.phase = 'CC'
+        
+        strategy_performance = strategy.get_performance_report()
+        
+        # Page extraction logic (from binbin_god.py)
+        current_state = strategy_performance.get("current_state", {})
+        holdings_data = {
+            "shares_held": strategy_performance.get("shares_held") or current_state.get("shares_held", 0),
+            "cost_basis": strategy_performance.get("cost_basis") or current_state.get("cost_basis", 0),
+            "options_held": strategy_performance.get("open_positions", []),
+        }
+        
+        # Verify extraction
+        assert holdings_data["shares_held"] == 100
+        assert holdings_data["cost_basis"] == 145.0
+        assert holdings_data["options_held"] == []
+
+    def test_monitoring_dashboard_receives_metrics(self, base_params):
+        """Monitoring dashboard should receive metrics from engine result."""
+        # Simulate metrics from engine
+        metrics = {
+            "total_return_pct": 15.5,
+            "annualized_return_pct": 22.3,
+            "win_rate": 75.0,
+            "sharpe_ratio": 1.8,
+            "max_drawdown_pct": 5.2,
+        }
+        
+        # Simulate strategy_performance
+        params = base_params.copy()
+        params['symbol'] = 'NVDA'
+        strategy = BinbinGodStrategy(params)
+        strategy_performance = strategy.get_performance_report()
+        
+        # Page combines metrics with strategy_performance
+        monitoring_data = {**strategy_performance, "metrics": metrics}
+        
+        # Monitoring dashboard extracts these
+        assert monitoring_data.get("metrics", {}).get("total_return_pct") == 15.5
+        assert monitoring_data.get("metrics", {}).get("win_rate") == 75.0
+        assert "current_state" in monitoring_data
+        assert "performance_metrics" in monitoring_data
+
+    def test_wheel_report_consistency_after_state_changes(self, base_params):
+        """Wheel performance report should reflect state changes."""
+        params = base_params.copy()
+        params['symbol'] = 'AAPL'
+        strategy = WheelStrategy(params)
+        
+        # Initial state
+        assert strategy.phase == 'SP'
+        report1 = strategy.get_performance_report()
+        assert report1['current_state']['phase'] == 'SP'
+        assert report1['current_state']['shares_held'] == 0
+        
+        # Simulate Put assignment
+        strategy.stock_holding.shares = 100
+        strategy.stock_holding.cost_basis = 180.0
+        strategy.phase = 'CC'
+        
+        report2 = strategy.get_performance_report()
+        assert report2['current_state']['phase'] == 'CC'
+        assert report2['current_state']['shares_held'] == 100
+        assert report2['current_state']['cost_basis'] == 180.0
+
+    def test_binbin_god_report_consistency_after_state_changes(self, base_params):
+        """BinbinGod performance report should reflect state changes."""
+        params = base_params.copy()
+        params['symbol'] = 'MSFT'
+        strategy = BinbinGodStrategy(params)
+        
+        # Initial state
+        assert strategy.phase == 'SP'
+        report1 = strategy.get_performance_report()
+        assert report1['current_state']['phase'] == 'SP'
+        assert report1['phase'] == 'SP'  # Also top-level
+        
+        # Simulate Put assignment
+        strategy.stock_holding.shares = 200
+        strategy.stock_holding.cost_basis = 380.0
+        strategy.phase = 'CC'
+        
+        report2 = strategy.get_performance_report()
+        assert report2['current_state']['phase'] == 'CC'
+        assert report2['phase'] == 'CC'
+        assert report2['shares_held'] == 200  # Top-level
+        assert report2['current_state']['shares_held'] == 200  # Nested
     
     def test_phase_transition_back_to_sp(self, base_params):
         """Test transition back to SP after all shares sold."""
