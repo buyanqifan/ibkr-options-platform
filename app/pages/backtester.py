@@ -52,11 +52,11 @@ layout = html.Div([
                         inline=True,
                         className="mb-3",
                         style={
-                            "color": "#ffffff",
-                            "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.08)",
                             "padding": "10px 14px",
                             "borderRadius": "4px",
-                            "border": "1px solid rgba(255, 255, 255, 0.1)",
+                            "border": "1px solid rgba(255, 255, 255, 0.2)",
                         },
                     ),
                     
@@ -68,11 +68,11 @@ layout = html.Div([
                         inline=True,
                         className="mb-3",
                         style={
-                            "color": "#ffffff",
-                            "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.08)",
                             "padding": "10px 14px",
                             "borderRadius": "4px",
-                            "border": "1px solid rgba(255, 255, 255, 0.1)",
+                            "border": "1px solid rgba(255, 255, 255, 0.2)",
                         },
                     ),
 
@@ -116,11 +116,11 @@ layout = html.Div([
                                value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#ffffff",
-                                    "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                                    "color": "#e0e0e0",
+                                    "backgroundColor": "rgba(255, 255, 255, 0.08)",
                                     "padding": "8px 12px",
                                     "borderRadius": "4px",
-                                    "border": "1px solid rgba(255, 255, 255, 0.1)",
+                                    "border": "1px solid rgba(255, 255, 255, 0.2)",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
@@ -143,11 +143,11 @@ layout = html.Div([
                                value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#ffffff",
-                                    "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                                    "color": "#e0e0e0",
+                                    "backgroundColor": "rgba(255, 255, 255, 0.08)",
                                     "padding": "8px 12px",
                                     "borderRadius": "4px",
-                                    "border": "1px solid rgba(255, 255, 255, 0.1)",
+                                    "border": "1px solid rgba(255, 255, 255, 0.2)",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
@@ -175,11 +175,11 @@ layout = html.Div([
                         inline=True,
                         className="mb-2",
                         style={
-                            "color": "#ffffff",
-                            "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.08)",
                             "padding": "10px 14px",
                             "borderRadius": "4px",
-                            "border": "1px solid rgba(255, 255, 255, 0.1)",
+                            "border": "1px solid rgba(255, 255, 255, 0.2)",
                         },
                     ),
                     
@@ -199,11 +199,11 @@ layout = html.Div([
                         inline=True,
                         className="mb-2",
                         style={
-                            "color": "#ffffff",
-                            "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.08)",
                             "padding": "10px 14px",
                             "borderRadius": "4px",
-                            "border": "1px solid rgba(255, 255, 255, 0.1)",
+                            "border": "1px solid rgba(255, 255, 255, 0.2)",
                         },
                     ),
                     
