@@ -349,7 +349,7 @@ def create_trade_timeline_chart(
             entry_annotations.append(
                 f"Entry {i+1}<br>"
                 f"{contract_name}<br>"
-                f"Qty: {abs(quantity)}x<br>"
+                f"Qty: {quantity}x<br>"
                 f"@ ${entry_price:.2f}"
             )
         
@@ -363,7 +363,7 @@ def create_trade_timeline_chart(
             exit_annotations.append(
                 f"Exit {i+1}<br>"
                 f"{contract_name}<br>"
-                f"Qty: {abs(quantity)}x<br>"
+                f"Qty: {quantity}x<br>"
                 f"@ ${exit_price:.2f}<br>"
                 f"P&L: ${pnl:+.2f}"
             )

@@ -134,7 +134,7 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
         except:
             option_name = f"{symbol} {expiry} {strike} {right}"
         
-        qty_display = f"{abs(quantity)}x {'Long' if quantity > 0 else 'Short'}"
+        qty_display = f"{quantity}x"  # Negative = Short, Positive = Long
         
         holdings_rows.append(
             html.Tr([
@@ -233,7 +233,7 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
         except:
             option_name = f"{symbol} {expiry} {strike} {right}"
         
-        qty_display = f"{abs(quantity)}x {'Long' if quantity > 0 else 'Short'}"
+        qty_display = f"{quantity}x"  # Negative = Short, Positive = Long
         
         holdings_rows.append(
             html.Tr([
