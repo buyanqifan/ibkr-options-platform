@@ -402,6 +402,12 @@ class BacktestEngine:
             
             cumulative_pnl = sum(t.pnl for t in simulator.closed_trades)
             
+            # IMPORTANT: Get strategy performance report BEFORE liquidating stock holdings
+            # This preserves the final state for UI display (Current Holdings, Current Strategy State)
+            strategy_performance = {}
+            if hasattr(strategy, 'get_performance_report'):
+                strategy_performance = strategy.get_performance_report()
+            
             # Handle remaining stock position for Wheel/BinbinGod strategies
             # At end of backtest, liquidate any remaining stock holdings
             if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
@@ -424,18 +430,13 @@ class BacktestEngine:
                         logger.debug(f"Released stock capital at backtest end: {pid}")
                         released_count += 1
                 
-                # Reset stock holding
+                # Reset stock holding AFTER getting performance report
                 strategy.stock_holding.shares = 0
                 strategy.stock_holding.cost_basis = 0.0
 
         # Calculate metrics
         trades = [t.to_dict() for t in simulator.closed_trades]
         metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
-        
-        # Add strategy-specific performance data if available
-        strategy_performance = {}
-        if hasattr(strategy, 'get_performance_report'):
-            strategy_performance = strategy.get_performance_report()
         
         # Add open positions info for UI display (convert OptionPosition to dict)
         if simulator.open_positions:
