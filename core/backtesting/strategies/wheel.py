@@ -527,7 +527,7 @@ class WheelStrategy(BaseStrategy):
             "premium_collected": round(self.stock_holding.total_premium_collected, 2),
         }
         self.phase_history.append(transition)
-        self.logger.info(f"Phase transition: {from_phase} â†’ {to_phase} ({reason})")
+        self.logger.info(f"Phase transition: {from_phase} â†?{to_phase} ({reason})")
     
     def update_daily_stats(self, date: str, portfolio_value: float, open_pnl: float):
         """Update daily statistics for performance monitoring."""
