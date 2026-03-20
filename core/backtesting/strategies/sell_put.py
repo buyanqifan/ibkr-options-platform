@@ -30,7 +30,9 @@ class SellPutStrategy(BaseStrategy):
         if len(open_positions) >= max_pos:
             return []
 
-        T = self.select_expiry_dte() / 365.0
+        # Get optimized DTE (ML or traditional)
+        dte_days = self.select_expiry_dte(underlying_price=underlying_price, iv=iv, right="P")
+        T = dte_days / 365.0
         
         # Get optimized delta (ML or traditional)
         optimized_delta = self.get_optimized_delta(underlying_price, iv, "P")
@@ -63,9 +65,8 @@ class SellPutStrategy(BaseStrategy):
         
         quantity = -num_contracts  # Sell contracts (negative quantity)
 
-        dte_days = int(self.select_expiry_dte())
         entry = datetime.strptime(current_date, "%Y-%m-%d")
-        expiry_date = entry + timedelta(days=dte_days)
+        expiry_date = entry + timedelta(days=int(dte_days))
         expiry_str = expiry_date.strftime("%Y%m%d")
 
         return [Signal(

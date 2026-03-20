@@ -102,10 +102,12 @@ class CoveredCallStrategy(BaseStrategy):
         available_share_lots = self.stock_holding.shares // 100
         max_contracts = min(max_contracts, available_share_lots)
         
-        T = self.select_expiry_dte() / 365.0
+        # Get optimized DTE (ML or traditional) - use cost basis for ML optimization
+        cost_basis = self.stock_holding.cost_basis if self.stock_holding.cost_basis > 0 else underlying_price
+        dte_days = self.select_expiry_dte(underlying_price=underlying_price, iv=iv, right="C", cost_basis=cost_basis)
+        T = dte_days / 365.0
         
         # Get optimized delta (ML or traditional) - use cost basis for ML optimization
-        cost_basis = self.stock_holding.cost_basis if self.stock_holding.cost_basis > 0 else underlying_price
         optimized_delta = self.get_optimized_delta(underlying_price, iv, "C", cost_basis)
         original_delta = self.delta_target
         self.delta_target = optimized_delta
@@ -116,9 +118,8 @@ class CoveredCallStrategy(BaseStrategy):
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
         
-        dte_days = int(self.select_expiry_dte())
         entry = datetime.strptime(current_date, "%Y-%m-%d")
-        expiry_date = entry + timedelta(days=dte_days)
+        expiry_date = entry + timedelta(days=int(dte_days))
         expiry_str = expiry_date.strftime("%Y%m%d")
         
         quantity = -max_contracts  # Sell calls

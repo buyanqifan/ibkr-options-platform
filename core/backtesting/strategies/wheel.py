@@ -301,10 +301,11 @@ class WheelStrategy(BaseStrategy):
                     f"Will use {whole_share_lots} shares in {whole_share_lots // 100} lots for covered calls."
                 )
 
-        T = self.select_expiry_dte() / 365.0
-        dte_days = int(self.select_expiry_dte())
+        # Get optimized DTE (ML or traditional)
+        dte_days = self.select_expiry_dte(underlying_price=underlying_price, iv=iv, right="P" if self.phase == "SP" else "C", cost_basis=self.stock_holding.cost_basis)
+        T = dte_days / 365.0
         entry = datetime.strptime(current_date, "%Y-%m-%d")
-        expiry_date = entry + timedelta(days=dte_days)
+        expiry_date = entry + timedelta(days=int(dte_days))
         expiry_str = expiry_date.strftime("%Y%m%d")
 
         if self.phase == "SP":
@@ -325,9 +326,10 @@ class WheelStrategy(BaseStrategy):
         position_mgr=None,
     ) -> list[Signal]:
         """Generate Sell Put signal for Phase 1."""
-        # Use put-specific delta
+        # Use put-specific delta with ML optimization if enabled
         original_delta = self.delta_target
-        self.delta_target = self.put_delta
+        optimized_delta = self.get_optimized_delta(underlying_price, iv, "P")
+        self.delta_target = optimized_delta
         strike = self.select_strike(underlying_price, iv, T, "P")
         self.delta_target = original_delta
 
@@ -381,9 +383,10 @@ class WheelStrategy(BaseStrategy):
             self.phase = "SP"
             return self._generate_sell_put_signal(underlying_price, iv, T, expiry_str, position_mgr)
 
-        # Use call-specific delta
+        # Use call-specific delta with ML optimization if enabled
         original_delta = self.delta_target
-        self.delta_target = self.call_delta
+        optimized_delta = self.get_optimized_delta(underlying_price, iv, "C", self.stock_holding.cost_basis)
+        self.delta_target = optimized_delta
         
         try:
             strike = self.select_strike(underlying_price, iv, T, "C")

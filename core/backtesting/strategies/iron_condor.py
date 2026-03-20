@@ -34,10 +34,11 @@ class IronCondorStrategy(BaseStrategy):
         if len(open_positions) >= max_pos:
             return []
 
-        T = self.select_expiry_dte() / 365.0
-        dte_days = int(self.select_expiry_dte())
+        # Get optimized DTE (ML or traditional)
+        dte_days = self.select_expiry_dte(underlying_price=underlying_price, iv=iv, right="P")
+        T = dte_days / 365.0
         entry = datetime.strptime(current_date, "%Y-%m-%d")
-        expiry_date = entry + timedelta(days=dte_days)
+        expiry_date = entry + timedelta(days=int(dte_days))
         expiry_str = expiry_date.strftime("%Y%m%d")
 
         # Short put (OTM) - with ML optimization if enabled

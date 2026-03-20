@@ -37,18 +37,20 @@ class BaseStrategy(ABC):
         # Position management: max_leverage only (position_percentage removed)
         self.max_leverage = params.get("max_leverage", 1.0)  # No leverage by default
         
-        # ML Delta optimization parameters
+        # ML optimization parameters
         self.ml_delta_optimization = params.get("ml_delta_optimization", False)
+        self.ml_dte_optimization = params.get("ml_dte_optimization", False)  # Add DTE optimization flag
         self.ml_adoption_rate = params.get("ml_adoption_rate", 0.5)
         self.ml_integration = None
         self.logger = logging.getLogger(f"strategy_{self.__class__.__name__}")
         
         # Initialize ML integration if enabled
-        if self.ml_delta_optimization:
+        if self.ml_delta_optimization or self.ml_dte_optimization:  # Update condition to include DTE
             try:
                 from core.ml.delta_strategy_integration import BinGodDeltaIntegration, AdaptiveDeltaStrategy
                 self.ml_integration = BinGodDeltaIntegration(
-                    ml_optimization_enabled=True,
+                    ml_optimization_enabled=self.ml_delta_optimization,
+                    ml_dte_optimization_enabled=self.ml_dte_optimization,  # Add DTE optimization flag
                     fallback_delta=self.delta_target,
                     config=params.get("ml_config")
                 )
@@ -56,13 +58,15 @@ class BaseStrategy(ABC):
                     ml_integration=self.ml_integration,
                     adoption_rate=self.ml_adoption_rate
                 )
-                self.logger.info("ML Delta optimizer initialized for strategy")
+                self.logger.info(f"ML optimizers initialized for strategy (Delta: {self.ml_delta_optimization}, DTE: {self.ml_dte_optimization})")
             except ImportError as e:
-                self.logger.warning(f"ML Delta optimization not available: {e}")
+                self.logger.warning(f"ML optimization not available: {e}")
                 self.ml_delta_optimization = False
+                self.ml_dte_optimization = False  # Also disable DTE optimization
             except Exception as e:
-                self.logger.warning(f"ML Delta optimization initialization failed: {e}")
+                self.logger.warning(f"ML optimization initialization failed: {e}")
                 self.ml_delta_optimization = False
+                self.ml_dte_optimization = False  # Also disable DTE optimization
     
     def pretrain_ml_model(self, historical_bars: list, iv_estimate: float = 0.25) -> dict:
         """
@@ -268,9 +272,72 @@ class BaseStrategy(ABC):
         
         return self.delta_target
 
-    def select_expiry_dte(self) -> float:
-        """Return target DTE in the middle of the range."""
+    def get_optimized_dte(self, underlying_price: float, iv: float, right: str, 
+                         cost_basis: float = 0.0) -> float:
+        """Get DTE value, using ML optimization if enabled.
+        
+        Args:
+            underlying_price: Current underlying price
+            iv: Implied volatility
+            right: Option type ('P' for put, 'C' for call)
+            cost_basis: Cost basis for position (relevant for covered calls)
+            
+        Returns:
+            float: Optimized DTE value
+        """
+        if not self.ml_dte_optimization or not self.ml_integration:
+            # Return traditional DTE calculation
+            return (self.dte_min + self.dte_max) / 2
+        
+        try:
+            # Use ML integration to get optimized DTE
+            if right == "P":
+                ml_result = self.ml_integration.optimize_put_dte(
+                    symbol=self.params.get("symbol", ""),
+                    current_price=underlying_price,
+                    cost_basis=cost_basis,
+                    bars=[],
+                    options_data=[],
+                    iv=iv,
+                    strategy_phase="SP"  # Sell Put phase
+                )
+            else:
+                ml_result = self.ml_integration.optimize_call_dte(
+                    symbol=self.params.get("symbol", ""),
+                    current_price=underlying_price,
+                    cost_basis=cost_basis,
+                    bars=[],
+                    options_data=[],
+                    iv=iv,
+                    strategy_phase="CC"  # Covered Call phase
+                )
+            
+            # Use the optimized DTE range if confidence is high enough
+            if ml_result and ml_result.confidence > 0.6:
+                # Return midpoint of the optimized range
+                optimized_dte = (ml_result.optimal_dte_min + ml_result.optimal_dte_max) / 2
+                self.logger.info(
+                    f"ML optimized {right} DTE: traditional={(self.dte_min + self.dte_max)/2:.1f}, "
+                    f"ml={optimized_dte:.1f} ({ml_result.optimal_dte_min}-{ml_result.optimal_dte_max})"
+                )
+                return optimized_dte
+            else:
+                self.logger.info(f"ML DTE confidence too low ({ml_result.confidence:.2f}), using traditional")
+                
+        except Exception as e:
+            self.logger.warning(f"ML DTE optimization failed, using traditional: {e}")
+        
+        # Return traditional DTE calculation
         return (self.dte_min + self.dte_max) / 2
+
+    def select_expiry_dte(self, underlying_price: float = None, iv: float = None, right: str = "P", 
+                         cost_basis: float = 0.0) -> float:
+        """Return target DTE, using ML optimization if enabled."""
+        if underlying_price is not None and iv is not None:
+            return self.get_optimized_dte(underlying_price=underlying_price, iv=iv, right=right, cost_basis=cost_basis)
+        else:
+            # Fallback to traditional calculation if parameters not provided
+            return (self.dte_min + self.dte_max) / 2
 
     def get_performance_report(self) -> dict:
         """Default performance report for strategies that don't override it.
