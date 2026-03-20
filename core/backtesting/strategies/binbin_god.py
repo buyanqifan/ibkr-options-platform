@@ -109,6 +109,12 @@ class BinbinGodStrategy(BaseStrategy):
         self.ml_adoption_rate = config.get("ml_adoption_rate", 0.5)
         self.ml_integration = None
         self.ml_dte_optimizer = None  # Add DTE optimizer
+
+        # ML exit optimization (profit target / stop loss) parameters
+        self.ml_exit_optimization = config.get("ml_exit_optimization", False)
+        self.ml_exit_optimizer = None
+        self.ml_exit_confidence_threshold = config.get("ml_exit_confidence_threshold", 0.6)
+
         self.logger = logging.getLogger("binbin_god")
         
         # Initialize ML integration if enabled (use BaseStrategy's pretrain_ml_model)
@@ -135,7 +141,22 @@ class BinbinGodStrategy(BaseStrategy):
                 self.logger.warning(f"ML optimization initialization failed: {e}")
                 self.ml_delta_optimization = False
                 self.ml_dte_optimization = False
-        
+
+        # Initialize ML Exit Optimizer if enabled
+        if self.ml_exit_optimization:
+            try:
+                from core.ml.exit_optimizer import MLExitOptimizer
+                self.ml_exit_optimizer = MLExitOptimizer(
+                    model_path=config.get("ml_exit_model_path")
+                )
+                self.logger.info("ML Exit Optimizer initialized for dynamic profit target / stop loss")
+            except ImportError as e:
+                self.logger.warning(f"ML Exit optimization not available: {e}")
+                self.ml_exit_optimization = False
+            except Exception as e:
+                self.logger.warning(f"ML Exit optimization initialization failed: {e}")
+                self.ml_exit_optimization = False
+
         # Scoring weights - optimized to avoid correlation
         # IV Rank is most important for options premium (35%)
         # Technical factors provide trend confirmation (25%)
@@ -972,30 +993,92 @@ class BinbinGodStrategy(BaseStrategy):
         current_price: float,
         entry_price: float,
         current_dt: datetime,
+        market_data: Dict[str, Any] = None,
     ) -> tuple[bool, str]:
-        """Check if position should be exited."""
-        
+        """Check if position should be exited with ML-optimized targets.
+
+        Args:
+            position: Position dictionary
+            current_price: Current option price
+            entry_price: Entry option price
+            current_dt: Current datetime
+            market_data: Current market data (for ML features)
+
+        Returns:
+            (should_exit, reason) tuple
+        """
+
         # Calculate P&L
         pnl = current_price - entry_price
         pnl_pct = (pnl / entry_price) * 100 if entry_price > 0 else 0
-        
-        # Profit target exit
-        if not self._profit_target_disabled:
+
+        # ML-based exit optimization
+        if self.ml_exit_optimization and self.ml_exit_optimizer and market_data:
+            try:
+                current_date = current_dt.strftime('%Y-%m-%d') if isinstance(current_dt, datetime) else str(current_dt)[:10]
+
+                # Build features for ML prediction
+                features = self.ml_exit_optimizer.build_features(
+                    position=position,
+                    market_data=market_data,
+                    current_date=current_date
+                )
+
+                # Check for early exit signals first
+                should_exit_early, early_reason = self.ml_exit_optimizer.should_exit_early(
+                    position=position,
+                    market_data=market_data,
+                    current_date=current_date
+                )
+                if should_exit_early:
+                    self.logger.info(f"ML early exit signal: {early_reason}")
+                    return True, f"ML_{early_reason}"
+
+                # Get ML-optimized profit target and stop loss
+                ml_profit_target, ml_stop_loss = self.ml_exit_optimizer.predict_optimal_exits(
+                    features=features,
+                    base_profit_target=self.profit_target_pct,
+                    base_stop_loss=self.stop_loss_pct
+                )
+
+                self.logger.debug(
+                    f"ML exit targets: profit={ml_profit_target:.1f}%, stop={ml_stop_loss:.1f}% "
+                    f"(base: profit={self.profit_target_pct:.1f}%, stop={self.stop_loss_pct:.1f}%)"
+                )
+
+                # Check ML-optimized profit target
+                if not self._profit_target_disabled:
+                    profit_threshold = ml_profit_target / 100.0 * abs(entry_price)
+                    if abs(pnl) >= profit_threshold and pnl < 0:  # Premium decayed enough
+                        return True, "ML_PROFIT_TARGET"
+
+                # Check ML-optimized stop loss
+                if not self._stop_loss_disabled:
+                    loss_threshold = ml_stop_loss / 100.0 * abs(entry_price)
+                    if pnl >= loss_threshold:  # Loss exceeded threshold
+                        return True, "ML_STOP_LOSS"
+
+            except Exception as e:
+                self.logger.warning(f"ML exit optimization failed, falling back to static: {e}")
+                # Fall through to static logic
+
+        # Static profit target exit (fallback or when ML disabled)
+        if not self._profit_target_disabled and not (self.ml_exit_optimization and self.ml_exit_optimizer):
             profit_threshold = self.profit_target_pct / 100.0 * abs(entry_price)
             if abs(pnl) >= profit_threshold and pnl < 0:  # Premium decayed enough
                 return True, "PROFIT_TARGET"
-        
-        # Stop loss exit
-        if not self._stop_loss_disabled:
+
+        # Static stop loss exit (fallback or when ML disabled)
+        if not self._stop_loss_disabled and not (self.ml_exit_optimization and self.ml_exit_optimizer):
             loss_threshold = self.stop_loss_pct / 100.0 * abs(entry_price)
             if pnl >= loss_threshold:  # Loss exceeded threshold
                 return True, "STOP_LOSS"
-        
+
         # Expiry exit
         expiry = position.get("expiry")
         if expiry and current_dt >= expiry:
             return True, "EXPIRY"
-        
+
         return False, ""
     
     def on_assignment(self, position: Dict[str, Any]):
@@ -1294,7 +1377,7 @@ class BinbinGodStrategy(BaseStrategy):
         """Generate comprehensive performance report with selection history."""
         # Debug logging
         self.logger.info(f"BinbinGod Performance Report: phase={self.phase}, shares={self.stock_holding.shares}, cost_basis={self.stock_holding.cost_basis:.2f}")
-        
+
         return {
             "strategy": "binbin_god",
             # current_state: for compatibility with Wheel's monitoring dashboard
@@ -1322,7 +1405,83 @@ class BinbinGodStrategy(BaseStrategy):
             "total_premium_collected": round(self.stock_holding.total_premium_collected, 2),
             "selection_history": self.selection_history,
             "mag7_analysis": self.mag7_analysis,
+            # ML optimization status
+            "ml_optimization": {
+                "delta_enabled": self.ml_delta_optimization,
+                "dte_enabled": self.ml_dte_optimization,
+                "exit_enabled": self.ml_exit_optimization,
+                "exit_model_loaded": self.ml_exit_optimizer.model is not None if self.ml_exit_optimizer else False,
+            },
             # For UI compatibility with Wheel strategy monitoring
             "trade_history": [],  # Would need to track in on_trade_closed
             "phase_history": [],  # Would need to track on phase transitions
         }
+
+    def build_market_data_for_exit(
+        self,
+        symbol: str,
+        current_price: float,
+        iv: float,
+        bars: List[Dict] = None,
+        option_price: float = None,
+        current_delta: float = None,
+    ) -> Dict[str, Any]:
+        """Build market data dictionary for ML exit optimization.
+
+        Args:
+            symbol: Stock symbol
+            current_price: Current underlying price
+            iv: Current implied volatility
+            bars: Price history bars
+            option_price: Current option price
+            current_delta: Current option delta
+
+        Returns:
+            Market data dictionary for ML features
+        """
+        from core.ml.market_data import MarketDataCalculator
+
+        # Calculate momentum indicators from bars if available
+        momentum_data = {}
+        if bars and len(bars) >= 20:
+            prices = [bar.get('close', 0) for bar in bars[-50:]]
+            if len(prices) >= 20:
+                momentum = MarketDataCalculator.calculate_momentum_indicators(prices, len(prices) - 1)
+                momentum_data = {
+                    'momentum_5d': momentum.get('momentum_5d', 0),
+                    'momentum_10d': momentum.get('momentum_10d', 0),
+                    'vs_ma20': momentum.get('vs_ma20', 0),
+                    'vs_ma50': momentum.get('vs_ma50', 0),
+                    'ma20': current_price / (1 + momentum.get('vs_ma20', 0) / 100),
+                    'ma50': current_price / (1 + momentum.get('vs_ma50', 0) / 100),
+                    'price_history': prices,
+                }
+
+        # Calculate historical volatility
+        hv = MarketDataCalculator.calculate_historical_volatility(
+            [bar.get('close', 0) for bar in bars[-30:]] if bars else [current_price]
+        )
+
+        # Build market data snapshot
+        market_data = {
+            'price': current_price,
+            'iv': iv,
+            'historical_volatility': hv,
+            'iv_rank': 50.0,  # Would need IV history to calculate
+            'iv_percentile': 50.0,
+            'option_price': option_price,
+            'delta': current_delta,
+            'gamma': 0.05,  # Estimate
+            'vega': 0.2,  # Estimate
+            **momentum_data,
+            'vix': 20.0,  # Default VIX
+            'vix_percentile': 50.0,
+            'vix_rank': 50.0,
+            'vix_change_pct': 0.0,
+            'vix_5d_ma': 20.0,
+            'vix_20d_ma': 20.0,
+            'vix_term_structure': 0.0,
+            'market_regime': 1,  # Normal
+        }
+
+        return market_data
