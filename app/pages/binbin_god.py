@@ -189,6 +189,16 @@ layout = dbc.Container([
                         style={"display": "flex", "alignItems": "center"}
                     ),
                     
+                    # ML DTE Optimization Toggle
+                    dbc.Label("Enable ML DTE Optimization"),
+                    dbc.Switch(
+                        id="bbg-ml-dte-optimization",
+                        value=False,
+                        label="Enable ML-powered adaptive DTE (Days to Expiration) selection",
+                        className="mb-3",
+                        style={"display": "flex", "alignItems": "center"}
+                    ),
+                    
                     # ML Adoption Rate (shown when ML is enabled)
                     html.Div([
                         dbc.Label("ML Adoption Rate"),
@@ -380,6 +390,16 @@ def toggle_ml_controls(ml_optimization_enabled):
     return {"display": "none"}, {"display": "none"}
 
 
+# Callback to handle ML DTE optimization
+@callback(
+    Output("bbg-ml-dte-optimization", "value"),
+    Input("bbg-ml-optimization", "value"),
+)
+def toggle_ml_dte_with_delta(ml_optimization_enabled):
+    """Enable ML DTE optimization when ML delta optimization is enabled."""
+    return ml_optimization_enabled
+
+
 # Callback to sync ML adoption rate slider and text input
 @callback(
     Output("bbg-ml-adoption-rate-text", "value"),
@@ -427,6 +447,7 @@ def update_ml_adoption_rate_slider(rate_text):
     State("bbg-disable-profit-target", "value"),
     State("bbg-disable-stop-loss", "value"),
     State("bbg-ml-optimization", "value"),
+    State("bbg-ml-dte-optimization", "value"),
     State("bbg-ml-adoption-rate-text", "value"),
     State("bbg-cc-optimization", "value"),
     prevent_initial_call=True,
@@ -436,7 +457,7 @@ def run_binbin_backtest(
     stock_pool, custom_stocks, dte_min, dte_max, put_delta, call_delta, 
     max_positions, rebalance_threshold, profit_target, stop_loss, 
     disable_profit_target, disable_stop_loss,
-    ml_optimization, ml_adoption_rate, cc_optimization
+    ml_optimization, ml_dte_optimization, ml_adoption_rate, cc_optimization
 ):
     """Run Binbin God strategy backtest."""
     if not start_date or not end_date:
@@ -490,6 +511,7 @@ def run_binbin_backtest(
         "rebalance_threshold": (rebalance_threshold or 15) / 100.0,
         # ML Delta Optimization parameters
         "ml_delta_optimization": ml_optimization or False,
+        "ml_dte_optimization": ml_dte_optimization or False,
         "ml_adoption_rate": ml_adoption_rate or 0.6,
         "cc_optimization_enabled": cc_optimization if cc_optimization is not None else True,
         "cc_min_delta_cost": 0.15,
