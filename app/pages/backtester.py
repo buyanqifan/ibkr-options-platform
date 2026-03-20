@@ -526,10 +526,10 @@ def run_backtest(
         # Add benchmark data to result
         result["benchmark_data"] = benchmark_data
     except Exception as e:
-        return {}, {}, html.P(f"Backtest error: {e}", className="text-danger"), "d-none"
+        return {}, {}, html.P(f"Backtest error: {e}", className="text-danger"), "d-none", "d-none"
 
     if not result:
-        return {}, {}, html.P("No results generated", className="text-muted"), "d-none"
+        return {}, {}, html.P("No results generated", className="text-muted"), "d-none", "d-none"
 
     # Build results UI
     metrics = result.get("metrics", {})
@@ -666,7 +666,7 @@ def run_backtest(
             ]))
 
     # Show save button after successful backtest
-    return result, params, content, "d-block mt-2"
+    return result, params, content, "d-block mt-2", "d-block mt-2"
 
 
 @callback(
@@ -682,15 +682,87 @@ def save_backtest_result(n_clicks, result, params):
     """Save the backtest result to database."""
     if not n_clicks or not result or not params:
         return "💾 Save Result", "success", False
-    
+
     try:
         from core.backtesting.storage import get_backtest_storage
         storage = get_backtest_storage()
-        
+
         backtest_id = storage.save_backtest(params, result)
         return f"✅ Saved #{backtest_id}", "secondary", True
     except Exception as e:
         return f"❌ Error: {str(e)[:30]}", "danger", False
+
+
+@callback(
+    Output("bt-download", "data"),
+    Input("bt-export-btn", "n_clicks"),
+    State("bt-results-store", "data"),
+    State("bt-params-store", "data"),
+    prevent_initial_call=True,
+)
+def export_backtest_result(n_clicks, result, params):
+    """Export the backtest result as JSON for AI analysis."""
+    import json
+    from datetime import datetime
+
+    if not n_clicks or not result or not params:
+        return no_update
+
+    # Build export data structure for AI analysis
+    metrics = result.get("metrics", {})
+    trades = result.get("trades", [])
+    daily_pnl = result.get("daily_pnl", [])
+    strategy_performance = result.get("strategy_performance", {})
+    benchmark_data = result.get("benchmark_data", {})
+
+    export_data = {
+        "export_info": {
+            "exported_at": datetime.utcnow().isoformat(),
+            "export_version": "1.0",
+            "purpose": "AI analysis and debugging"
+        },
+        "backtest_summary": {
+            "strategy": params.get("strategy"),
+            "symbol": params.get("symbol"),
+            "period": {
+                "start_date": params.get("start_date"),
+                "end_date": params.get("end_date"),
+            },
+            "capital": {
+                "initial": params.get("initial_capital"),
+            },
+        },
+        "parameters": params,
+        "performance_metrics": {
+            "total_return_pct": metrics.get("total_return_pct"),
+            "annualized_return_pct": metrics.get("annualized_return_pct"),
+            "max_drawdown_pct": metrics.get("max_drawdown_pct"),
+            "sharpe_ratio": metrics.get("sharpe_ratio"),
+            "sortino_ratio": metrics.get("sortino_ratio"),
+            "win_rate": metrics.get("win_rate"),
+            "total_trades": metrics.get("total_trades"),
+            "avg_profit": metrics.get("avg_profit"),
+            "avg_loss": metrics.get("avg_loss"),
+            "profit_factor": metrics.get("profit_factor"),
+            "monthly_returns": metrics.get("monthly_returns"),
+        },
+        "trades": trades,
+        "daily_pnl": daily_pnl,
+        "strategy_performance": strategy_performance,
+        "benchmark_data": benchmark_data,
+    }
+
+    # Generate filename
+    symbol = params.get("symbol", "UNKNOWN")
+    strategy = params.get("strategy", "unknown")
+    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"backtest_{strategy}_{symbol}_{date_str}.json"
+
+    return dict(
+        content=json.dumps(export_data, indent=2, ensure_ascii=False, default=str),
+        filename=filename,
+        mime_type="application/json",
+    )
 
 
 # Custom CSS for dropdown visibility in dark theme

@@ -99,6 +99,9 @@ layout = html.Div([
     
     # Result message container
     html.Div(id="bh-clear-result"),
+
+    # Download component for export
+    dcc.Download(id="bh-download"),
 ])
 
 
@@ -291,7 +294,7 @@ def show_backtest_detail(cell_clicked):
         {"headerName": "Reason", "field": "exit_reason", "width": 100},
     ]
     trades_table = create_data_table(trades, trade_columns, "bh-detail-trades-table", height=300) if trades else html.P("No trades", className="text-muted")
-    
+
     detail_content = dbc.Card([
         dbc.CardHeader([
             html.Div([
@@ -306,11 +309,12 @@ def show_backtest_detail(cell_clicked):
             html.H6("Trade Log", className="mt-4 mb-2"),
             trades_table,
             html.Div([
+                dbc.Button("📤 Export for AI Analysis", id="bh-export-btn", color="info", className="mt-3 me-2"),
                 dbc.Button("🗑️ Delete This Record", id="bh-delete-btn", color="danger", outline=True, className="mt-3"),
             ]),
         ]),
     ], className="shadow-sm mt-3")
-    
+
     return detail_content, "d-block", backtest["id"]
 
 
@@ -380,3 +384,41 @@ def clear_all_backtests(n_clicks):
             deleted_count += 1
     
     return dbc.Alert(f"Deleted {deleted_count} backtest(s).", color="warning")
+
+
+@callback(
+    Output("bh-download", "data"),
+    Input("bh-export-btn", "n_clicks"),
+    State("bh-selected-id", "data"),
+    prevent_initial_call=True,
+)
+def export_backtest(n_clicks, backtest_id):
+    """Export the selected backtest as JSON for AI analysis."""
+    from datetime import datetime
+
+    if not n_clicks or not backtest_id:
+        return no_update
+
+    storage = get_backtest_storage()
+    export_json = storage.export_backtest_json(backtest_id)
+
+    if not export_json:
+        return no_update
+
+    # Get backtest info for filename
+    backtest = storage.get_backtest(backtest_id)
+    if backtest:
+        symbol = backtest.get("symbol", "UNKNOWN")
+        strategy = backtest.get("strategy_name", "unknown")
+    else:
+        symbol = "UNKNOWN"
+        strategy = "unknown"
+
+    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"backtest_{strategy}_{symbol}_{date_str}.json"
+
+    return dict(
+        content=export_json,
+        filename=filename,
+        mime_type="application/json",
+    )

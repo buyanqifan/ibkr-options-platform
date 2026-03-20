@@ -277,6 +277,82 @@ class BacktestStorage:
         finally:
             session.close()
 
+    def export_backtest(self, backtest_id: int) -> Optional[Dict[str, Any]]:
+        """Export a complete backtest record for AI analysis.
+        
+        Returns all information including:
+        - Backtest configuration and parameters
+        - Performance metrics
+        - All trade records with details
+        - Daily P&L data
+        - Strategy performance data
+        
+        Args:
+            backtest_id: The ID of the backtest to export
+            
+        Returns:
+            Dictionary containing complete backtest data for export, or None if not found
+        """
+        data = self.get_backtest(backtest_id)
+        if not data:
+            return None
+        
+        # Structure the export data for AI analysis
+        export_data = {
+            "export_info": {
+                "exported_at": datetime.utcnow().isoformat(),
+                "backtest_id": backtest_id,
+                "export_version": "1.0",
+                "purpose": "AI analysis and debugging"
+            },
+            "backtest_summary": {
+                "strategy": data["strategy_name"],
+                "symbol": data["symbol"],
+                "period": {
+                    "start_date": data["start_date"],
+                    "end_date": data["end_date"],
+                },
+                "capital": {
+                    "initial": data["initial_capital"],
+                    "final": data["final_capital"],
+                },
+                "created_at": data.get("created_at"),
+            },
+            "parameters": data.get("params", {}),
+            "performance_metrics": {
+                "total_return_pct": data["total_return_pct"],
+                "annualized_return_pct": data["annualized_return_pct"],
+                "max_drawdown_pct": data["max_drawdown_pct"],
+                "sharpe_ratio": data["sharpe_ratio"],
+                "sortino_ratio": data["sortino_ratio"],
+                "win_rate": data["win_rate"],
+                "total_trades": data["total_trades"],
+                "avg_profit": data["avg_profit"],
+                "avg_loss": data["avg_loss"],
+                "profit_factor": data["profit_factor"],
+                "avg_dte_at_entry": data["avg_dte_at_entry"],
+                "assignment_count": data.get("assignment_count", 0),
+            },
+            "trades": data.get("trades", []),
+            "daily_pnl": data.get("daily_pnl", []),
+        }
+        
+        return export_data
+
+    def export_backtest_json(self, backtest_id: int) -> Optional[str]:
+        """Export backtest as JSON string for download.
+        
+        Args:
+            backtest_id: The ID of the backtest to export
+            
+        Returns:
+            JSON string of the export data, or None if not found
+        """
+        data = self.export_backtest(backtest_id)
+        if not data:
+            return None
+        return json.dumps(data, indent=2, ensure_ascii=False, default=str)
+
     def get_summary_stats(self) -> Dict[str, Any]:
         """Get summary statistics across all backtests.
         
