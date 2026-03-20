@@ -34,6 +34,15 @@ class MLExitOptimizer:
             'historical_volatility',
             'iv_percentile',
             
+            # Fear/Greed index (VIX)
+            'vix',  # Current VIX level
+            'vix_percentile',  # Where VIX sits in recent history
+            'vix_rank',  # VIX rank (0-100)
+            'vix_change_pct',  # 5-day VIX change
+            'vix_5d_ma',  # 5-day VIX MA
+            'vix_20d_ma',  # 20-day VIX MA
+            'vix_term_structure',  # Contango/backwardation
+            
             # Time features
             'dte',
             'dte_percent',  # DTE / original_DTE
@@ -163,6 +172,15 @@ class MLExitOptimizer:
             'iv_rank': iv_rank,
             'historical_volatility': hv * 100,
             'iv_percentile': market_data.get('iv_percentile', iv_rank),
+            
+            # Fear/Greed (VIX)
+            'vix': market_data.get('vix', 20.0),
+            'vix_percentile': market_data.get('vix_percentile', 50.0),
+            'vix_rank': market_data.get('vix_rank', 50.0),
+            'vix_change_pct': market_data.get('vix_change_pct', 0.0),
+            'vix_5d_ma': market_data.get('vix_5d_ma', 20.0),
+            'vix_20d_ma': market_data.get('vix_20d_ma', 20.0),
+            'vix_term_structure': market_data.get('vix_term_structure', 0.0),
             
             # Time
             'dte': dte,

@@ -4,6 +4,7 @@ Provides real-time market data from IBKR including:
 - Live IV Rank from options chain
 - Real-time Greeks
 - Market data snapshots
+- VIX (fear index) and term structure
 """
 
 import logging
@@ -145,7 +146,10 @@ class IBKRDataIntegration:
             # Calculate IV Rank from chain
             iv_data = self._calculate_iv_from_chain(chain_data)
             
-            # Build market snapshot
+            # Fetch VIX data (fear index)
+            vix_data = self._get_vix_data()
+            
+            # Build market snapshot with VIX
             snapshot = {
                 'price': underlying_data.get('close', 0),
                 'historical_volatility': self._calculate_hv(underlying_data),
@@ -156,6 +160,7 @@ class IBKRDataIntegration:
                 'momentum_10d': self._calculate_momentum(underlying_data, 10),
                 'vs_ma20': self._calculate_vs_ma(underlying_data, 20),
                 'vs_ma50': self._calculate_vs_ma(underlying_data, 50),
+                **vix_data,  # VIX features
                 'market_regime': self._determine_regime(iv_data.get('iv_rank', 50)),
                 'risk_free_rate': 0.05,
             }
@@ -282,3 +287,48 @@ class IBKRDataIntegration:
             return 2  # High vol
         else:
             return 1  # Normal
+    
+    def _get_vix_data(self) -> Dict[str, Any]:
+        """Fetch VIX (fear index) data from IBKR.
+        
+        Returns:
+            Dictionary with VIX features
+        """
+        try:
+            # Fetch VIX index data
+            vix_data = self.data_client.get_vix_data()
+            
+            if not vix_data:
+                return self._default_vix_data()
+            
+            current_vix = vix_data.get('vix', 20.0)
+            vix_history = vix_data.get('history', [])
+            vix9d = vix_data.get('vix9d')
+            vix3m = vix_data.get('vix3m')
+            
+            # Calculate VIX features
+            from core.ml.market_data import MarketDataCalculator
+            vix_features = MarketDataCalculator.calculate_vix_features(
+                current_vix=current_vix,
+                vix_history=vix_history,
+                vix9d=vix9d,
+                vix3m=vix3m
+            )
+            
+            return vix_features
+            
+        except Exception as e:
+            logger.debug(f"Could not fetch VIX data: {e}")
+            return self._default_vix_data()
+    
+    def _default_vix_data(self) -> Dict[str, Any]:
+        """Return default VIX data when not available."""
+        return {
+            'vix': 20.0,
+            'vix_percentile': 50.0,
+            'vix_rank': 50.0,
+            'vix_change_pct': 0.0,
+            'vix_5d_ma': 20.0,
+            'vix_20d_ma': 20.0,
+            'vix_term_structure': 0.0,
+        }

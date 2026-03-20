@@ -5,6 +5,7 @@ Calculates real-time market metrics including:
 - Historical volatility
 - Greeks (Delta, Gamma, Vega, Theta)
 - Price momentum indicators
+- VIX (fear/greed index) and term structure
 """
 
 import numpy as np
@@ -221,10 +222,87 @@ class MarketDataCalculator:
         return iv_percentile
     
     @staticmethod
+    def calculate_vix_features(
+        current_vix: Optional[float] = None,
+        vix_history: Optional[List[float]] = None,
+        vix9d: Optional[float] = None,
+        vix3m: Optional[float] = None
+    ) -> Dict[str, float]:
+        """Calculate VIX (fear index) related features.
+        
+        Args:
+            current_vix: Current VIX level
+            vix_history: Historical VIX values (last 20-90 days)
+            vix9d: 9-day forward VIX (if available)
+            vix3m: 3-month forward VIX (if available)
+            
+        Returns:
+            Dictionary with VIX features
+        """
+        if current_vix is None:
+            # Default values when VIX data not available
+            return {
+                'vix': 20.0,  # Long-term average
+                'vix_percentile': 50.0,
+                'vix_rank': 50.0,
+                'vix_change_pct': 0.0,
+                'vix_5d_ma': 20.0,
+                'vix_20d_ma': 20.0,
+                'vix_term_structure': 0.0,
+            }
+        
+        # VIX percentile (where current VIX sits in recent history)
+        if vix_history and len(vix_history) > 0:
+            vix_percentile = MarketDataCalculator.calculate_iv_percentile(
+                current_vix, vix_history
+            )
+            vix_rank = MarketDataCalculator.calculate_iv_rank(
+                current_vix,
+                max(vix_history) if vix_history else current_vix * 1.5,
+                min(vix_history) if vix_history else current_vix * 0.5
+            )
+        else:
+            vix_percentile = 50.0
+            vix_rank = 50.0
+        
+        # VIX change (5-day)
+        vix_change_pct = 0.0
+        if vix_history and len(vix_history) >= 5:
+            vix_5d_ago = vix_history[-5]
+            if vix_5d_ago > 0:
+                vix_change_pct = (current_vix - vix_5d_ago) / vix_5d_ago * 100
+        
+        # VIX moving averages
+        vix_5d_ma = current_vix
+        vix_20d_ma = current_vix
+        if vix_history:
+            if len(vix_history) >= 5:
+                vix_5d_ma = np.mean(vix_history[-5:])
+            if len(vix_history) >= 20:
+                vix_20d_ma = np.mean(vix_history[-20:])
+        
+        # VIX term structure (contango/backwardation)
+        # Positive = contango (normal), Negative = backwardation (fear)
+        vix_term_structure = 0.0
+        if vix9d is not None and current_vix > 0:
+            vix_term_structure = (vix9d - current_vix) / current_vix * 100
+        
+        return {
+            'vix': current_vix,
+            'vix_percentile': vix_percentile,
+            'vix_rank': vix_rank,
+            'vix_change_pct': vix_change_pct,
+            'vix_5d_ma': vix_5d_ma,
+            'vix_20d_ma': vix_20d_ma,
+            'vix_term_structure': vix_term_structure,
+        }
+    
+    @staticmethod
     def build_market_data_snapshot(
         prices: List[float],
         current_idx: int,
         iv_data: Optional[Dict[str, float]] = None,
+        vix_data: Optional[Dict[str, float]] = None,
         risk_free_rate: float = 0.05
     ) -> Dict[str, float]:
         """Build complete market data snapshot for ML features.
@@ -233,10 +311,11 @@ class MarketDataCalculator:
             prices: List of closing prices
             current_idx: Current index in price series
             iv_data: Optional IV data {'current_iv', 'iv_52w_high', 'iv_52w_low', 'historical_ivs'}
+            vix_data: Optional VIX data {'current_vix', 'vix_history', 'vix9d', 'vix3m'}
             risk_free_rate: Risk-free interest rate
             
         Returns:
-            Complete market data dictionary
+            Complete market data dictionary with VIX features
         """
         current_price = prices[current_idx]
         
@@ -264,11 +343,19 @@ class MarketDataCalculator:
             iv_rank = 50.0
             iv_percentile = 50.0
         
-        # Determine market regime
-        if iv_rank < 20:
-            market_regime = 0  # Low vol
-        elif iv_rank > 50:
-            market_regime = 2  # High vol
+        # Calculate VIX features
+        vix_features = MarketDataCalculator.calculate_vix_features(
+            current_vix=vix_data.get('current_vix') if vix_data else None,
+            vix_history=vix_data.get('vix_history') if vix_data else None,
+            vix9d=vix_data.get('vix9d') if vix_data else None,
+            vix3m=vix_data.get('vix3m') if vix_data else None
+        )
+        
+        # Determine market regime (now considers both IV and VIX)
+        if iv_rank < 20 and vix_features['vix_percentile'] < 30:
+            market_regime = 0  # Low vol / complacent
+        elif iv_rank > 50 or vix_features['vix_percentile'] > 70:
+            market_regime = 2  # High vol / fear
         else:
             market_regime = 1  # Normal
         
@@ -279,6 +366,7 @@ class MarketDataCalculator:
             'iv_percentile': iv_percentile,
             'current_iv': current_iv,
             **momentum,
+            **vix_features,  # VIX features
             'market_regime': market_regime,
             'risk_free_rate': risk_free_rate
         }

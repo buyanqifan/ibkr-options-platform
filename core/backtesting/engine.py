@@ -517,11 +517,20 @@ class BacktestEngine:
                         'historical_ivs': hv[:i+1] if i > 0 else [0.3],
                     }
                     
-                    # Calculate real market metrics
+                    # Build VIX data (fear index) - estimate from HV if not available
+                    vix_data = {
+                        'current_vix': hv[i] * 100 if i < len(hv) else 20.0,  # Use HV as proxy
+                        'vix_history': [h * 100 for h in hv[:i+1]] if i > 0 else [20.0],
+                        'vix9d': None,  # Would need VIX9D data from IBKR
+                        'vix3m': None,  # Would need VIX3M data from IBKR
+                    }
+                    
+                    # Calculate real market metrics with VIX
                     market_snapshot = MarketDataCalculator.build_market_data_snapshot(
                         prices=prices,
                         current_idx=i,
                         iv_data=iv_data,
+                        vix_data=vix_data,
                         risk_free_rate=0.05
                     )
                     
