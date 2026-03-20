@@ -15,6 +15,16 @@ from app.components.monitoring import (
 )
 from app.services import get_services
 
+# Initialize services at module level
+_services = None
+
+def get_services_cached():
+    """Get services with caching to avoid local variable issues."""
+    global _services
+    if _services is None:
+        _services = get_services()
+    return _services
+
 dash.register_page(__name__, path="/binbin-god", name="Binbin God", icon="bi bi-robot")
 
 # Strategy info
@@ -557,7 +567,7 @@ def run_binbin_backtest(
     if not start_date or not end_date:
         return no_update, no_update, no_update, no_update
     
-    services = get_services()
+    services = get_services_cached()
     if not services:
         return {}, html.Div(), html.P("Services not initialized", className="text-warning"), {"display": "none"}
     
