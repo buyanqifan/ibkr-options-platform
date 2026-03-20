@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from core.ml.delta_optimizer import DeltaOptimizerML, DeltaOptimizationConfig, MarketContext, OptimizationResult
+from core.ml.dte_optimizer import DTEOptimizerML, DTEOptimizationConfig, DTEOptimizationResult
 from core.backtesting.pricing import OptionsPricer
 
 logger = logging.getLogger("delta_integration")
@@ -26,13 +27,16 @@ class BinGodDeltaIntegration:
     
     def __init__(self, 
                  ml_optimization_enabled: bool = True,
+                 ml_dte_optimization_enabled: bool = False,  # Add DTE optimization flag
                  fallback_delta: float = 0.30,
-                 config: Optional[DeltaOptimizationConfig] = None):
+                 config: Optional[DeltaOptimizationConfig] = None,
+                 dte_config: Optional[DTEOptimizationConfig] = None):  # Add DTE config
         
         self.ml_optimization_enabled = ml_optimization_enabled
+        self.ml_dte_optimization_enabled = ml_dte_optimization_enabled  # Store DTE optimization flag
         self.fallback_delta = fallback_delta
         
-        # Initialize ML optimizer if enabled
+        # Initialize ML delta optimizer if enabled
         if ml_optimization_enabled:
             self.ml_config = config or DeltaOptimizationConfig()
             self.optimizer = DeltaOptimizerML(self.ml_config)
@@ -40,6 +44,15 @@ class BinGodDeltaIntegration:
         else:
             self.optimizer = None
             logger.info("ML Delta optimization disabled, using static delta")
+        
+        # Initialize ML DTE optimizer if enabled
+        if ml_dte_optimization_enabled:
+            self.dte_config = dte_config or DTEOptimizationConfig()
+            self.dte_optimizer = DTEOptimizerML(self.dte_config)
+            logger.info("ML DTE optimizer initialized")
+        else:
+            self.dte_optimizer = None
+            logger.info("ML DTE optimization disabled, using static DTE")
     
     def optimize_put_delta(self,
                           symbol: str,
@@ -218,6 +231,118 @@ class BinGodDeltaIntegration:
             return self.optimizer.get_optimization_insights()
         else:
             return {"status": "ML optimization disabled"}
+    
+    def optimize_put_dte(self,
+                        symbol: str,
+                        current_price: float,
+                        cost_basis: float,
+                        bars: List[Dict],
+                        options_data: List[Dict],
+                        fundamentals: Dict = None,
+                        iv: float = 0.25,
+                        strategy_phase: str = "SP") -> DTEOptimizationResult:
+        """
+        Optimize DTE selection for put options using ML models.
+        """
+        
+        if not self.ml_dte_optimization_enabled or not self.dte_optimizer:
+            # Return fallback result
+            return DTEOptimizationResult(
+                optimal_dte_min=21,
+                optimal_dte_max=45,
+                expected_premium=0.02 * current_price,  # Estimate
+                expected_probability_assignment=0.30,   # Estimate
+                risk_score=0.5,
+                confidence=1.0,
+                reasoning="Static DTE mode (ML DTE disabled)"
+            )
+        
+        try:
+            # Extract market context for DTE optimization
+            market_context = self.dte_optimizer.extract_market_context(
+                symbol, current_price, cost_basis, bars, options_data, fundamentals, strategy_phase
+            )
+            
+            # Optimize DTE for put
+            result = self.dte_optimizer.optimize_dte_range(
+                market_context=market_context,
+                right="P",
+                iv=iv
+            )
+            
+            logger.info(f"ML optimized put DTE: {result.optimal_dte_min}-{result.optimal_dte_max} days "
+                       f"(confidence: {result.confidence:.2f}) - {result.reasoning}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"ML put DTE optimization failed: {e}, falling back to static DTE")
+            
+            return DTEOptimizationResult(
+                optimal_dte_min=21,
+                optimal_dte_max=45,
+                expected_premium=0.02 * current_price,
+                expected_probability_assignment=0.30,
+                risk_score=0.5,
+                confidence=0.5,
+                reasoning=f"ML DTE optimization failed, fallback to default DTE range 21-45"
+            )
+    
+    def optimize_call_dte(self,
+                         symbol: str,
+                         current_price: float,
+                         cost_basis: float,
+                         bars: List[Dict],
+                         options_data: List[Dict],
+                         fundamentals: Dict = None,
+                         iv: float = 0.25,
+                         strategy_phase: str = "CC") -> DTEOptimizationResult:
+        """
+        Optimize DTE selection for call options using ML models.
+        """
+        
+        if not self.ml_dte_optimization_enabled or not self.dte_optimizer:
+            # Return fallback result
+            return DTEOptimizationResult(
+                optimal_dte_min=21,
+                optimal_dte_max=45,
+                expected_premium=0.02 * current_price,  # Estimate
+                expected_probability_assignment=0.25,   # Estimate
+                risk_score=0.4,
+                confidence=1.0,
+                reasoning="Static DTE mode (ML DTE disabled)"
+            )
+        
+        try:
+            # Extract market context for DTE optimization
+            market_context = self.dte_optimizer.extract_market_context(
+                symbol, current_price, cost_basis, bars, options_data, fundamentals, strategy_phase
+            )
+            
+            # Optimize DTE for call
+            result = self.dte_optimizer.optimize_dte_range(
+                market_context=market_context,
+                right="C",
+                iv=iv
+            )
+            
+            logger.info(f"ML optimized call DTE: {result.optimal_dte_min}-{result.optimal_dte_max} days "
+                       f"(confidence: {result.confidence:.2f}) - {result.reasoning}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"ML call DTE optimization failed: {e}, falling back to static DTE")
+            
+            return DTEOptimizationResult(
+                optimal_dte_min=21,
+                optimal_dte_max=45,
+                expected_premium=0.02 * current_price,
+                expected_probability_assignment=0.25,
+                risk_score=0.4,
+                confidence=0.5,
+                reasoning=f"ML DTE optimization failed, fallback to default DTE range 21-45"
+            )
 
 
 class AdaptiveDeltaStrategy:

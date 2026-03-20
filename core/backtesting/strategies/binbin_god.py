@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from core.backtesting.strategies.base import BaseStrategy, Signal
 from core.backtesting.pricing import OptionsPricer
+from core.ml.dte_optimizer import DTEOptimizerML, DTEOptimizationConfig, DTEOptimizationResult
 import logging
 
 
@@ -104,16 +105,19 @@ class BinbinGodStrategy(BaseStrategy):
         
         # ML delta optimization parameters - use BaseStrategy's implementation
         self.ml_delta_optimization = config.get("ml_delta_optimization", False)
+        self.ml_dte_optimization = config.get("ml_dte_optimization", False)  # Add DTE optimization flag
         self.ml_adoption_rate = config.get("ml_adoption_rate", 0.5)
         self.ml_integration = None
+        self.ml_dte_optimizer = None  # Add DTE optimizer
         self.logger = logging.getLogger("binbin_god")
         
         # Initialize ML integration if enabled (use BaseStrategy's pretrain_ml_model)
-        if self.ml_delta_optimization:
+        if self.ml_delta_optimization or self.ml_dte_optimization:
             try:
                 from core.ml.delta_strategy_integration import BinGodDeltaIntegration, AdaptiveDeltaStrategy
                 self.ml_integration = BinGodDeltaIntegration(
-                    ml_optimization_enabled=True,
+                    ml_optimization_enabled=self.ml_delta_optimization,
+                    ml_dte_optimization_enabled=self.ml_dte_optimization,
                     fallback_delta=self.call_delta,
                     config=config.get("ml_config")
                 )
@@ -121,13 +125,16 @@ class BinbinGodStrategy(BaseStrategy):
                     ml_integration=self.ml_integration,
                     adoption_rate=self.ml_adoption_rate
                 )
-                self.logger.info("ML Delta optimizer initialized for BinbinGod")
+                self.logger.info("ML optimizers initialized for BinbinGod (Delta: {}, DTE: {})".format(
+                    self.ml_delta_optimization, self.ml_dte_optimization))
             except ImportError as e:
-                self.logger.warning(f"ML Delta optimization not available: {e}")
+                self.logger.warning(f"ML optimization not available: {e}")
                 self.ml_delta_optimization = False
+                self.ml_dte_optimization = False
             except Exception as e:
-                self.logger.warning(f"ML Delta optimization initialization failed: {e}")
+                self.logger.warning(f"ML optimization initialization failed: {e}")
                 self.ml_delta_optimization = False
+                self.ml_dte_optimization = False
         
         # Scoring weights - optimized to avoid correlation
         # IV Rank is most important for options premium (35%)
@@ -470,16 +477,68 @@ class BinbinGodStrategy(BaseStrategy):
         from datetime import timedelta
         from core.backtesting.pricing import OptionsPricer
         
-        T = self.dte_max / 365.0
+        # Default DTE values
         dte_days = int(self.dte_max)
+        T = dte_days / 365.0
         entry = datetime.strptime(current_date, "%Y-%m-%d")
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
         
+        # ML Delta optimization
+        ml_result = None
+        if self.ml_delta_optimization and self.ml_integration:
+            try:
+                ml_result = self.ml_integration.optimize_put_delta(
+                    symbol=symbol,
+                    current_price=underlying_price,
+                    cost_basis=self.stock_holding.cost_basis,
+                    bars=[],  # Will be populated by real-time interface
+                    options_data=[],  # Will be populated by real-time interface
+                    iv=iv
+                )
+                logger.info(f"ML optimized delta: {ml_result.optimal_delta:.3f} (confidence: {ml_result.confidence:.2f})")
+            except Exception as e:
+                logger.warning(f"ML optimization failed: {e}")
+                ml_result = None
+        
+        # ML DTE optimization for Sell Puts
+        ml_dte_result = None
+        if self.ml_dte_optimization and self.ml_integration:
+            try:
+                ml_dte_result = self.ml_integration.optimize_put_dte(
+                    symbol=symbol,
+                    current_price=underlying_price,
+                    cost_basis=self.stock_holding.cost_basis,
+                    bars=[],  # Will be populated by real-time interface
+                    options_data=[],  # Will be populated by real-time interface
+                    iv=iv,
+                    strategy_phase="SP"
+                )
+                logger.info(f"ML optimized DTE for SP: {ml_dte_result.optimal_dte_min}-{ml_dte_result.optimal_dte_max} days "
+                           f"(confidence: {ml_dte_result.confidence:.2f})")
+                
+                # Update DTE values based on ML recommendation
+                if ml_dte_result.confidence > 0.6:  # Only apply if confidence is reasonable
+                    dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
+                    T = dte_days / 365.0
+                    expiry_date = entry + timedelta(days=dte_days)
+                    expiry_str = expiry_date.strftime("%Y%m%d")
+                    logger.info(f"Updated DTE to {dte_days} days based on ML recommendation")
+            except Exception as e:
+                logger.warning(f"ML DTE optimization failed: {e}")
+                ml_dte_result = None
+        
         # Use put-specific delta
         original_delta = self.delta_target
         self.delta_target = self.put_delta
-        strike = self.select_strike(underlying_price, iv, T, "P")
+        
+        # Apply ML delta if available and confident
+        effective_delta = self.put_delta
+        if ml_result and ml_result.confidence > 0.7:
+            effective_delta = ml_result.optimal_delta
+            logger.info(f"Using ML optimized put delta: {effective_delta:.3f}")
+        
+        strike = self.select_strike_with_delta(underlying_price, iv, T, "P", effective_delta)
         self.delta_target = original_delta
         
         premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
@@ -544,8 +603,9 @@ class BinbinGodStrategy(BaseStrategy):
                 symbol, current_date, underlying_price, iv, position_mgr
             )
         
-        T = self.dte_max / 365.0
+        # Default DTE values
         dte_days = int(self.dte_max)
+        T = dte_days / 365.0
         entry = datetime.strptime(current_date, "%Y-%m-%d")
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
@@ -553,6 +613,33 @@ class BinbinGodStrategy(BaseStrategy):
         # Check if we need CC optimization
         call_delta_target = self.call_delta
         additional_constraints = {}
+        
+        # ML DTE optimization for Covered Calls
+        ml_dte_result = None
+        if self.ml_dte_optimization and self.ml_integration:
+            try:
+                ml_dte_result = self.ml_integration.optimize_call_dte(
+                    symbol=symbol,
+                    current_price=underlying_price,
+                    cost_basis=self.stock_holding.cost_basis,
+                    bars=[],  # Will be populated by real-time interface
+                    options_data=[],  # Will be populated by real-time interface
+                    iv=iv,
+                    strategy_phase="CC"
+                )
+                logger.info(f"ML optimized DTE for CC: {ml_dte_result.optimal_dte_min}-{ml_dte_result.optimal_dte_max} days "
+                           f"(confidence: {ml_dte_result.confidence:.2f})")
+                
+                # Update DTE values based on ML recommendation
+                if ml_dte_result.confidence > 0.6:  # Only apply if confidence is reasonable
+                    dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
+                    T = dte_days / 365.0
+                    expiry_date = entry + timedelta(days=dte_days)
+                    expiry_str = expiry_date.strftime("%Y%m%d")
+                    logger.info(f"Updated DTE to {dte_days} days based on ML recommendation")
+            except Exception as e:
+                logger.warning(f"ML DTE optimization failed: {e}")
+                ml_dte_result = None
         
         # ML Delta optimization
         ml_result = None
@@ -570,6 +657,33 @@ class BinbinGodStrategy(BaseStrategy):
             except Exception as e:
                 logger.warning(f"ML optimization failed: {e}")
                 ml_result = None
+        
+        # ML DTE optimization for Covered Calls
+        ml_dte_result = None
+        if self.ml_dte_optimization and self.ml_integration:
+            try:
+                ml_dte_result = self.ml_integration.optimize_call_dte(
+                    symbol=symbol,
+                    current_price=underlying_price,
+                    cost_basis=self.stock_holding.cost_basis,
+                    bars=[],  # Will be populated by real-time interface
+                    options_data=[],  # Will be populated by real-time interface
+                    iv=iv,
+                    strategy_phase="CC"
+                )
+                logger.info(f"ML optimized DTE for CC: {ml_dte_result.optimal_dte_min}-{ml_dte_result.optimal_dte_max} days "
+                           f"(confidence: {ml_dte_result.confidence:.2f})")
+                
+                # Update DTE values based on ML recommendation
+                if ml_dte_result.confidence > 0.6:  # Only apply if confidence is reasonable
+                    dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
+                    T = dte_days / 365.0
+                    expiry_date = entry + timedelta(days=dte_days)
+                    expiry_str = expiry_date.strftime("%Y%m%d")
+                    logger.info(f"Updated DTE to {dte_days} days based on ML recommendation")
+            except Exception as e:
+                logger.warning(f"ML DTE optimization failed: {e}")
+                ml_dte_result = None
         
         if self.cc_optimization_enabled and self.stock_holding.cost_basis > 0:
             # Check if current price is below cost basis (loss position)
@@ -1084,6 +1198,60 @@ class BinbinGodStrategy(BaseStrategy):
                     # to ensure we find a valid strike
                     test_delta = OptionsPricer.delta(underlying_price, min_strike, T, iv, right)
                     logger.info(f"Test delta at minimum strike ${min_strike:.2f}: {test_delta:.3f}")
+
+        for _ in range(50):
+            mid = (low + high) / 2
+            d = OptionsPricer.delta(underlying_price, mid, T, iv, right)
+            if right == "P":
+                # For puts: increasing strike makes delta more negative
+                # So if d < target_delta (too negative), decrease strike (high = mid)
+                # If d > target_delta (too positive), increase strike (low = mid)
+                if d < target_delta:
+                    high = mid
+                else:
+                    low = mid
+            else:
+                # For calls: increasing strike makes delta decrease (more negative)
+                # So if d > target_delta (too high), increase strike (low = mid)
+                # If d < target_delta (too low), decrease strike (high = mid)
+                if d > target_delta:
+                    low = mid
+                else:
+                    high = mid
+            if abs(d - target_delta) < 0.005:
+                break
+
+        # Round to nearest 0.5 or 1.0
+        if underlying_price > 100:
+            return round(mid)
+        return round(mid * 2) / 2
+    
+    def select_strike_with_delta(
+        self,
+        underlying_price: float,
+        iv: float,
+        T: float,
+        right: str,
+        target_delta: float,
+    ) -> float:
+        """Select strike price with a specific delta value."""
+        from core.backtesting.pricing import OptionsPricer
+        
+        # Binary search for the strike that gives target delta
+        if right == "P":
+            target_delta = -abs(target_delta)
+            # For put options: when S > K (OTM), delta approaches 0
+            # When S < K (ITM), delta approaches -1
+            # So to get delta near -0.3 (slightly OTM), we want K slightly less than S
+            low = underlying_price * 0.8  # e.g. 120 for S=150
+            high = underlying_price * 1.1  # e.g. 165 for S=150
+        else:
+            target_delta = abs(target_delta)
+            # For call options: when S > K (ITM), delta approaches 1
+            # When S < K (OTM), delta approaches 0
+            # So to get delta near 0.3 (slightly OTM for covered calls), we want K > S
+            low = underlying_price * 0.8  # Wider range for better convergence
+            high = underlying_price * 1.2
 
         for _ in range(50):
             mid = (low + high) / 2
