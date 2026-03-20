@@ -67,15 +67,17 @@ class AsyncEventBridge:
             except TimeoutError:
                 future.cancel()
                 raise TimeoutError(f"Coroutine timed out after {timeout}s")
-        except RuntimeError as e:
+        except Exception as e:
             # Handle "event loop is already running" error
-            if "event loop is already running" in str(e):
+            error_msg = str(e)
+            if "event loop is already running" in error_msg or "This event loop is already running" in error_msg:
                 logger.warning(f"Event loop conflict detected: {e}")
                 # Fallback: run in a new thread
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(asyncio.run, coro)
                     return future.result(timeout=timeout)
+            # Re-raise other exceptions
             raise
 
     def submit_async(self, coro: Coroutine) -> Future:
