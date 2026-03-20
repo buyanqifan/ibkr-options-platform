@@ -446,6 +446,25 @@ class BacktestEngine:
         trades = [t.to_dict() for t in simulator.closed_trades]
         metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
         
+        # Merge engine-calculated metrics into strategy_performance
+        # This ensures performance_metrics in UI shows real data, not placeholders
+        if "performance_metrics" not in strategy_performance:
+            strategy_performance["performance_metrics"] = {}
+        
+        # Update performance_metrics with actual calculated metrics
+        strategy_performance["performance_metrics"].update({
+            "total_trades": metrics.get("total_trades", 0),
+            "winning_trades": metrics.get("winning_trades", 0),
+            "losing_trades": metrics.get("losing_trades", 0),
+            "total_pnl": metrics.get("total_pnl", 0),
+            "win_rate": metrics.get("win_rate", 0),
+            "avg_pnl_per_trade": metrics.get("avg_pnl_per_trade", 0),
+            "max_drawdown": metrics.get("max_drawdown_pct", 0),
+            "profit_factor": metrics.get("profit_factor", 0),
+            "sharpe_ratio": metrics.get("sharpe_ratio", 0),
+            "sortino_ratio": metrics.get("sortino_ratio", 0),
+        })
+        
         # Add open positions info for UI display (convert OptionPosition to dict)
         if simulator.open_positions:
             open_positions = []
