@@ -461,14 +461,18 @@ def run_backtest(
     # Add monitoring dashboard for wheel strategy
     monitoring_section = html.Div()
     if strategy_performance and params.get("strategy") == "wheel":
-        monitoring_section = create_monitoring_dashboard(strategy_performance)
+        # Add metrics from engine result for performance card
+        monitoring_data = {**strategy_performance, "metrics": metrics}
+        monitoring_section = create_monitoring_dashboard(monitoring_data)
     
     # Add holdings card (for all strategies)
     holdings_card = html.Div()
     if strategy_performance:
+        # Handle both nested (Wheel) and flat (BinbinGod) data structures
+        current_state = strategy_performance.get("current_state", {})
         holdings_data = {
-            "shares_held": strategy_performance.get("shares_held", 0),
-            "cost_basis": strategy_performance.get("cost_basis", 0),
+            "shares_held": strategy_performance.get("shares_held") or current_state.get("shares_held", 0),
+            "cost_basis": strategy_performance.get("cost_basis") or current_state.get("cost_basis", 0),
             "options_held": strategy_performance.get("open_positions", []),
         }
         holdings_card = create_holdings_card(holdings_data)

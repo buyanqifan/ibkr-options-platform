@@ -436,6 +436,22 @@ class BacktestEngine:
         strategy_performance = {}
         if hasattr(strategy, 'get_performance_report'):
             strategy_performance = strategy.get_performance_report()
+        
+        # Add open positions info for UI display (convert OptionPosition to dict)
+        if simulator.open_positions:
+            open_positions = []
+            for pos in simulator.open_positions:
+                open_positions.append({
+                    "symbol": pos.symbol,
+                    "trade_type": pos.trade_type,
+                    "right": pos.right,
+                    "strike": pos.strike,
+                    "expiry": pos.expiry,
+                    "quantity": pos.quantity,
+                    "entry_price": pos.entry_price,
+                    "market_value": pos.current_price * abs(pos.quantity) * 100,
+                })
+            strategy_performance["open_positions"] = open_positions
 
         # Get underlying price data for timeline chart
         underlying_prices = []

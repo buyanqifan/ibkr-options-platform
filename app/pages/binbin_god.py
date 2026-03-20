@@ -586,9 +586,11 @@ def run_binbin_backtest(
     holdings_card = html.Div()
     strategy_performance = result.get("strategy_performance", {})
     if strategy_performance:
+        # Handle both nested (Wheel) and flat (BinbinGod) data structures
+        current_state = strategy_performance.get("current_state", {})
         holdings_data = {
-            "shares_held": strategy_performance.get("shares_held", 0),
-            "cost_basis": strategy_performance.get("cost_basis", 0),
+            "shares_held": strategy_performance.get("shares_held") or current_state.get("shares_held", 0),
+            "cost_basis": strategy_performance.get("cost_basis") or current_state.get("cost_basis", 0),
             "options_held": strategy_performance.get("open_positions", []),
         }
         holdings_card = create_holdings_card(holdings_data)
@@ -596,7 +598,9 @@ def run_binbin_backtest(
     # Monitoring dashboard for wheel logic
     monitoring_section = html.Div()
     if strategy_performance and params.get("strategy") == "binbin_god":
-        monitoring_section = create_monitoring_dashboard(strategy_performance)
+        # Add metrics from engine result for performance card
+        monitoring_data = {**strategy_performance, "metrics": metrics}
+        monitoring_section = create_monitoring_dashboard(monitoring_data)
     
     # MAG7 analysis section (unique to BinbinGod)
     mag7_analysis = result.get("mag7_analysis", {})

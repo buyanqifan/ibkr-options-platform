@@ -1111,10 +1111,32 @@ class BinbinGodStrategy(BaseStrategy):
         """Generate comprehensive performance report with selection history."""
         return {
             "strategy": "binbin_god",
+            # current_state: for compatibility with Wheel's monitoring dashboard
+            "current_state": {
+                "phase": self.phase,
+                "shares_held": self.stock_holding.shares,
+                "cost_basis": round(self.stock_holding.cost_basis, 2),
+                "total_premium_collected": round(self.stock_holding.total_premium_collected, 2),
+            },
+            # performance_metrics: placeholder for monitoring dashboard
+            "performance_metrics": {
+                "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
+                "total_pnl": 0.0,
+                "win_rate": 0.0,
+                "avg_pnl_per_trade": 0.0,
+                "max_drawdown": 0.0,
+                "phase_transitions": 0,
+            },
+            # Top-level fields for easy access
             "phase": self.phase,
             "shares_held": self.stock_holding.shares,
             "cost_basis": round(self.stock_holding.cost_basis, 2),
             "total_premium_collected": round(self.stock_holding.total_premium_collected, 2),
             "selection_history": self.selection_history,
             "mag7_analysis": self.mag7_analysis,
+            # For UI compatibility with Wheel strategy monitoring
+            "trade_history": [],  # Would need to track in on_trade_closed
+            "phase_history": [],  # Would need to track on phase transitions
         }
