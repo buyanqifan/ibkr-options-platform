@@ -271,3 +271,40 @@ class BaseStrategy(ABC):
     def select_expiry_dte(self) -> float:
         """Return target DTE in the middle of the range."""
         return (self.dte_min + self.dte_max) / 2
+
+    def get_performance_report(self) -> dict:
+        """Default performance report for strategies that don't override it.
+        
+        This provides basic structure for UI compatibility, though specific 
+        strategies may override this with more detailed information.
+        """
+        return {
+            "strategy": self.name,
+            "current_state": {
+                "phase": "N/A",  # Default for strategies without phases
+                "shares_held": 0,  # Default: no shares held
+                "cost_basis": 0.0,  # Default: no cost basis
+                "total_premium_collected": 0.0,  # Default: no premium collected
+            },
+            "performance_metrics": {
+                "total_trades": 0,
+                "successful_assignments": 0,
+                "expired_worthless": 0,
+                "profit_target_exits": 0,
+                "stop_loss_exits": 0,
+                "total_pnl": 0.0,
+                "avg_pnl_per_trade": 0.0,
+                "win_rate": 0.0,
+                "max_drawdown": 0.0,
+                "phase_transitions": 0,
+            },
+            # Top-level fields for UI compatibility
+            "phase": "N/A",
+            "shares_held": 0,
+            "cost_basis": 0.0,
+            "total_premium_collected": 0.0,
+            "open_positions": [],  # Default: no open positions
+            "selection_history": [],
+            "trade_history": [],
+            "phase_history": [],
+        }
