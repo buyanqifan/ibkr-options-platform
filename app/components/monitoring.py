@@ -211,7 +211,7 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
                 html.Td(f"{shares_held:,}"),
                 html.Td(f"${cost_basis:.2f}"),
                 html.Td("-"),
-                html.Td(f"${cost_basis:.2f}"),
+                html.Td(f"${cost_basis * shares_held:.2f}"),
             ], className="table-success")
         )
     
@@ -268,7 +268,7 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
                 dbc.Row([
                     dbc.Col([
                         html.H6("Total Stock Value", className="text-muted"),
-                        html.H5(f"${cost_basis:.2f}", className="text-info"),
+                        html.H5(f"${cost_basis * shares_held:.2f}", className="text-info"),
                     ], width=6),
                     dbc.Col([
                         html.H6("Total Options Value", className="text-muted"),
@@ -279,6 +279,9 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
             ]),
         ]),
     ], className="mb-4 shadow-sm")
+
+
+def create_performance_summary_card(performance_metrics: Dict[str, Any]) -> dbc.Card:
     """Create a card displaying detailed performance summary."""
     return dbc.Card([
         dbc.CardHeader(html.H5("Performance Summary", className="mb-0")),
