@@ -91,11 +91,14 @@ layout = html.Div([
                     html.Hr(),
                     html.H6("Strategy Parameters", className="fw-bold mb-2"),
 
-                    dbc.Label("DTE Range (days)"),
-                    dbc.Row([
-                        dbc.Col(dbc.Input(id="bt-dte-min", type="number", value=30, size="sm"), width=6),  # 30-45 DTE is optimal
-                        dbc.Col(dbc.Input(id="bt-dte-max", type="number", value=45, size="sm"), width=6),
-                    ], className="mb-2"),
+                    # DTE Range - can be hidden when ML DTE optimization is enabled
+                    html.Div(id="bt-dte-container", children=[
+                        dbc.Label("DTE Range (days)"),
+                        dbc.Row([
+                            dbc.Col(dbc.Input(id="bt-dte-min", type="number", value=30, size="sm"), width=6),
+                            dbc.Col(dbc.Input(id="bt-dte-max", type="number", value=45, size="sm"), width=6),
+                        ], className="mb-2"),
+                    ]),
 
                     # Delta configuration - shown for non-Wheel strategies only
                     html.Div(id="delta-config-container", children=[
@@ -103,59 +106,62 @@ layout = html.Div([
                         dbc.Input(id="bt-delta", type="number", value=0.30, step=0.05, size="sm", className="mb-2"),
                     ]),
 
-                    dbc.Label("Profit Target (% of premium)"),
-                    dbc.Row([
-                        dbc.Col(
-                            dbc.Input(id="bt-profit-target", type="number", value=50, step=10, size="sm"),
-                            width=8
-                        ),
-                       dbc.Col(
-                            dcc.Checklist(
-                                id="bt-disable-profit-target",
-                               options=[{"label": "Disable", "value": True}],
-                               value=[],
-                                className="mt-2",
-                                style={
-                                    "color": "#e0e0e0",
-                                    "backgroundColor": "rgba(255, 255, 255, 0.08)",
-                                    "padding": "8px 12px",
-                                    "borderRadius": "4px",
-                                    "border": "1px solid rgba(255, 255, 255, 0.2)",
-                                    "display": "flex",
-                                    "alignItems": "center",
-                                    "gap": "8px"
-                                }
+                    # Exit Conditions - can be hidden when ML Exit optimization is enabled
+                    html.Div(id="bt-exit-conditions-container", children=[
+                        dbc.Label("Profit Target (% of premium)"),
+                        dbc.Row([
+                            dbc.Col(
+                                dbc.Input(id="bt-profit-target", type="number", value=50, step=10, size="sm"),
+                                width=8
                             ),
-                            width=4
-                        ),
-                    ], className="mb-2"),
+                           dbc.Col(
+                                dcc.Checklist(
+                                    id="bt-disable-profit-target",
+                                   options=[{"label": "Disable", "value": True}],
+                                   value=[],
+                                    className="mt-2",
+                                    style={
+                                        "color": "#e0e0e0",
+                                        "backgroundColor": "rgba(255, 255, 255, 0.08)",
+                                        "padding": "8px 12px",
+                                        "borderRadius": "4px",
+                                        "border": "1px solid rgba(255, 255, 255, 0.2)",
+                                        "display": "flex",
+                                        "alignItems": "center",
+                                        "gap": "8px"
+                                    }
+                                ),
+                                width=4
+                            ),
+                        ], className="mb-2"),
 
-                   dbc.Label("Stop Loss (% of premium)"),
-                   dbc.Row([
-                       dbc.Col(
-                           dbc.Input(id="bt-stop-loss", type="number", value=200, step=50, size="sm"),
-                            width=8
-                        ),
-                       dbc.Col(
-                            dcc.Checklist(
-                                id="bt-disable-stop-loss",
-                               options=[{"label": "Disable", "value": True}],
-                               value=[],
-                                className="mt-2",
-                                style={
-                                    "color": "#e0e0e0",
-                                    "backgroundColor": "rgba(255, 255, 255, 0.08)",
-                                    "padding": "8px 12px",
-                                    "borderRadius": "4px",
-                                    "border": "1px solid rgba(255, 255, 255, 0.2)",
-                                    "display": "flex",
-                                    "alignItems": "center",
-                                    "gap": "8px"
-                                }
+                       dbc.Label("Stop Loss (% of premium)"),
+                       dbc.Row([
+                           dbc.Col(
+                               dbc.Input(id="bt-stop-loss", type="number", value=200, step=50, size="sm"),
+                                width=8
                             ),
-                            width=4
-                        ),
-                    ], className="mb-3"),
+                           dbc.Col(
+                                dcc.Checklist(
+                                    id="bt-disable-stop-loss",
+                                   options=[{"label": "Disable", "value": True}],
+                                   value=[],
+                                    className="mt-2",
+                                    style={
+                                        "color": "#e0e0e0",
+                                        "backgroundColor": "rgba(255, 255, 255, 0.08)",
+                                        "padding": "8px 12px",
+                                        "borderRadius": "4px",
+                                        "border": "1px solid rgba(255, 255, 255, 0.2)",
+                                        "display": "flex",
+                                        "alignItems": "center",
+                                        "gap": "8px"
+                                    }
+                                ),
+                                width=4
+                            ),
+                        ], className="mb-3"),
+                    ]),
 
                     # Max Positions (visible for all strategies)
                     html.Hr(),
@@ -321,23 +327,53 @@ def toggle_wheel_params(strategy):
 @callback(
     Output("delta-config-container", "className"),
     Input("bt-strategy", "value"),
+    Input("bt-ml-delta", "value"),
 )
-def toggle_delta_config(strategy):
-    """Show/hide delta configuration for non-Wheel strategies."""
-    if strategy != "wheel":
-        return "d-block"
-    return "d-none"
+def toggle_delta_config(strategy, ml_delta_enabled):
+    """Show/hide delta configuration for non-Wheel strategies.
+
+    Hide when:
+    - Strategy is Wheel (has its own put/call delta)
+    - ML Delta optimization is enabled (ML will optimize delta)
+    """
+    ml_delta_on = bool(ml_delta_enabled and True in ml_delta_enabled)
+
+    if strategy == "wheel":
+        return "d-none"
+    if ml_delta_on:
+        return "d-none"
+    return "d-block"
 
 
 @callback(
     Output("ml-delta-params-container", "className"),
+    Output("bt-dte-container", "className"),
+    Output("bt-exit-conditions-container", "className"),
     Input("bt-ml-delta", "value"),
+    Input("bt-ml-dte", "value"),
+    Input("bt-ml-exit", "value"),
 )
-def toggle_ml_delta_params(ml_delta_enabled):
-    """Show/hide ML delta parameters when ML optimization is enabled."""
-    if ml_delta_enabled and True in ml_delta_enabled:
-        return "d-block"
-    return "d-none"
+def toggle_ml_params(ml_delta_enabled, ml_dte_enabled, ml_exit_enabled):
+    """Show/hide ML parameters and hide traditional params when ML is enabled.
+
+    When ML Delta is enabled: show ML delta params, hide delta config
+    When ML DTE is enabled: hide DTE range (ML will optimize)
+    When ML Exit is enabled: hide exit conditions (ML will optimize)
+    """
+    ml_delta_on = bool(ml_delta_enabled and True in ml_delta_enabled)
+    ml_dte_on = bool(ml_dte_enabled and True in ml_dte_enabled)
+    ml_exit_on = bool(ml_exit_enabled and True in ml_exit_enabled)
+
+    # ML delta params: show when ML delta is enabled
+    ml_delta_class = "d-block" if ml_delta_on else "d-none"
+
+    # DTE container: hide when ML DTE is enabled
+    dte_class = "d-none" if ml_dte_on else "d-block"
+
+    # Exit conditions: hide when ML Exit is enabled
+    exit_class = "d-none" if ml_exit_on else "d-block"
+
+    return ml_delta_class, dte_class, exit_class
 
 
 @callback(
@@ -347,18 +383,6 @@ def toggle_ml_delta_params(ml_delta_enabled):
 def toggle_ml_dte_with_delta(ml_delta_enabled):
     """Enable ML DTE optimization when ML delta optimization is enabled."""
     return ml_delta_enabled
-
-
-# Callback to disable traditional parameters when ML is enabled
-@callback(
-    Output("bt-dte-min", "disabled"),
-    Output("bt-dte-max", "disabled"),
-    Input("bt-ml-dte", "value"),
-)
-def disable_traditional_dte_params_when_ml_enabled(ml_dte_enabled):
-    """Disable traditional DTE parameters when ML DTE optimization is enabled."""
-    ml_enabled = bool(ml_dte_enabled and True in ml_dte_enabled)
-    return ml_enabled, ml_enabled
 
 
 @callback(
