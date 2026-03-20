@@ -15,7 +15,6 @@ from core.backtesting.strategies.wheel import WheelStrategy
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy  # New: Binbin God strategy
 from core.backtesting.position_manager import PositionManager
 from core.backtesting.cost_model import TradingCostModel  # New: Trading cost model
-from core.ml.exit_optimizer import MLExitOptimizer  # New: ML exit optimizer
 from utils.logger import setup_logger
 
 logger = setup_logger("backtest_engine")
@@ -126,11 +125,12 @@ class BacktestEngine:
             slippage_per_contract=params.get("slippage_per_contract", 0.05),
         )
         
-        # Initialize ML exit optimizer if enabled
-        ml_exit_optimizer = None
-        if params.get("ml_exit_optimization", False):
-            ml_exit_optimizer = MLExitOptimizer()
-            logger.info("ML Exit Optimizer initialized")
+        # Initialize ML roll optimizer if enabled
+        ml_roll_optimizer = None
+        if params.get("ml_roll_optimization", False):
+            from core.ml.roll_optimizer import MLRollOptimizer
+            ml_roll_optimizer = MLRollOptimizer()
+            logger.info("ML Roll Optimizer initialized")
         
         # Run simulation
         simulator = TradeSimulator()
@@ -210,51 +210,11 @@ class BacktestEngine:
                 # Unless user explicitly disabled them
                 profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
                 stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
-                
-                # Use ML-optimized profit target and stop loss if enabled
-                if ml_exit_optimizer and simulator.open_positions:
-                    # Get market data for ML features
-                    market_data = {
-                        'price': underlying_price,
-                        'iv': iv,
-                        'iv_rank': params.get('iv_rank', 50),  # Would need to fetch this
-                        'historical_volatility': hv[i] if i < len(hv) else 0.3,
-                        'ma20': np.mean(prices[max(0, i-19):i+1]) if i > 0 else underlying_price,
-                        'ma50': np.mean(prices[max(0, i-49):i+1]) if i > 0 else underlying_price,
-                        'price_history': prices[max(0, i-10):i+1],
-                    }
-                    
-                    # Optimize for each open position
-                    for pos in simulator.open_positions:
-                        position_data = {
-                            'entry_date': pos.entry_date,
-                            'expiry': pos.expiry,
-                            'strike': pos.strike,
-                            'right': pos.right,
-                            'entry_price': pos.entry_price,
-                            'quantity': pos.quantity,
-                            'delta_at_entry': pos.delta_at_entry,
-                            'underlying_price': pos.underlying_price_at_entry,
-                        }
-                        
-                        # Build features
-                        features = ml_exit_optimizer.build_features(
-                            position_data,
-                            market_data,
-                            bar_date
-                        )
-                        
-                        # Get optimized targets
-                        opt_profit, opt_stop = ml_exit_optimizer.predict_optimal_exits(
-                            features,
-                            base_profit_target=profit_target_to_use,
-                            base_stop_loss=stop_loss_to_use
-                        )
-                        
-                        # Use the more conservative of the two targets
-                        profit_target_to_use = min(profit_target_to_use, opt_profit)
-                        stop_loss_to_use = min(stop_loss_to_use, opt_stop)
-                
+
+                # Use ML roll optimization if enabled (for Wheel strategies)
+                # Note: Roll optimization is handled in strategy.should_exit_position()
+                # The simulator just uses standard profit/stop logic as fallback
+
                 closed = simulator.check_exits(
                     bar_date,
                     underlying_price,
@@ -496,68 +456,17 @@ class BacktestEngine:
         # Calculate metrics
         trades = [t.to_dict() for t in simulator.closed_trades]
         metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
-        
-        # Train ML exit optimizer if enabled and we have trades
-        if ml_exit_optimizer and trades:
+
+        # Train ML roll optimizer if enabled and we have trades
+        if ml_roll_optimizer and trades:
             try:
-                from core.ml.market_data import MarketDataCalculator
-                
-                # Prepare training data from this backtest with real market data
-                market_data_for_training = {}
-                
-                # Build complete market data for each day
-                for i, bar in enumerate(bars):
-                    date_str = bar["date"][:10]
-                    
-                    # Build IV data if available (would come from IBKR in live trading)
-                    iv_data = {
-                        'current_iv': hv[i] if i < len(hv) else 0.3,
-                        'iv_52w_high': max(hv[:i+1]) * 1.2 if i > 0 else 0.4,
-                        'iv_52w_low': min(hv[:i+1]) * 0.8 if i > 0 else 0.2,
-                        'historical_ivs': hv[:i+1] if i > 0 else [0.3],
-                    }
-                    
-                    # Build VIX data (fear index) - estimate from HV if not available
-                    vix_data = {
-                        'current_vix': hv[i] * 100 if i < len(hv) else 20.0,  # Use HV as proxy
-                        'vix_history': [h * 100 for h in hv[:i+1]] if i > 0 else [20.0],
-                        'vix9d': None,  # Would need VIX9D data from IBKR
-                        'vix3m': None,  # Would need VIX3M data from IBKR
-                    }
-                    
-                    # Calculate real market metrics with VIX
-                    market_snapshot = MarketDataCalculator.build_market_data_snapshot(
-                        prices=prices,
-                        current_idx=i,
-                        iv_data=iv_data,
-                        vix_data=vix_data,
-                        risk_free_rate=0.05
-                    )
-                    
-                    market_data_for_training[date_str] = market_snapshot
-                
-                # Prepare complete market data structure
-                market_data_for_training = {symbol: market_data_for_training}
-                
-                # Prepare training data with real Greeks and momentum
-                training_df = MLExitOptimizer.prepare_training_data(
-                    trades,
-                    market_data_for_training,
-                    use_real_greeks=True  # Use Black-Scholes Greeks
-                )
-                
-                if len(training_df) > 10:
-                    # Train model
-                    train_stats = ml_exit_optimizer.train_model(training_df)
-                    logger.info(f"ML Exit Optimizer trained: {train_stats}")
-                    
-                    # Add training info to result
-                    strategy_performance["ml_training_stats"] = train_stats
-                else:
-                    logger.warning(f"Insufficient training data: {len(training_df)} trades")
-                    
+                # For roll optimizer, we would need labeled data with optimal roll decisions
+                # This is typically done offline with historical analysis
+                logger.info(f"ML Roll Optimizer enabled with {len(trades)} trades")
+                # Training would be done separately with labeled optimal roll decisions
+
             except Exception as e:
-                logger.error(f"ML training failed: {e}")
+                logger.error(f"ML roll optimization error: {e}")
         
         # Merge engine-calculated metrics into strategy_performance
         # This ensures performance_metrics in UI shows real data, not placeholders

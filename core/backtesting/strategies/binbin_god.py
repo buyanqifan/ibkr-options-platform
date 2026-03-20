@@ -1451,15 +1451,15 @@ class BinbinGodStrategy(BaseStrategy):
             "ml_optimization": {
                 "delta_enabled": self.ml_delta_optimization,
                 "dte_enabled": self.ml_dte_optimization,
-                "exit_enabled": self.ml_exit_optimization,
-                "exit_model_loaded": self.ml_exit_optimizer.model is not None if self.ml_exit_optimizer else False,
+                "roll_enabled": self.ml_roll_optimization,
+                "roll_model_loaded": self.ml_roll_optimizer.model is not None if self.ml_roll_optimizer else False,
             },
             # For UI compatibility with Wheel strategy monitoring
             "trade_history": [],  # Would need to track in on_trade_closed
             "phase_history": [],  # Would need to track on phase transitions
         }
 
-    def build_market_data_for_exit(
+    def build_market_data_for_roll(
         self,
         symbol: str,
         current_price: float,
@@ -1468,7 +1468,7 @@ class BinbinGodStrategy(BaseStrategy):
         option_price: float = None,
         current_delta: float = None,
     ) -> Dict[str, Any]:
-        """Build market data dictionary for ML exit optimization.
+        """Build market data dictionary for ML roll optimization.
 
         Args:
             symbol: Stock symbol
@@ -1479,7 +1479,7 @@ class BinbinGodStrategy(BaseStrategy):
             current_delta: Current option delta
 
         Returns:
-            Market data dictionary for ML features
+            Market data dictionary for ML roll features
         """
         from core.ml.market_data import MarketDataCalculator
 
