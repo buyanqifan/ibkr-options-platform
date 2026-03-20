@@ -373,7 +373,9 @@ class BacktestEngine:
                         if "PUT" in roll_signal.trade_type:
                             margin_per_contract = roll_signal.strike * 100
                         elif "CALL" in roll_signal.trade_type:
-                            margin_per_contract = 0 if strategy.stock_holding.shares > 0 else roll_signal.strike * 100
+                            # Covered calls need no margin if shares held
+                            has_shares = hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0
+                            margin_per_contract = 0 if has_shares else roll_signal.strike * 100
                         else:
                             margin_per_contract = roll_signal.margin_requirement or 0
 

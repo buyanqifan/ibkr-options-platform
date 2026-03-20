@@ -103,3 +103,77 @@ class OptionsPricer:
         d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
         d2 = d1 - sigma * math.sqrt(T)
         return d1, d2
+
+    @classmethod
+    def strike_from_delta(
+        cls,
+        S: float,
+        T: float,
+        sigma: float,
+        target_delta: float,
+        right: str,
+        r: float | None = None,
+        tol: float = 0.001,
+        max_iter: int = 100,
+    ) -> float:
+        """Find strike that gives the target delta.
+
+        Args:
+            S: Underlying price
+            T: Time to expiry in years
+            sigma: Implied volatility
+            target_delta: Target delta (positive for calls, negative for puts)
+            right: 'C' for call, 'P' for put
+            r: Risk-free rate
+
+        Returns:
+            Strike price that achieves the target delta
+        """
+        r = r if r is not None else cls.RISK_FREE_RATE
+
+        if T <= 0 or sigma <= 0:
+            # At expiry, return ATM
+            return S
+
+        # Initial guess: use delta approximation
+        # For OTM put with delta -0.30, strike should be below S
+        # For OTM call with delta 0.30, strike should be above S
+        if right == 'P':
+            # Put delta is negative
+            # For OTM put, strike < S
+            target_abs_delta = abs(target_delta)
+            K = S * math.exp(-norm.ppf(target_abs_delta) * sigma * math.sqrt(T))
+        else:
+            # Call delta is positive
+            # For OTM call, strike > S
+            K = S * math.exp(norm.ppf(target_delta) * sigma * math.sqrt(T))
+
+        # Newton-Raphson iteration
+        for _ in range(max_iter):
+            current_delta = cls.delta(S, K, T, sigma, right, r)
+
+            # Difference from target (use absolute value for puts)
+            if right == 'P':
+                diff = current_delta - target_delta  # both should be negative
+            else:
+                diff = current_delta - target_delta
+
+            if abs(diff) < tol:
+                return K
+
+            # Approximate dDelta/dK
+            # For calls: dDelta/dK ≈ -norm.pdf(d1) * e^(-rT) / (S * sigma * sqrt(T))
+            # Use numerical derivative for simplicity
+            dK = K * 0.01
+            delta_up = cls.delta(S, K + dK, T, sigma, right, r)
+            delta_down = cls.delta(S, K - dK, T, sigma, right, r)
+            ddelta_dK = (delta_up - delta_down) / (2 * dK)
+
+            if abs(ddelta_dK) < 1e-12:
+                break
+
+            # Update strike
+            K = K - diff / ddelta_dK
+            K = max(S * 0.5, min(K, S * 2.0))  # Bound the strike
+
+        return K
