@@ -493,7 +493,8 @@ def run_backtest(
     ])
     
     # Add trade history and phase transition updates if monitoring data exists
-    if strategy_performance:
+    # Skip for strategies that have dedicated monitoring dashboard (wheel, binbin_god) since it already shows these
+    if strategy_performance and params.get("strategy") not in ["wheel", "binbin_god"]:
         trade_history = strategy_performance.get("trade_history", [])
         phase_history = strategy_performance.get("phase_history", [])
         

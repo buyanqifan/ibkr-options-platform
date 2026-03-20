@@ -353,6 +353,8 @@ def create_monitoring_dashboard(performance_data: Dict[str, Any]) -> html.Div:
     current_state = performance_data.get("current_state", {})
     performance_metrics = performance_data.get("performance_metrics", {})
     metrics = performance_data.get("metrics", {})
+    trade_history = performance_data.get("trade_history", [])
+    phase_history = performance_data.get("phase_history", [])
     
     return html.Div([
         html.H3("Performance Monitoring Dashboard", className="mb-4"),
@@ -371,8 +373,8 @@ def create_monitoring_dashboard(performance_data: Dict[str, Any]) -> html.Div:
                     dbc.CardBody([
                         html.Div(
                             id="monitoring-trade-history",
-                            children=html.P("Trade history will appear here after running backtest", 
-                                          className="text-muted")
+                            children=create_trade_history_table(trade_history) if trade_history else 
+                                  html.P("No trade history available", className="text-muted")
                         ),
                     ]),
                 ], className="shadow-sm"),
@@ -384,8 +386,8 @@ def create_monitoring_dashboard(performance_data: Dict[str, Any]) -> html.Div:
                     dbc.CardBody([
                         html.Div(
                             id="monitoring-phase-log",
-                            children=html.P("Phase transitions will appear here", 
-                                          className="text-muted")
+                            children=create_phase_transition_log(phase_history) if phase_history else 
+                                  html.P("No phase transitions recorded", className="text-muted")
                         ),
                     ]),
                 ], className="shadow-sm"),
