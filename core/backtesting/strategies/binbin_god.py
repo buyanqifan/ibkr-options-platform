@@ -1292,6 +1292,9 @@ class BinbinGodStrategy(BaseStrategy):
     
     def get_performance_report(self) -> Dict[str, Any]:
         """Generate comprehensive performance report with selection history."""
+        # Debug logging
+        self.logger.info(f"BinbinGod Performance Report: phase={self.phase}, shares={self.stock_holding.shares}, cost_basis={self.stock_holding.cost_basis:.2f}")
+        
         return {
             "strategy": "binbin_god",
             # current_state: for compatibility with Wheel's monitoring dashboard

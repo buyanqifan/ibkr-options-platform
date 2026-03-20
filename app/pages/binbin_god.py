@@ -706,10 +706,22 @@ def run_binbin_backtest(
     if strategy_performance:
         # Handle both nested (Wheel) and flat (BinbinGod) data structures
         current_state = strategy_performance.get("current_state", {})
+        shares = strategy_performance.get("shares_held") or current_state.get("shares_held", 0)
+        cost = strategy_performance.get("cost_basis") or current_state.get("cost_basis", 0)
+        options = strategy_performance.get("open_positions", [])
+        
+        # Debug logging
+        from app.services import get_services
+        services = get_services()
+        if services:
+            logger = services.get("logger")
+            if logger:
+                logger.info(f"BinbinGod Holdings: shares={shares}, cost_basis={cost}, options={len(options)}")
+        
         holdings_data = {
-            "shares_held": strategy_performance.get("shares_held") or current_state.get("shares_held", 0),
-            "cost_basis": strategy_performance.get("cost_basis") or current_state.get("cost_basis", 0),
-            "options_held": strategy_performance.get("open_positions", []),
+            "shares_held": shares,
+            "cost_basis": cost,
+            "options_held": options,
         }
         holdings_card = create_holdings_card(holdings_data)
     

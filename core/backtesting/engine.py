@@ -414,6 +414,7 @@ class BacktestEngine:
             strategy_performance = {}
             if hasattr(strategy, 'get_performance_report'):
                 strategy_performance = strategy.get_performance_report()
+                logger.info(f"Engine: Retrieved strategy_performance - shares={strategy_performance.get('shares_held')}, cost={strategy_performance.get('cost_basis')}")
             
             # Handle remaining stock position for Wheel/BinbinGod strategies
             # At end of backtest, liquidate any remaining stock holdings

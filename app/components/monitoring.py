@@ -112,7 +112,7 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
                 html.Td(f"{shares_held:,}"),
                 html.Td(f"${cost_basis:.2f}"),
                 html.Td("-"),
-                html.Td(f"${cost_basis:.2f}"),
+                html.Td(f"${cost_basis * shares_held:.2f}"),  # Fixed: multiply by shares
             ], className="table-success")
         )
     
