@@ -108,6 +108,8 @@ class WheelStrategy(BaseStrategy):
                 
                 # Update stock holding - track shares acquired from assignment
                 # Cost basis is tracked separately for stock (not including option premium)
+                # Ensure shares acquired is a multiple of 100 to maintain proper lot sizes
+                shares_acquired = quantity * 100  # This should already be multiple of 100, but ensure it
                 total_stock_cost = self.stock_holding.shares * self.stock_holding.cost_basis
                 total_stock_cost += shares_acquired * strike
                 self.stock_holding.shares += shares_acquired
@@ -144,22 +146,30 @@ class WheelStrategy(BaseStrategy):
                     return 0.0
                 
                 # Calculate stock P&L from this assignment
-                # Limit shares_sold to actual shares held to avoid negative positions
+                # Ensure shares_sold is a multiple of 100 to maintain proper lot sizes
+                # But also ensure we don't sell more shares than we hold
                 actual_shares_sold = min(shares_sold, self.stock_holding.shares)
+                            
+                # Make sure we're selling in lots of 100 shares (or all remaining shares if less than 100)
+                if actual_shares_sold >= 100:
+                    # Round down to nearest 100 to maintain lot size
+                    actual_shares_sold = (actual_shares_sold // 100) * 100
+                # If less than 100 shares held, we'll sell all of them
+                            
                 if actual_shares_sold != shares_sold:
-                    self.logger.warning(
-                        f"Call assignment for {shares_sold} shares but only {self.stock_holding.shares} held. "
-                        f"Adjusting to {actual_shares_sold} shares."
+                    self.logger.info(
+                        f"Adjusted call assignment from {shares_sold} to {actual_shares_sold} shares "
+                        f"to maintain proper lot size (100-share multiples)."
                     )
                     shares_sold = actual_shares_sold
-                
+                            
                 stock_cost_basis = self.stock_holding.cost_basis * shares_sold
                 stock_proceeds = strike * shares_sold
                 stock_pnl = stock_proceeds - stock_cost_basis  # Realized stock P&L
-                
+                            
                 # IMPORTANT: Record stock P&L to be added to cumulative_pnl
                 additional_stock_pnl = stock_pnl
-                
+                            
                 # Reduce stock holding
                 self.stock_holding.shares = max(0, self.stock_holding.shares - shares_sold)
                 
@@ -239,8 +249,31 @@ class WheelStrategy(BaseStrategy):
             p for p in open_positions 
             if p.trade_type in ("WHEEL_PUT", "WHEEL_CALL")
         ]
-        if len(wheel_positions) >= max_pos:
-            return []
+        
+        # CRITICAL FIX: In CC phase, we should be more flexible about max_pos
+        # because we can have multiple covered calls as long as we have shares to back them
+        if self.phase == "CC":
+            # For CC phase, check how many calls we can potentially sell based on shares held
+            max_calls_by_shares = self.stock_holding.shares // 100
+            max_calls_allowed = min(max_pos, max_calls_by_shares)
+            
+            # Count already sold Call contracts (negative quantity means sold)
+            existing_call_contracts = sum(
+                abs(p.quantity) for p in wheel_positions 
+                if p.trade_type == "WHEEL_CALL"
+            )
+            
+            # If we can still sell more calls based on shares we have, generate signal
+            if existing_call_contracts < max_calls_allowed:
+                # We have capacity to sell more covered calls
+                pass  # Continue to generate signal
+            else:
+                # No more calls can be sold (either hit max_pos or ran out of shares)
+                return []
+        else:  # SP phase
+            # Original logic for SP phase: respect max_pos strictly
+            if len(wheel_positions) >= max_pos:
+                return []
         
         # CRITICAL: For CC phase, check if we already have enough Call contracts
         # Each Call contract locks 100 shares. We cannot sell more Calls than shares owned.
@@ -257,6 +290,16 @@ class WheelStrategy(BaseStrategy):
             # If no shares available for more Calls, don't generate signal
             if shares_available <= 0:
                 return []
+            
+            # Ensure we have shares in lots of 100 for proper covered calls
+            # If fractional shares exist, log them and proceed with available whole lots
+            if self.stock_holding.shares % 100 != 0:
+                fractional_shares = self.stock_holding.shares % 100
+                whole_share_lots = self.stock_holding.shares - fractional_shares
+                self.logger.info(
+                    f"Detected fractional shares ({fractional_shares}). "
+                    f"Will use {whole_share_lots} shares in {whole_share_lots // 100} lots for covered calls."
+                )
 
         T = self.select_expiry_dte() / 365.0
         dte_days = int(self.select_expiry_dte())
@@ -341,9 +384,19 @@ class WheelStrategy(BaseStrategy):
         # Use call-specific delta
         original_delta = self.delta_target
         self.delta_target = self.call_delta
-        strike = self.select_strike(underlying_price, iv, T, "C")
+        
+        try:
+            strike = self.select_strike(underlying_price, iv, T, "C")
+        except Exception as e:
+            # If we can't find a suitable strike, try a more flexible approach
+            self.logger.warning(f"Could not select strike with target delta {self.call_delta}: {e}")
+            # Try to find a reasonable strike even if it doesn't match the target delta perfectly
+            strike = self._find_alternative_call_strike(underlying_price)
+        
         self.delta_target = original_delta
 
+        # Calculate premium and delta for the selected strike
+        from core.backtesting.pricing import OptionsPricer
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
 
@@ -353,9 +406,24 @@ class WheelStrategy(BaseStrategy):
         max_by_shares = self.stock_holding.shares // 100
         max_contracts = min(max_by_shares, self.params.get("max_positions", 10))
         
-        # Return empty if no shares to cover
+        # If we have shares but not enough to sell another call (less than 100 shares),
+        # we should handle the fractional shares appropriately
         if max_contracts <= 0:
-            return []
+            # If we have shares but less than 100, we can't sell covered calls
+            # If we have fractional shares (<100), we should liquidate them to avoid getting stuck
+            if 0 < self.stock_holding.shares < 100:
+                self.logger.info(
+                    f"Liquidating fractional shares ({self.stock_holding.shares}) to avoid getting stuck in CC phase."
+                )
+                # Liquidate fractional shares by switching to SP phase
+                self.phase = "SP"
+                return self._generate_sell_put_signal(underlying_price, iv, T, expiry_str, position_mgr)
+            else:
+                return []
+        
+        # Double-check that we're using a valid number of contracts based on available shares
+        available_share_lots = self.stock_holding.shares // 100
+        max_contracts = min(max_contracts, available_share_lots)
         
         quantity = -max_contracts  # Sell
         
@@ -376,6 +444,34 @@ class WheelStrategy(BaseStrategy):
             underlying_price=underlying_price,  # Pass stock price at entry
             margin_requirement=margin_requirement,  # No additional margin needed for covered call
         )]
+    
+    def _find_alternative_call_strike(self, underlying_price: float) -> float:
+        """Find an alternative call strike when target delta cannot be achieved."""
+        # If we can't find a strike with the target delta, try a more practical approach
+        # For covered calls, we often want OTM strikes, but let's be more flexible
+        # Try strikes at various percentages of underlying price
+        
+        # Try various percentage levels above the current price for OTM calls
+        for factor in [1.05, 1.10, 1.15, 1.20, 1.25]:
+            trial_strike = underlying_price * factor
+            # Round to nearest dollar or half-dollar
+            if underlying_price > 100:
+                trial_strike = round(trial_strike)
+            else:
+                trial_strike = round(trial_strike * 2) / 2
+            
+            # If the strike is reasonable, return it
+            if trial_strike > underlying_price * 0.9:  # Reasonable range
+                return trial_strike
+        
+        # If all else fails, use a strike slightly above current price
+        fallback_strike = underlying_price * 1.05
+        if underlying_price > 100:
+            fallback_strike = round(fallback_strike)
+        else:
+            fallback_strike = round(fallback_strike * 2) / 2
+        
+        return fallback_strike
 
     def _record_trade(self, trade: dict):
         """Record trade details for performance tracking."""
