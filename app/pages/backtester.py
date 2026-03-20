@@ -151,6 +151,19 @@ layout = html.Div([
                         dbc.Input(id="bt-ml-adoption-rate", type="number", value=0.5, step=0.1, min=0.0, max=1.0, size="sm", className="mb-3"),
                     ], className="d-none"),
                     
+                    # ML DTE Optimization
+                    html.Hr(),
+                    html.H6("ML DTE Optimization", className="fw-bold mb-2"),
+                    
+                    dcc.Checklist(
+                        id="bt-ml-dte",
+                        options=[{"label": " Enable ML DTE Optimization", "value": True}],
+                        value=[],
+                        inline=True,
+                        className="mb-2",
+                        style={"color": "#fff"},
+                    ),
+                    
                     # Benchmark Comparison
                     html.Hr(),
                     html.H6("Benchmark Comparison", className="fw-bold mb-2"),
@@ -279,6 +292,27 @@ def toggle_ml_delta_params(ml_delta_enabled):
 
 
 @callback(
+    Output("bt-ml-dte", "value"),
+    Input("bt-ml-delta", "value"),
+)
+def toggle_ml_dte_with_delta(ml_delta_enabled):
+    """Enable ML DTE optimization when ML delta optimization is enabled."""
+    return ml_delta_enabled
+
+
+# Callback to disable traditional parameters when ML is enabled
+@callback(
+    Output("bt-dte-min", "disabled"),
+    Output("bt-dte-max", "disabled"),
+    Input("bt-ml-dte", "value"),
+)
+def disable_traditional_dte_params_when_ml_enabled(ml_dte_enabled):
+    """Disable traditional DTE parameters when ML DTE optimization is enabled."""
+    ml_enabled = bool(ml_dte_enabled and True in ml_dte_enabled)
+    return ml_enabled, ml_enabled
+
+
+@callback(
     Output("bt-results-store", "data"),
     Output("bt-params-store", "data"),
     Output("bt-results-container", "children"),
@@ -303,6 +337,7 @@ def toggle_ml_delta_params(ml_delta_enabled):
     State("bt-disable-stop-loss", "value"),
     State("bt-use-synthetic", "value"),
     State("bt-ml-delta", "value"),
+    State("bt-ml-dte", "value"),
     State("bt-ml-adoption-rate", "value"),
     prevent_initial_call=True,
 )
@@ -311,7 +346,7 @@ def run_backtest(
     capital, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
     put_delta, call_delta, max_positions, benchmarks,
     disable_profit_target, disable_stop_loss, use_synthetic,
-    ml_delta, ml_adoption_rate
+    ml_delta, ml_dte, ml_adoption_rate
 ):
     if not symbol or not start_date or not end_date:
         return no_update, no_update, no_update, no_update
@@ -349,6 +384,7 @@ def run_backtest(
         "max_positions": max_positions or 10,  # Default 10 for diversification
         # ML Delta optimization parameters
         "ml_delta_optimization": bool(ml_delta and True in ml_delta),
+        "ml_dte_optimization": bool(ml_dte and True in ml_dte),
         "ml_adoption_rate": ml_adoption_rate or 0.5,
     }
 
