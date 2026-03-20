@@ -57,8 +57,17 @@ class StockScreener:
 
     def _gather_data(self, symbol: str) -> dict:
         """Fetch and merge quote, fundamentals, and options data for screening."""
-        # Real-time quote
-        quote = self._client.get_realtime_quote(symbol)
+        # Real-time quote - handle market data subscription errors
+        try:
+            quote = self._client.get_realtime_quote(symbol)
+        except Exception as e:
+            if "10089" in str(e) or "market data requires additional subscription" in str(e).lower():
+                logger.warning(f"Market data not subscribed for {symbol}, using delayed data")
+                # Try to get delayed quote instead
+                quote = self._get_delayed_quote(symbol)
+            else:
+                raise
+        
         price = quote.get("last") or quote.get("close") or 0
 
         # Fundamentals
@@ -117,7 +126,11 @@ class StockScreener:
                         if atm_iv and fundamentals.get("week52_high"):
                             iv_rank = min(100, max(0, atm_iv))  # simplified
         except Exception as e:
-            logger.debug("Options data unavailable for %s: %s", symbol, e)
+            error_msg = str(e).lower()
+            if "10089" in str(e) or "market data requires additional subscription" in error_msg:
+                logger.debug(f"Options market data not subscribed for {symbol}, skipping options data")
+            else:
+                logger.debug(f"Options data unavailable for {symbol}: {e}")
 
         return {
             "symbol": symbol,
@@ -136,3 +149,20 @@ class StockScreener:
             "put_premium_yield": put_premium_yield,
             "option_volume": option_volume,
         }
+    
+    def _get_delayed_quote(self, symbol: str) -> dict:
+        """Get delayed quote when real-time data is not available.
+        
+        This is a fallback for accounts without market data subscription.
+        """
+        try:
+            # Try to get fundamentals which may still work
+            fundamentals = self._client.get_fundamentals(symbol)
+            return {
+                "last": fundamentals.get("close"),
+                "close": fundamentals.get("close"),
+                "volume": fundamentals.get("volume", 0),
+            }
+        except Exception:
+            logger.warning(f"Could not get any data for {symbol}")
+            return {"last": 0, "close": 0, "volume": 0}
