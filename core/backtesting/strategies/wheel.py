@@ -64,7 +64,7 @@ class WheelStrategy(BaseStrategy):
         self.call_delta = params.get("call_delta", 0.30)
         # Track pending assignments
         self._pending_assignment = None
-        
+
         # Performance monitoring
         self.logger = logging.getLogger(f"wheel_strategy_{params.get('symbol', 'unknown')}")
         self.performance_metrics = PerformanceMetrics()
@@ -74,14 +74,146 @@ class WheelStrategy(BaseStrategy):
         self._current_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._peak_value = self.initial_capital
         self._trough_value = self.initial_capital
-        
+
         # Check if profit target/stop loss are disabled (special value 999999 means disabled)
         self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
         self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999
 
+        # ML Position Optimization
+        self.ml_position_optimization = params.get("ml_position_optimization", False)
+        self.ml_position_optimizer = None
+        self.position_recommendations = []  # Track ML recommendations for analysis
+
+        if self.ml_position_optimization:
+            try:
+                from core.ml.position_optimizer import MLPositionOptimizer, WheelPositionIntegration
+                self.ml_position_optimizer = WheelPositionIntegration(
+                    optimizer=MLPositionOptimizer(model_path=params.get("ml_position_model_path")),
+                    enabled=True,
+                    fallback_to_rules=True,
+                )
+                self.logger.info("ML Position Optimizer initialized for Wheel strategy")
+            except ImportError as e:
+                self.logger.warning(f"ML Position optimization not available: {e}")
+                self.ml_position_optimization = False
+            except Exception as e:
+                self.logger.warning(f"ML Position optimization initialization failed: {e}")
+                self.ml_position_optimization = False
+
     @property
     def name(self) -> str:
         return "wheel"
+
+    def _calculate_ml_position_size(
+        self,
+        underlying_price: float,
+        iv: float,
+        strike: float,
+        premium: float,
+        dte: int,
+        delta: float,
+        position_mgr,
+        strategy_phase: str,
+    ) -> int:
+        """Calculate position size using ML optimizer.
+
+        Args:
+            underlying_price: Current stock price
+            iv: Implied volatility
+            strike: Option strike
+            premium: Option premium
+            dte: Days to expiry
+            delta: Option delta
+            position_mgr: Position manager
+            strategy_phase: "SP" or "CC"
+
+        Returns:
+            Recommended number of contracts
+        """
+        # Base position from position manager
+        if position_mgr:
+            base_position = position_mgr.calculate_position_size(
+                margin_per_contract=strike * 100 if strategy_phase == "SP" else 0,
+                max_positions=self.params.get("max_positions", 10),
+            )
+        else:
+            base_position = self.params.get("max_positions", 1)
+
+        if base_position <= 0:
+            return 0
+
+        # If ML optimization disabled, return base position
+        if not self.ml_position_optimization or self.ml_position_optimizer is None:
+            return base_position
+
+        try:
+            # Build market data for ML
+            market_data = {
+                'price': underlying_price,
+                'iv': iv,
+                'iv_rank': getattr(self, '_current_iv_rank', 50),
+                'iv_percentile': getattr(self, '_current_iv_percentile', 50),
+                'historical_volatility': iv * 100,
+                'vix': getattr(self, '_current_vix', 20),
+                'momentum': getattr(self, '_current_momentum', {}),
+            }
+
+            # Build portfolio state
+            portfolio_state = {
+                'total_capital': self.initial_capital,
+                'available_margin': position_mgr.available_margin if position_mgr else self.initial_capital,
+                'margin_used': position_mgr.total_margin_used if position_mgr else 0,
+                'drawdown': self.performance_metrics.max_drawdown,
+                'positions': [],  # Would need to track open positions
+                'cost_basis': self.stock_holding.cost_basis,
+            }
+
+            # Build option info
+            option_info = {
+                'underlying_price': underlying_price,
+                'strike': strike,
+                'premium': premium,
+                'dte': dte,
+                'delta': delta,
+            }
+
+            # Get ML recommendation
+            max_position = self.params.get("max_positions", 10)
+            if strategy_phase == "CC":
+                # For CC, limit by shares held
+                max_position = min(max_position, self.stock_holding.shares // 100)
+
+            num_contracts, recommendation = self.ml_position_optimizer.get_position_size(
+                symbol=self.params.get("symbol", "UNKNOWN"),
+                market_data=market_data,
+                portfolio_state=portfolio_state,
+                strategy_phase=strategy_phase,
+                option_info=option_info,
+                base_position=base_position,
+                max_position=max_position,
+            )
+
+            # Log recommendation for analysis
+            if recommendation:
+                self.position_recommendations.append({
+                    'date': datetime.now().strftime("%Y-%m-%d"),
+                    'phase': strategy_phase,
+                    'contracts': num_contracts,
+                    'multiplier': recommendation.position_multiplier,
+                    'confidence': recommendation.confidence,
+                    'reasoning': recommendation.reasoning,
+                })
+
+                self.logger.info(
+                    f"ML Position: {num_contracts} contracts ({recommendation.position_multiplier:.2f}x, "
+                    f"confidence: {recommendation.confidence:.0%}) - {recommendation.reasoning}"
+                )
+
+            return num_contracts
+
+        except Exception as e:
+            self.logger.warning(f"ML position optimization failed, using base: {e}")
+            return base_position
 
     def on_trade_closed(self, trade: dict):
         """Called by engine when a trade is closed. Updates internal state and tracks performance.
@@ -336,21 +468,38 @@ class WheelStrategy(BaseStrategy):
         premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
 
-        # Position sizing using position manager
-        # Cash-secured put: reserve strike * 100 per contract
-        if position_mgr:
-            max_contracts = position_mgr.calculate_position_size(
-                margin_per_contract=strike * 100,
-                max_positions=self.params.get("max_positions", 10),
+        # Calculate DTE from T
+        dte = int(T * 365)
+
+        # Position sizing: use ML optimizer if enabled, otherwise traditional
+        if self.ml_position_optimization and self.ml_position_optimizer:
+            max_contracts = self._calculate_ml_position_size(
+                underlying_price=underlying_price,
+                iv=iv,
+                strike=strike,
+                premium=premium,
+                dte=dte,
+                delta=delta,
+                position_mgr=position_mgr,
+                strategy_phase="SP",
             )
         else:
-            # Fallback when no position manager (e.g., in unit tests)
-            max_contracts = self.params.get("max_positions", 1)
+            # Traditional position sizing using position manager
+            # Cash-secured put: reserve strike * 100 per contract
+            if position_mgr:
+                max_contracts = position_mgr.calculate_position_size(
+                    margin_per_contract=strike * 100,
+                    max_positions=self.params.get("max_positions", 10),
+                )
+            else:
+                # Fallback when no position manager (e.g., in unit tests)
+                max_contracts = self.params.get("max_positions", 1)
+
         if max_contracts <= 0:
             return []  # No signal if insufficient capital
-        
+
         quantity = -max_contracts  # Sell
-        
+
         # Explicitly set margin requirement for cash-secured put
         margin_per_contract = strike * 100
 
@@ -403,12 +552,31 @@ class WheelStrategy(BaseStrategy):
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
 
-        # Covered call: 1 contract per 100 shares owned
-        # Calculate contracts based on shares held (same as CoveredCallStrategy)
-        # generate_signals() already checks for existing call positions to prevent over-selling
-        max_by_shares = self.stock_holding.shares // 100
-        max_contracts = min(max_by_shares, self.params.get("max_positions", 10))
-        
+        # Calculate DTE from T
+        dte = int(T * 365)
+
+        # Position sizing: use ML optimizer if enabled, otherwise traditional
+        if self.ml_position_optimization and self.ml_position_optimizer:
+            max_contracts = self._calculate_ml_position_size(
+                underlying_price=underlying_price,
+                iv=iv,
+                strike=strike,
+                premium=premium,
+                dte=dte,
+                delta=delta,
+                position_mgr=position_mgr,
+                strategy_phase="CC",
+            )
+            # For CC, ensure we don't exceed shares held
+            max_by_shares = self.stock_holding.shares // 100
+            max_contracts = min(max_contracts, max_by_shares)
+        else:
+            # Traditional: Covered call: 1 contract per 100 shares owned
+            # Calculate contracts based on shares held (same as CoveredCallStrategy)
+            # generate_signals() already checks for existing call positions to prevent over-selling
+            max_by_shares = self.stock_holding.shares // 100
+            max_contracts = min(max_by_shares, self.params.get("max_positions", 10))
+
         # If we have shares but not enough to sell another call (less than 100 shares),
         # we should handle the fractional shares appropriately
         if max_contracts <= 0:
@@ -423,7 +591,7 @@ class WheelStrategy(BaseStrategy):
                 return self._generate_sell_put_signal(underlying_price, iv, T, expiry_str, position_mgr)
             else:
                 return []
-        
+
         # Double-check that we're using a valid number of contracts based on available shares
         available_share_lots = self.stock_holding.shares // 100
         max_contracts = min(max_contracts, available_share_lots)
@@ -545,7 +713,7 @@ class WheelStrategy(BaseStrategy):
     
     def get_performance_report(self) -> dict:
         """Generate comprehensive performance report."""
-        return {
+        report = {
             "strategy": "wheel",
             "run_id": self._current_run_id,
             "current_state": self.get_state_summary(),
@@ -554,6 +722,20 @@ class WheelStrategy(BaseStrategy):
             "phase_history": self.phase_history[-5:],   # Last 5 transitions
             "daily_stats": self.daily_stats[-30:],      # Last 30 days
         }
+
+        # Add ML position optimization info if enabled
+        if self.ml_position_optimization:
+            report["ml_position_optimization"] = {
+                "enabled": True,
+                "recommendations": self.position_recommendations[-20:],  # Last 20 recommendations
+                "total_recommendations": len(self.position_recommendations),
+            }
+        else:
+            report["ml_position_optimization"] = {
+                "enabled": False,
+            }
+
+        return report
     
     def get_state_summary(self) -> dict:
         """Return current strategy state for debugging/display."""

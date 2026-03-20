@@ -39,6 +39,37 @@ class BacktestEngine:
         self._client = data_client
         self._vol_predictor = vol_predictor  # ML volatility predictor
 
+    def _get_price_for_symbol(self, symbol: str, date_str: str, mag7_data: dict) -> float | None:
+        """Get the closing price for a specific symbol on a specific date.
+
+        Args:
+            symbol: Stock symbol
+            date_str: Date string in YYYY-MM-DD format
+            mag7_data: Dictionary of {symbol: list of bars}
+
+        Returns:
+            Closing price or None if not found
+        """
+        if not mag7_data or symbol not in mag7_data:
+            return None
+
+        bars = mag7_data.get(symbol, [])
+        for bar in bars:
+            bar_date = str(bar.get("date", ""))[:10]
+            if bar_date == date_str:
+                return bar.get("close")
+
+        # If exact date not found, try to find the closest previous date
+        closest_price = None
+        for bar in bars:
+            bar_date = str(bar.get("date", ""))[:10]
+            if bar_date <= date_str:
+                closest_price = bar.get("close")
+            else:
+                break
+
+        return closest_price
+
     def run(self, params: dict) -> dict:
         """Execute a backtest and return results.
 
