@@ -616,11 +616,10 @@ class BinbinGodStrategy(BaseStrategy):
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
         
-        # Covered call: Sell only 1 contract per signal for better diversification
-        # and to prevent over-selling beyond available shares
-        max_contracts = 1  # Sell only 1 contract per signal
+        # Covered call: Calculate contracts based on shares available
+        # generate_signals() already checks for existing call positions to prevent over-selling
         max_by_shares = shares_available // 100
-        max_contracts = min(max_contracts, max_by_shares, self.max_positions)
+        max_contracts = min(max_by_shares, self.max_positions)
         
         if max_contracts <= 0:
             return []

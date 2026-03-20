@@ -293,10 +293,14 @@ class WheelStrategy(BaseStrategy):
 
         # Position sizing using position manager
         # Cash-secured put: reserve strike * 100 per contract
-        max_contracts = position_mgr.calculate_position_size(
-            margin_per_contract=strike * 100,
-            max_positions=self.params.get("max_positions", 10),  # Default 10 for better diversification
-        )
+        if position_mgr:
+            max_contracts = position_mgr.calculate_position_size(
+                margin_per_contract=strike * 100,
+                max_positions=self.params.get("max_positions", 10),
+            )
+        else:
+            # Fallback when no position manager (e.g., in unit tests)
+            max_contracts = self.params.get("max_positions", 1)
         if max_contracts <= 0:
             return []  # No signal if insufficient capital
         
@@ -344,14 +348,10 @@ class WheelStrategy(BaseStrategy):
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
 
         # Covered call: 1 contract per 100 shares owned
-        # But we must check existing open Call positions to avoid over-selling
-        # Note: This is a secondary check. The primary check is in generate_signals.
-        # This ensures we sell only 1 contract per signal (not all available at once)
-        max_contracts = 1  # Sell only 1 contract per signal for better diversification
-        
-        # Also verify we have enough shares
+        # Calculate contracts based on shares held (same as CoveredCallStrategy)
+        # generate_signals() already checks for existing call positions to prevent over-selling
         max_by_shares = self.stock_holding.shares // 100
-        max_contracts = min(max_contracts, max_by_shares, self.params.get("max_positions", 10))
+        max_contracts = min(max_by_shares, self.params.get("max_positions", 10))
         
         # Return empty if no shares to cover
         if max_contracts <= 0:

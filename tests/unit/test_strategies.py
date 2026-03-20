@@ -583,8 +583,8 @@ class TestWheelStrategy:
         assert strategy.stock_holding.shares == 100
         assert strategy.stock_holding.cost_basis == 145.0
     
-    def test_cc_signal_only_one_contract_per_call(self, base_params):
-        """Test that CC phase generates only 1 contract per signal."""
+    def test_cc_signal_contracts_match_shares(self, base_params):
+        """Test that CC phase generates contracts matching shares held."""
         strategy = WheelStrategy(base_params)
         strategy.phase = 'CC'
         strategy.stock_holding.shares = 500  # 5 contracts worth
@@ -599,9 +599,9 @@ class TestWheelStrategy:
             position_mgr=position_mgr,
         )
         
-        # Should only sell 1 contract per signal (not 5)
+        # Should sell contracts matching shares (500 shares = 5 contracts)
         assert len(signals) == 1
-        assert abs(signals[0].quantity) == 1
+        assert abs(signals[0].quantity) == 5  # Fixed: now matches shares held
     
     def test_no_cc_signal_when_shares_covered(self, base_params):
         """Test that no CC signal when all shares already covered by existing Calls."""
@@ -837,8 +837,8 @@ class TestBinbinGodStrategy:
         # And within reasonable range
         assert strike <= underlying_price * 1.3
     
-    def test_cc_signal_only_one_contract_per_call(self, base_params):
-        """Test that CC phase generates only 1 contract per signal."""
+    def test_cc_signal_contracts_match_shares(self, base_params):
+        """Test that CC phase generates contracts matching shares held."""
         params = base_params.copy()
         params['symbol'] = 'NVDA'
         strategy = BinbinGodStrategy(params)
@@ -854,9 +854,9 @@ class TestBinbinGodStrategy:
             position_mgr=None,
         )
         
-        # Should only sell 1 contract per signal (not 5)
+        # Should sell contracts matching shares (500 shares = 5 contracts)
         assert len(signals) == 1
-        assert abs(signals[0].quantity) == 1
+        assert abs(signals[0].quantity) == 5  # Fixed: now matches shares held
     
     def test_no_cc_signal_when_shares_covered(self, base_params):
         """Test that no CC signal when all shares already covered by existing Calls."""
