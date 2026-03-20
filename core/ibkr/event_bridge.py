@@ -58,13 +58,25 @@ class AsyncEventBridge:
         """Submit a coroutine to the event loop and block until result is ready.
 
         Safe to call from any thread (including Dash callback threads).
+        Handles "event loop is already running" errors gracefully.
         """
-        future: Future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         try:
-            return future.result(timeout=timeout)
-        except TimeoutError:
-            future.cancel()
-            raise TimeoutError(f"Coroutine timed out after {timeout}s")
+            future: Future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            try:
+                return future.result(timeout=timeout)
+            except TimeoutError:
+                future.cancel()
+                raise TimeoutError(f"Coroutine timed out after {timeout}s")
+        except RuntimeError as e:
+            # Handle "event loop is already running" error
+            if "event loop is already running" in str(e):
+                logger.warning(f"Event loop conflict detected: {e}")
+                # Fallback: run in a new thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, coro)
+                    return future.result(timeout=timeout)
+            raise
 
     def submit_async(self, coro: Coroutine) -> Future:
         """Submit a coroutine without blocking. Returns a Future."""

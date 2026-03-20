@@ -1,6 +1,7 @@
 """Dash application entry point. Initializes services, wires up global callbacks."""
 
 import os
+import asyncio
 import dash
 import dash_bootstrap_components as dbc
 from config.settings import settings
@@ -13,6 +14,10 @@ from utils.logger import setup_logger
 from app.services import get_services, set_services
 
 logger = setup_logger("app")
+
+# Prevent Dash from conflicting with IBKR's event loop
+# Set environment variable to disable Dash's internal async handling
+os.environ['DASH_ASYNC'] = 'false'
 
 
 def _init_services() -> dict:
