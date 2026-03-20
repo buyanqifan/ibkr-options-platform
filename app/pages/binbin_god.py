@@ -342,9 +342,9 @@ layout = dbc.Container([
                     ], id="bbg-run-btn", color="primary", className="w-100", size="lg"),
                 ]),
             ]),
-        ], md=4),
+        ], md=3),
         
-        # Right column: Results
+        # Right column: Results (wider for better readability)
         dbc.Col([
             create_mag7_analysis_placeholder(),
             
