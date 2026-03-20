@@ -297,12 +297,14 @@ layout = dbc.Container([
 
                     html.Hr(),
                     html.H6("Exit Conditions", className="fw-bold mb-2"),
-                    
+                    html.P("Note: For Wheel strategy, consider using ML Roll Optimization instead of traditional stop loss.", 
+                           className="text-muted small mb-2"),
+
                     # Profit Target
                     dbc.Label("Profit Target (% of premium)"),
                     dbc.Row([
                         dbc.Col(
-                            dbc.Input(id="bbg-profit-target", type="number", 
+                            dbc.Input(id="bbg-profit-target", type="number",
                                      value=50, step=10, size="sm"),
                            width=8
                         ),
@@ -331,7 +333,7 @@ layout = dbc.Container([
                     dbc.Label("Stop Loss (% of premium)"),
                     dbc.Row([
                         dbc.Col(
-                            dbc.Input(id="bbg-stop-loss", type="number", 
+                            dbc.Input(id="bbg-stop-loss", type="number",
                                      value=200, step=50, size="sm"),
                            width=8
                         ),
@@ -405,7 +407,7 @@ layout = dbc.Container([
             
             # Hidden store for results data
             dcc.Store(id="binbin-results-store", data={}),
-        ], md=8),
+        ], md=9),
     ]),
     
     # Custom CSS for loading animation and dropdown visibility
@@ -480,17 +482,38 @@ def toggle_custom_stocks_input(stock_pool):
     return {"display": "none"}
 
 
-# Callback to show/hide ML optimization controls
+# Callback to show/hide ML optimization controls and hide traditional params
 @callback(
     Output("bbg-ml-adoption-container", "style"),
     Output("bbg-cc-optimization-container", "style"),
+    Output("bbg-dte-range-container", "style"),
+    Output("bbg-delta-targets-container", "style"),
     Input("bbg-ml-optimization", "value"),
+    Input("bbg-ml-dte-optimization", "value"),
+    Input("bbg-ml-roll-optimization", "value"),
 )
-def toggle_ml_controls(ml_optimization_enabled):
-    """Show/hide ML optimization controls based on toggle."""
-    if ml_optimization_enabled:
-        return {"display": "block"}, {"display": "block"}
-    return {"display": "none"}, {"display": "none"}
+def toggle_ml_controls(ml_delta_enabled, ml_dte_enabled, ml_roll_enabled):
+    """Show/hide ML optimization controls and hide traditional params when ML is enabled.
+
+    When any ML optimization is enabled:
+    - Show ML adoption rate and CC optimization controls
+    - Hide traditional DTE range (ML will optimize DTE)
+    - Hide traditional Delta targets (ML will optimize Delta)
+    """
+    ml_any_enabled = ml_delta_enabled or ml_dte_enabled or ml_roll_enabled
+
+    if ml_any_enabled:
+        # Show ML controls
+        ml_style = {"display": "block"}
+        # Hide traditional params that ML will handle
+        traditional_style = {"display": "none"}
+        return ml_style, ml_style, traditional_style, traditional_style
+
+    # Hide ML controls
+    ml_style = {"display": "none"}
+    # Show traditional params
+    traditional_style = {"display": "block"}
+    return ml_style, ml_style, traditional_style, traditional_style
 
 
 # Callback to handle ML DTE optimization
@@ -501,21 +524,6 @@ def toggle_ml_controls(ml_optimization_enabled):
 def toggle_ml_dte_with_delta(ml_optimization_enabled):
     """Enable ML DTE optimization when ML delta optimization is enabled."""
     return ml_optimization_enabled
-
-
-# Callback to disable traditional parameters when ML is enabled
-@callback(
-    Output("bbg-dte-min", "disabled"),
-    Output("bbg-dte-max", "disabled"),
-    Output("bbg-put-delta", "disabled"),
-    Output("bbg-call-delta", "disabled"),
-    Input("bbg-ml-optimization", "value"),
-    Input("bbg-ml-dte-optimization", "value"),
-)
-def disable_traditional_params_when_ml_enabled(ml_delta_enabled, ml_dte_enabled):
-    """Disable traditional parameters when ML optimization is enabled."""
-    ml_enabled = ml_delta_enabled or ml_dte_enabled
-    return ml_enabled, ml_enabled, ml_enabled, ml_enabled
 
 
 # Callback to sync ML adoption rate slider and text input
