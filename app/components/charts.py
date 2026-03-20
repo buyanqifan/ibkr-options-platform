@@ -341,14 +341,10 @@ def create_trade_timeline_chart(
                 )
                 stock_count += 1
     
-    # Add trade entry points
-    entry_dates = []
-    entry_prices = []
-    entry_annotations = []
-    
-    exit_dates = []
-    exit_prices = []
-    exit_annotations = []
+    # Add trade entry and exit points
+    # Group trades by symbol for proper price mapping
+    entry_markers = []  # List of (date, price, symbol, annotation)
+    exit_markers = []   # List of (date, price, symbol, annotation)
     
     for i, trade in enumerate(trades):
         # Generate contract name: e.g., "AAPL 240115 150 Put"
@@ -368,71 +364,88 @@ def create_trade_timeline_chart(
         
         # Entry point
         entry_date = trade.get("entry_date", "")
+        # Use underlying_entry from trade, or look up from multi_stock_prices if available
         entry_price = trade.get("underlying_entry", 0)
         if entry_date and entry_price:
-            entry_dates.append(entry_date)
-            entry_prices.append(entry_price)
-            entry_annotations.append(
-                f"Entry {i+1}<br>"
-                f"{contract_name}<br>"
-                f"Qty: {quantity}x<br>"
-                f"@ ${entry_price:.2f}"
-            )
+            entry_markers.append({
+                "date": entry_date,
+                "price": entry_price,
+                "symbol": symbol,
+                "annotation": f"Entry {i+1}<br>{contract_name}<br>Qty: {quantity}x<br>@ ${entry_price:.2f}"
+            })
         
         # Exit point
         exit_date = trade.get("exit_date", "")
         exit_price = trade.get("underlying_exit", trade.get("underlying_entry", 0))
         if exit_date and exit_price:
             pnl = trade.get("pnl", 0)
-            exit_dates.append(exit_date)
-            exit_prices.append(exit_price)
-            exit_annotations.append(
-                f"Exit {i+1}<br>"
-                f"{contract_name}<br>"
-                f"Qty: {quantity}x<br>"
-                f"@ ${exit_price:.2f}<br>"
-                f"P&L: ${pnl:+.2f}"
+            exit_markers.append({
+                "date": exit_date,
+                "price": exit_price,
+                "symbol": symbol,
+                "annotation": f"Exit {i+1}<br>{contract_name}<br>Qty: {quantity}x<br>@ ${exit_price:.2f}<br>P&L: ${pnl:+.2f}"
+            })
+    
+    # Add entry markers grouped by symbol
+    if entry_markers:
+        # Group by symbol
+        from collections import defaultdict
+        entries_by_symbol = defaultdict(list)
+        for marker in entry_markers:
+            entries_by_symbol[marker["symbol"]].append(marker)
+        
+        # Define colors for different symbols
+        colors = ["#4CAF50", "#2196F3", "#FFC107", "#E91E63", "#9C27B0", "#FF5722", "#00BCD4", "#8BC34A"]
+        
+        for idx, (symbol, markers) in enumerate(entries_by_symbol.items()):
+            color = colors[idx % len(colors)]
+            fig.add_trace(
+                go.Scatter(
+                    x=[m["date"] for m in markers],
+                    y=[m["price"] for m in markers],
+                    mode='markers',
+                    name=f"Entry: {symbol}",
+                    marker=dict(
+                        color=color,
+                        size=10,
+                        symbol="triangle-up",
+                        line=dict(color="white", width=1)
+                    ),
+                    text=[m["annotation"] for m in markers],
+                    hovertemplate="<b>%{text}</b><extra></extra>",
+                ),
+                row=1, col=1
             )
     
-    # Add entry markers
-    if entry_dates:
-        fig.add_trace(
-            go.Scatter(
-                x=entry_dates,
-                y=entry_prices,
-                mode='markers',
-                name="Entry Points",
-                marker=dict(
-                    color="#4CAF50",
-                    size=10,
-                    symbol="triangle-up",
-                    line=dict(color="white", width=1)
+    # Add exit markers grouped by symbol
+    if exit_markers:
+        from collections import defaultdict
+        exits_by_symbol = defaultdict(list)
+        for marker in exit_markers:
+            exits_by_symbol[marker["symbol"]].append(marker)
+        
+        # Define colors for different symbols (same as entries)
+        colors = ["#F44336", "#1976D2", "#FFB300", "#C2185B", "#7B1FA2", "#E64A19", "#0097A7", "#7CB342"]
+        
+        for idx, (symbol, markers) in enumerate(exits_by_symbol.items()):
+            color = colors[idx % len(colors)]
+            fig.add_trace(
+                go.Scatter(
+                    x=[m["date"] for m in markers],
+                    y=[m["price"] for m in markers],
+                    mode='markers',
+                    name=f"Exit: {symbol}",
+                    marker=dict(
+                        color=color,
+                        size=10,
+                        symbol="triangle-down",
+                        line=dict(color="white", width=1)
+                    ),
+                    text=[m["annotation"] for m in markers],
+                    hovertemplate="<b>%{text}</b><extra></extra>",
                 ),
-                text=entry_annotations,
-                hovertemplate="<b>%{text}</b><extra></extra>",
-            ),
-            row=1, col=1
-        )
-    
-    # Add exit markers
-    if exit_dates:
-        fig.add_trace(
-            go.Scatter(
-                x=exit_dates,
-                y=exit_prices,
-                mode='markers',
-                name="Exit Points",
-                marker=dict(
-                    color="#F44336",
-                    size=10,
-                    symbol="triangle-down",
-                    line=dict(color="white", width=1)
-                ),
-                text=exit_annotations,
-                hovertemplate="<b>%{text}</b><extra></extra>",
-            ),
-            row=1, col=1
-        )
+                row=1, col=1
+            )
     
     # Add stock selection change markers (for binbin_god strategy)
     selection_shapes = []
