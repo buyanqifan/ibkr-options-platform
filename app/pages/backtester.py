@@ -59,6 +59,22 @@ layout = html.Div([
                             "border": "1px solid rgba(255, 255, 255, 0.1)",
                         },
                     ),
+                    
+                    # ML Exit Optimization Option
+                    dcc.Checklist(
+                        id="bt-ml-exit",
+                        options=[{"label": " Enable ML Exit Optimization (dynamic profit target & stop loss)", "value": True}],
+                        value=[],
+                        inline=True,
+                        className="mb-3",
+                        style={
+                            "color": "#ffffff",
+                            "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                            "padding": "10px 14px",
+                            "borderRadius": "4px",
+                            "border": "1px solid rgba(255, 255, 255, 0.1)",
+                        },
+                    ),
 
                     dbc.Label("Date Range"),
                     dbc.Row([
@@ -369,6 +385,7 @@ def disable_traditional_dte_params_when_ml_enabled(ml_dte_enabled):
     State("bt-disable-profit-target", "value"),
     State("bt-disable-stop-loss", "value"),
     State("bt-use-synthetic", "value"),
+    State("bt-ml-exit", "value"),
     State("bt-ml-delta", "value"),
     State("bt-ml-dte", "value"),
     State("bt-ml-adoption-rate", "value"),
@@ -379,7 +396,7 @@ def run_backtest(
     capital, leverage, dte_min, dte_max, delta, profit_target, stop_loss,
     put_delta, call_delta, max_positions, benchmarks,
     disable_profit_target, disable_stop_loss, use_synthetic,
-    ml_delta, ml_dte, ml_adoption_rate
+    ml_exit, ml_delta, ml_dte, ml_adoption_rate
 ):
     if not symbol or not start_date or not end_date:
         return no_update, no_update, no_update, no_update
@@ -419,6 +436,8 @@ def run_backtest(
         "ml_delta_optimization": bool(ml_delta and True in ml_delta),
         "ml_dte_optimization": bool(ml_dte and True in ml_dte),
         "ml_adoption_rate": ml_adoption_rate or 0.5,
+        # ML Exit optimization parameters
+        "ml_exit_optimization": bool(ml_exit and True in ml_exit),
     }
 
     # Get benchmark data if requested
