@@ -143,6 +143,12 @@ layout = dbc.Container([
                                 ],
                                 value="MAG7",
                                 clearable=False,
+                                style={
+                                    "color": "#212529",
+                                    "backgroundColor": "#fff",
+                                    "border": "1px solid #ced4da",
+                                    "borderRadius": "4px",
+                                },
                             ),
                         ], width=12),
                     ], className="mb-2"),
@@ -354,7 +360,7 @@ layout = dbc.Container([
         ], md=8),
     ]),
     
-    # Custom CSS for loading animation
+    # Custom CSS for loading animation and dropdown visibility
     dcc.Markdown('''
     <style>
     .dash-loading {
@@ -363,6 +369,27 @@ layout = dbc.Container([
     .dash-spinner circle {
         stroke: #4CAF50 !important;
         stroke-width: 4;
+    }
+    /* Ensure dropdown text is visible on dark backgrounds */
+    #bbg-stock-pool .Select-control,
+    #bbg-stock-pool .Select-menu-outer {
+        background-color: #fff !important;
+        color: #212529 !important;
+    }
+    #bbg-stock-pool .Select-value-label,
+    #bbg-stock-pool .Select-placeholder {
+        color: #212529 !important;
+    }
+    #bbg-stock-pool .Select-option {
+        background-color: #fff !important;
+        color: #212529 !important;
+    }
+    #bbg-stock-pool .Select-option:hover {
+        background-color: #f0f0f0 !important;
+    }
+    #bbg-stock-pool .Select-option.is-selected {
+        background-color: #e3f2fd !important;
+        color: #212529 !important;
     }
     </style>
     ''', dangerously_allow_html=True)

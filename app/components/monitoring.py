@@ -53,7 +53,7 @@ def create_strategy_state_card(state: Dict[str, Any]) -> dbc.Card:
                 ], width=3),
                 dbc.Col([
                     html.H6("Cost Basis", className="text-muted mb-1"),
-                    html.H4(f"${state.get('cost_basis', 0):.2f}", className="text-dark"),
+                    html.H4(f"${state.get('cost_basis', 0):.2f}", className="text-info"),
                 ], width=3),
                 dbc.Col([
                     html.H6("Premium Collected", className="text-muted mb-1"),
@@ -66,7 +66,7 @@ def create_strategy_state_card(state: Dict[str, Any]) -> dbc.Card:
                 dbc.Col([
                     html.H6("Effective Cost Basis", className="text-muted mb-1"),
                     html.H5(f"${state.get('effective_cost_basis', 0):.2f}", 
-                           className="text-dark"),
+                           className="text-info"),
                 ], width=4),
                 dbc.Col([
                     html.H6("Current Portfolio Value", className="text-muted mb-1"),
