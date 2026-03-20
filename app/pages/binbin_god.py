@@ -126,10 +126,11 @@ layout = dbc.Container([
                         inline=True,
                         className="mb-3",
                         style={
-                            "color": "#e0e0e0",
-                            "backgroundColor": "rgba(255, 255, 255, 0.05)",
-                            "padding": "8px 12px",
+                            "color": "#ffffff",
+                            "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                            "padding": "10px 14px",
                             "borderRadius": "4px",
+                            "border": "1px solid rgba(255, 255, 255, 0.1)",
                         },
                     ),
                     
@@ -288,10 +289,11 @@ layout = dbc.Container([
                                value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#e0e0e0",
-                                    "backgroundColor": "rgba(255, 255, 255, 0.05)",
-                                    "padding": "6px 10px",
+                                    "color": "#ffffff",
+                                    "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                                    "padding": "8px 12px",
                                     "borderRadius": "4px",
+                                    "border": "1px solid rgba(255, 255, 255, 0.1)",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
@@ -316,10 +318,11 @@ layout = dbc.Container([
                               value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#e0e0e0",
-                                    "backgroundColor": "rgba(255, 255, 255, 0.05)",
-                                    "padding": "6px 10px",
+                                    "color": "#ffffff",
+                                    "backgroundColor": "rgba(0, 0, 0, 0.2)",
+                                    "padding": "8px 12px",
                                     "borderRadius": "4px",
+                                    "border": "1px solid rgba(255, 255, 255, 0.1)",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
