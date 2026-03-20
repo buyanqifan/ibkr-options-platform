@@ -570,15 +570,30 @@ class BinbinGodStrategy(BaseStrategy):
                 if market_data:
                     actual_symbol = self._select_best_stock(market_data, current_date)
                     logger.info(f"SP phase: Selected {actual_symbol} for new put position")
+                    
+                    # CRITICAL FIX: Get the actual underlying price for the selected stock
+                    # This ensures correct option pricing and strike selection
+                    actual_underlying_price = underlying_price  # Default to passed price
+                    if actual_symbol in pool_data:
+                        bars = pool_data[actual_symbol]
+                        for bar in bars:
+                            bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
+                            if bar_date_str <= current_date:
+                                actual_underlying_price = bar["close"]
+                        logger.info(f"Using {actual_symbol} price: ${actual_underlying_price:.2f}")
+                    else:
+                        logger.warning(f"No price data for {actual_symbol}, using fallback price")
                 else:
                     # Fallback: use first stock in pool
                     actual_symbol = stock_pool[0] if stock_pool else "MSFT"
+                    actual_underlying_price = underlying_price
                     logger.warning(f"No market data available, using fallback: {actual_symbol}")
             else:
                 actual_symbol = self.symbol
+                actual_underlying_price = underlying_price
             
             return self._generate_backtest_put_signal(
-                actual_symbol, current_date, underlying_price, iv, position_mgr
+                actual_symbol, current_date, actual_underlying_price, iv, position_mgr
             )
         else:  # CC phase
             # In CC phase: use the stock we already hold shares of
