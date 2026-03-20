@@ -1289,7 +1289,113 @@ class BinbinGodStrategy(BaseStrategy):
             'expected_improvement': recommendation.expected_pnl_improvement,
             'confidence': recommendation.confidence,
         }
-    
+
+    def generate_roll_signal(
+        self,
+        closed_trade: Dict[str, Any],
+        current_date: str,
+        underlying_price: float,
+        iv: float,
+    ) -> Optional[Signal]:
+        """Generate a roll signal after a position is closed.
+
+        Called by the backtest engine when a position is closed with PROFIT_TARGET
+        (indicating premium captured, good candidate for roll forward).
+
+        Args:
+            closed_trade: The trade that was just closed
+            current_date: Current date (YYYY-MM-DD)
+            underlying_price: Current underlying price
+            iv: Current implied volatility
+
+        Returns:
+            Signal for new position, or None if no roll
+        """
+        # Only roll on profit target (premium captured successfully)
+        exit_reason = closed_trade.get('exit_reason', '')
+        if exit_reason not in ('PROFIT_TARGET', 'ROLL_FORWARD', 'ROLL_OUT'):
+            return None
+
+        # Don't roll if assigned (we now hold stock or sold stock)
+        if exit_reason == 'ASSIGNMENT':
+            return None
+
+        symbol = closed_trade.get('symbol', '')
+        right = closed_trade.get('right', '')  # 'P' or 'C'
+        quantity = closed_trade.get('quantity', 0)
+
+        # Determine DTE for new position
+        if self.ml_dte_optimization and self.ml_dte_optimizer:
+            # Use ML-optimized DTE
+            dte_result = self.ml_dte_optimizer.predict_optimal_dte(
+                symbol=symbol,
+                current_date=current_date,
+                iv=iv,
+                delta_target=self.call_delta if right == 'C' else self.put_delta,
+            )
+            target_dte = dte_result.predicted_dte
+        else:
+            # Use configured DTE range
+            target_dte = self.dte_max  # Default to longer DTE for rolls
+
+        # Calculate expiry date
+        try:
+            curr_date = datetime.strptime(current_date, '%Y-%m-%d')
+        except:
+            curr_date = datetime.now()
+
+        expiry_date = curr_date + timedelta(days=target_dte)
+        expiry_str = expiry_date.strftime('%Y%m%d')
+
+        # Determine strike based on phase and right
+        if self.phase == "SP" and right == "P":
+            # Continue selling puts
+            target_delta = self.put_delta
+            strike = OptionsPricer.strike_from_delta(
+                underlying_price, target_dte / 365.0, iv, target_delta, 'P'
+            )
+            trade_type = "BINBIN_PUT"
+
+        elif self.phase == "CC" and right == 'C':
+            # Continue selling calls
+            target_delta = self.call_delta
+            strike = OptionsPricer.strike_from_delta(
+                underlying_price, target_dte / 365.0, iv, target_delta, 'C'
+            )
+            trade_type = "BINBIN_CALL"
+
+        else:
+            # Phase mismatch, don't roll
+            return None
+
+        # Calculate premium
+        T = target_dte / 365.0
+        if right == 'P':
+            premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
+        else:
+            premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
+
+        # Generate signal
+        signal = Signal(
+            symbol=symbol,
+            trade_type=trade_type,
+            strike=round(strike, 2),
+            expiry=expiry_str,
+            right=right,
+            quantity=quantity,  # Same size
+            premium=premium,
+            delta=target_delta,
+            iv=iv,
+            margin_requirement=strike * 100 if right == 'P' else None,
+        )
+
+        logger.info(
+            f"Generated roll signal: {symbol} {trade_type} strike={strike:.2f} "
+            f"dte={target_dte} premium={premium:.2f}"
+        )
+
+        return signal
+
     def on_assignment(self, position: Dict[str, Any]):
         """Called when option is assigned/exercised."""
         right = position.get("right", "")

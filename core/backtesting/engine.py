@@ -350,6 +350,74 @@ class BacktestEngine:
                         position_mgr.cumulative_pnl += additional_pnl
                         # net_capital is a property (initial_capital + cumulative_pnl), auto-updates
 
+                # Generate roll signal for Wheel-style strategies
+                # When profit target is hit, immediately roll to new position
+                roll_signal = None
+                if hasattr(strategy, 'generate_roll_signal') and trade.exit_reason in ('PROFIT_TARGET', 'ROLL_FORWARD', 'ROLL_OUT'):
+                    # Get underlying price for this symbol
+                    roll_underlying_price = underlying_price
+                    if is_multi_stock:
+                        symbol_price = self._get_price_for_symbol(trade.symbol, bar_date, mag7_data)
+                        if symbol_price is not None:
+                            roll_underlying_price = symbol_price
+
+                    roll_signal = strategy.generate_roll_signal(
+                        closed_trade=trade.to_dict(),
+                        current_date=bar_date,
+                        underlying_price=roll_underlying_price,
+                        iv=iv,
+                    )
+
+                    if roll_signal:
+                        # Open roll position immediately (same day)
+                        if "PUT" in roll_signal.trade_type:
+                            margin_per_contract = roll_signal.strike * 100
+                        elif "CALL" in roll_signal.trade_type:
+                            margin_per_contract = 0 if strategy.stock_holding.shares > 0 else roll_signal.strike * 100
+                        else:
+                            margin_per_contract = roll_signal.margin_requirement or 0
+
+                        total_margin = abs(roll_signal.quantity) * margin_per_contract
+                        roll_position_id = f"{roll_signal.symbol}_{bar_date}_ROLL_{roll_signal.strike}_{roll_signal.right}"
+
+                        if position_mgr.allocate_margin(
+                            position_id=roll_position_id,
+                            strategy=strategy.name,
+                            symbol=roll_signal.symbol,
+                            entry_date=bar_date,
+                            margin_amount=total_margin,
+                        ):
+                            roll_pos = OptionPosition(
+                                symbol=roll_signal.symbol,
+                                entry_date=bar_date,
+                                expiry=roll_signal.expiry,
+                                strike=roll_signal.strike,
+                                right=roll_signal.right,
+                                trade_type=roll_signal.trade_type,
+                                quantity=roll_signal.quantity,
+                                entry_price=roll_signal.premium,
+                                underlying_entry=roll_underlying_price,
+                                iv_at_entry=roll_signal.iv,
+                                delta_at_entry=roll_signal.delta,
+                                capital_at_entry=position_mgr.net_capital,
+                            )
+                            simulator.open_position(roll_pos)
+
+                            # Track roll costs
+                            roll_cost = cost_model.calculate_total_cost(roll_signal.quantity)
+                            total_commission += cost_model.calculate_commission(roll_signal.quantity)
+                            total_slippage += cost_model.calculate_slippage(roll_signal.quantity)
+
+                            logger.info(
+                                f"Rolled position: {trade.symbol} {trade.exit_reason} -> "
+                                f"{roll_signal.symbol} {roll_signal.trade_type} strike={roll_signal.strike:.2f} "
+                                f"premium={roll_signal.premium:.2f}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Insufficient margin for roll: {roll_signal.symbol} {roll_signal.trade_type}"
+                            )
+
             # Generate new signals (no cooldown for strategies that should trade frequently)
             # Cooldown was causing delays between closing and reopening positions
             # For sell_put strategy, we want to deploy capital as soon as it's available
