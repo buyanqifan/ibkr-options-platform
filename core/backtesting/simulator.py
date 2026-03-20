@@ -104,6 +104,125 @@ class TradeSimulator:
     def open_position(self, position: OptionPosition):
         self.open_positions.append(position)
 
+    def check_exits_for_position(
+        self,
+        pos: OptionPosition,
+        current_date: str,
+        underlying_price: float,
+        iv: float,
+        profit_target_pct: float,
+        stop_loss_pct: float,
+        min_dte: int = 0,
+    ) -> TradeRecord | None:
+        """Check a single position for exit conditions.
+
+        This method is used for multi-stock strategies where each position
+        may have a different underlying price.
+
+        Returns:
+            TradeRecord if position was closed, None otherwise
+        """
+        from datetime import datetime
+
+        exit_reason = None
+        exit_price = 0.0
+
+        # Calculate DTE
+        try:
+            expiry_date = datetime.strptime(pos.expiry, "%Y%m%d").date()
+            curr_date = datetime.strptime(current_date, "%Y-%m-%d").date()
+            dte = (expiry_date - curr_date).days
+        except (ValueError, TypeError):
+            dte = 999
+
+        # Calculate current option price using Black-Scholes
+        T = max(dte / 365.0, 0.001)
+        if pos.right == "P":
+            current_opt_price = OptionsPricer.put_price(
+                underlying_price, pos.strike, T, iv
+            )
+        else:
+            current_opt_price = OptionsPricer.call_price(
+                underlying_price, pos.strike, T, iv
+            )
+
+        # For short positions, profit = entry_premium - current_premium
+        if pos.quantity < 0:
+            pnl_per_share = pos.entry_price - current_opt_price
+            pnl_pct = (pnl_per_share / pos.entry_price * 100) if pos.entry_price > 0 else 0
+        else:
+            pnl_per_share = current_opt_price - pos.entry_price
+            pnl_pct = (pnl_per_share / pos.entry_price * 100) if pos.entry_price > 0 else 0
+
+        # Check profit target (dynamic adjustment based on DTE)
+        adjusted_profit_target = profit_target_pct
+        if dte <= 7:  # Last week: reduce target to capture remaining premium
+            adjusted_profit_target = profit_target_pct * 0.7
+
+        if pnl_pct >= adjusted_profit_target:
+            exit_reason = "PROFIT_TARGET"
+            exit_price = current_opt_price
+
+        # Check stop loss (dynamic adjustment based on DTE and holding period)
+        adjusted_stop_loss = stop_loss_pct
+        if dte <= 7:  # Last week: widen stop to avoid whipsaw
+            adjusted_stop_loss = stop_loss_pct * 1.3
+
+        if pnl_pct <= -adjusted_stop_loss:
+            exit_reason = "STOP_LOSS"
+            exit_price = current_opt_price
+
+        # Check expiration
+        elif dte <= min_dte:
+            # At expiration, option value is its intrinsic value
+            if pos.right == "P":  # Put option
+                intrinsic_value = max(0, pos.strike - underlying_price)
+            else:  # Call option
+                intrinsic_value = max(0, underlying_price - pos.strike)
+
+            exit_price = intrinsic_value
+            exit_reason = "EXPIRY"
+
+            # Check assignment for short puts (stock price below strike)
+            if pos.right == "P" and pos.quantity < 0 and underlying_price < pos.strike:
+                exit_reason = "ASSIGNMENT"
+
+            # Check assignment for short calls (stock price above strike)
+            if pos.right == "C" and pos.quantity < 0 and underlying_price > pos.strike:
+                exit_reason = "ASSIGNMENT"
+
+        if exit_reason:
+            total_pnl = pnl_per_share * abs(pos.quantity) * 100  # options multiplier
+            total_pnl_pct = pnl_pct
+
+            trade = TradeRecord(
+                symbol=pos.symbol,
+                trade_type=pos.trade_type,
+                entry_date=pos.entry_date,
+                exit_date=current_date,
+                expiry=pos.expiry,
+                strike=pos.strike,
+                right=pos.right,
+                entry_price=pos.entry_price,
+                exit_price=exit_price,
+                quantity=pos.quantity,
+                pnl=total_pnl,
+                pnl_pct=total_pnl_pct,
+                exit_reason=exit_reason,
+                underlying_entry=pos.underlying_entry,
+                underlying_exit=underlying_price,
+                iv_at_entry=pos.iv_at_entry,
+                delta_at_entry=pos.delta_at_entry,
+                capital_at_entry=getattr(pos, 'capital_at_entry', 0.0),
+                capital_at_exit=0.0,
+            )
+            self.closed_trades.append(trade)
+            return trade
+        else:
+            pos.current_price = current_opt_price
+            pos.current_pnl = pnl_per_share * abs(pos.quantity) * 100
+            return None
+
     def check_exits(
         self,
         current_date: str,

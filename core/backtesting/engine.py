@@ -207,8 +207,40 @@ class BacktestEngine:
                 iv = 0.3  # fallback
 
             # Check exits and release margin
+            # For BinbinGod strategy with multi-stock, check each position with its correct price
+            mag7_data = getattr(strategy, 'mag7_data', None)
+            is_multi_stock = strategy_name == "binbin_god" and mag7_data
+
+            if is_multi_stock:
+                # Multi-stock mode: check each position with its correct underlying price
+                profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
+                stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
+
+                closed = []
+                remaining_positions = []
+                for pos in simulator.open_positions:
+                    # Get the correct price for this position's symbol
+                    pos_price = self._get_price_for_symbol(pos.symbol, bar_date, mag7_data)
+                    if pos_price is None:
+                        pos_price = underlying_price  # Fallback to primary stock price
+
+                    trade = simulator.check_exits_for_position(
+                        pos,
+                        bar_date,
+                        pos_price,
+                        iv,
+                        profit_target_to_use,
+                        stop_loss_to_use,
+                        min_dte=0,
+                    )
+                    if trade:
+                        closed.append(trade)
+                    else:
+                        remaining_positions.append(pos)
+
+                simulator.open_positions = remaining_positions
             # For Wheel strategy SP phase, skip profit target/stop loss - only check assignment at expiry
-            if strategy.name == "wheel":
+            elif strategy.name == "wheel":
                 # Check which phase the Wheel strategy is in
                 wheel_phase = getattr(strategy, 'phase', 'SP')  # Default to SP if not found
                 
@@ -358,6 +390,14 @@ class BacktestEngine:
                         entry_date=bar_date,
                         margin_amount=total_margin,
                     ):
+                        # Get correct underlying price for this symbol (important for multi-stock strategies)
+                        entry_underlying_price = underlying_price  # Default: use primary stock
+                        if is_multi_stock:
+                            symbol_price = self._get_price_for_symbol(sig.symbol, bar_date, mag7_data)
+                            if symbol_price is not None:
+                                entry_underlying_price = symbol_price
+                                logger.debug(f"Using {sig.symbol} price ${entry_underlying_price:.2f} for entry (vs primary ${underlying_price:.2f})")
+
                         # Margin allocated successfully, open position
                         pos = OptionPosition(
                             symbol=sig.symbol,
@@ -368,7 +408,7 @@ class BacktestEngine:
                             trade_type=sig.trade_type,
                             quantity=sig.quantity,
                             entry_price=sig.premium,
-                            underlying_entry=underlying_price,
+                            underlying_entry=entry_underlying_price,
                             iv_at_entry=sig.iv,
                             delta_at_entry=sig.delta,
                             capital_at_entry=position_mgr.net_capital,  # Record total capital at entry
