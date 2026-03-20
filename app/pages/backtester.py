@@ -185,6 +185,12 @@ layout = html.Div([
                         value=[],
                         multi=True,
                         className="mb-3",
+                        style={
+                            "color": "#212529",
+                            "backgroundColor": "#fff",
+                            "border": "1px solid #ced4da",
+                            "borderRadius": "4px",
+                        },
                     ),
                     
                     # Wheel Strategy Specific Parameters
@@ -574,3 +580,31 @@ def save_backtest_result(n_clicks, result, params):
         return f"✅ Saved #{backtest_id}", "secondary", True
     except Exception as e:
         return f"❌ Error: {str(e)[:30]}", "danger", False
+
+
+# Custom CSS for dropdown visibility in dark theme
+layout.children.append(dcc.Markdown('''
+<style>
+/* Ensure benchmark dropdown text is visible on dark backgrounds */
+#bt-benchmarks .Select-control,
+#bt-benchmarks .Select-menu-outer {
+    background-color: #fff !important;
+    color: #212529 !important;
+}
+#bt-benchmarks .Select-value-label,
+#bt-benchmarks .Select-placeholder {
+    color: #212529 !important;
+}
+#bt-benchmarks .Select-option {
+    background-color: #fff !important;
+    color: #212529 !important;
+}
+#bt-benchmarks .Select-option:hover {
+    background-color: #f0f0f0 !important;
+}
+#bt-benchmarks .Select-option.is-selected {
+    background-color: #e3f2fd !important;
+    color: #212529 !important;
+}
+</style>
+''', dangerously_allow_html=True))
