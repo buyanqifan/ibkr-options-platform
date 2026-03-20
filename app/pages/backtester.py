@@ -51,6 +51,12 @@ layout = html.Div([
                         value=[],
                         inline=True,
                         className="mb-3",
+                        style={
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                            "padding": "8px 12px",
+                            "borderRadius": "4px",
+                        },
                     ),
 
                     dbc.Label("Date Range"),
@@ -93,7 +99,10 @@ layout = html.Div([
                                value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#fff",
+                                    "color": "#e0e0e0",
+                                    "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                                    "padding": "6px 10px",
+                                    "borderRadius": "4px",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
@@ -116,7 +125,10 @@ layout = html.Div([
                                value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#fff",
+                                    "color": "#e0e0e0",
+                                    "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                                    "padding": "6px 10px",
+                                    "borderRadius": "4px",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
@@ -143,7 +155,12 @@ layout = html.Div([
                         value=[],
                         inline=True,
                         className="mb-2",
-                        style={"color": "#fff"},
+                        style={
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                            "padding": "8px 12px",
+                            "borderRadius": "4px",
+                        },
                     ),
                     
                     html.Div(id="ml-delta-params-container", children=[
@@ -161,7 +178,12 @@ layout = html.Div([
                         value=[],
                         inline=True,
                         className="mb-2",
-                        style={"color": "#fff"},
+                        style={
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                            "padding": "8px 12px",
+                            "borderRadius": "4px",
+                        },
                     ),
                     
                     # Benchmark Comparison
@@ -605,6 +627,23 @@ layout.children.append(dcc.Markdown('''
 #bt-benchmarks .Select-option.is-selected {
     background-color: #e3f2fd !important;
     color: #212529 !important;
+}
+
+/* Improve checklist and switch visibility in dark theme */
+#bt-use-synthetic label,
+#bt-disable-profit-target label,
+#bt-disable-stop-loss label,
+#bt-ml-delta label,
+#bt-ml-dte label {
+    color: #e0e0e0 !important;
+    font-weight: 500;
+}
+#bt-use-synthetic input[type="checkbox"],
+#bt-disable-profit-target input[type="checkbox"],
+#bt-disable-stop-loss input[type="checkbox"],
+#bt-ml-delta input[type="checkbox"],
+#bt-ml-dte input[type="checkbox"] {
+    accent-color: #4CAF50;
 }
 </style>
 ''', dangerously_allow_html=True))

@@ -125,6 +125,12 @@ layout = dbc.Container([
                         value=[],
                         inline=True,
                         className="mb-3",
+                        style={
+                            "color": "#e0e0e0",
+                            "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                            "padding": "8px 12px",
+                            "borderRadius": "4px",
+                        },
                     ),
                     
                     html.Hr(),
@@ -196,7 +202,11 @@ layout = dbc.Container([
                         value=False,
                         label="Enable ML-powered adaptive delta selection",
                         className="mb-3",
-                        style={"display": "flex", "alignItems": "center"}
+                        style={
+                            "display": "flex", 
+                            "alignItems": "center",
+                            "color": "#e0e0e0",
+                        }
                     ),
                     
                     # ML DTE Optimization Toggle
@@ -206,7 +216,11 @@ layout = dbc.Container([
                         value=False,
                         label="Enable ML-powered adaptive DTE (Days to Expiration) selection",
                         className="mb-3",
-                        style={"display": "flex", "alignItems": "center"}
+                        style={
+                            "display": "flex", 
+                            "alignItems": "center",
+                            "color": "#e0e0e0",
+                        }
                     ),
                     
                     # ML Adoption Rate (shown when ML is enabled)
@@ -235,7 +249,8 @@ layout = dbc.Container([
                             id="bbg-cc-optimization",
                             value=True,
                             label="Enable CC optimization for loss positions",
-                            className="mb-3"
+                            className="mb-3",
+                            style={"color": "#e0e0e0"}
                         ),
                     ], id="bbg-cc-optimization-container", style={"display": "none"}),
                     
@@ -273,7 +288,10 @@ layout = dbc.Container([
                                value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#fff",
+                                    "color": "#e0e0e0",
+                                    "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                                    "padding": "6px 10px",
+                                    "borderRadius": "4px",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
@@ -298,7 +316,10 @@ layout = dbc.Container([
                               value=[],
                                 className="mt-2",
                                 style={
-                                    "color": "#fff",
+                                    "color": "#e0e0e0",
+                                    "backgroundColor": "rgba(255, 255, 255, 0.05)",
+                                    "padding": "6px 10px",
+                                    "borderRadius": "4px",
                                     "display": "flex",
                                     "alignItems": "center",
                                     "gap": "8px"
@@ -390,6 +411,30 @@ layout = dbc.Container([
     #bbg-stock-pool .Select-option.is-selected {
         background-color: #e3f2fd !important;
         color: #212529 !important;
+    }
+    
+    /* Improve checklist and switch visibility in dark theme */
+    #bbg-use-synthetic label,
+    #bbg-disable-profit-target label,
+    #bbg-disable-stop-loss label {
+        color: #e0e0e0 !important;
+        font-weight: 500;
+    }
+    #bbg-use-synthetic input[type="checkbox"],
+    #bbg-disable-profit-target input[type="checkbox"],
+    #bbg-disable-stop-loss input[type="checkbox"] {
+        accent-color: #4CAF50;
+    }
+    #bbg-ml-optimization label,
+    #bbg-ml-dte-optimization label,
+    #bbg-cc-optimization label {
+        color: #e0e0e0 !important;
+        font-weight: 500;
+    }
+    #bbg-ml-optimization input[type="checkbox"],
+    #bbg-ml-dte-optimization input[type="checkbox"],
+    #bbg-cc-optimization input[type="checkbox"] {
+        accent-color: #4CAF50;
     }
     </style>
     ''', dangerously_allow_html=True)
