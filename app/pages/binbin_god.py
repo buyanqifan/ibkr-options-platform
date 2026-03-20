@@ -159,22 +159,26 @@ layout = dbc.Container([
                     html.H6("Wheel Parameters", className="fw-bold mb-2"),
                     
                     # DTE Range
-                    dbc.Label("DTE Range (days)"),
-                    dbc.Row([
-                        dbc.Col(dbc.Input(id="bbg-dte-min", type="number", 
-                                        value=30, size="sm"), width=6),
-                        dbc.Col(dbc.Input(id="bbg-dte-max", type="number", 
-                                        value=45, size="sm"), width=6),
-                    ], className="mb-2"),
+                    html.Div([
+                        dbc.Label("DTE Range (days)"),
+                        dbc.Row([
+                            dbc.Col(dbc.Input(id="bbg-dte-min", type="number", 
+                                            value=30, size="sm", disabled=False), width=6),
+                            dbc.Col(dbc.Input(id="bbg-dte-max", type="number", 
+                                            value=45, size="sm", disabled=False), width=6),
+                        ], className="mb-2"),
+                    ], id="bbg-dte-range-container"),
                     
                     # Delta Targets
-                    dbc.Label("Put Delta (absolute)"),
-                    dbc.Input(id="bbg-put-delta", type="number", 
-                             value=0.30, step=0.05, size="sm", className="mb-2"),
-                    
-                    dbc.Label("Call Delta (absolute)"),
-                    dbc.Input(id="bbg-call-delta", type="number", 
-                             value=0.30, step=0.05, size="sm", className="mb-2"),
+                    html.Div([
+                        dbc.Label("Put Delta (absolute)"),
+                        dbc.Input(id="bbg-put-delta", type="number", 
+                                 value=0.30, step=0.05, size="sm", className="mb-2", disabled=False),
+                        
+                        dbc.Label("Call Delta (absolute)"),
+                        dbc.Input(id="bbg-call-delta", type="number", 
+                                 value=0.30, step=0.05, size="sm", className="mb-2", disabled=False),
+                    ], id="bbg-delta-targets-container"),
                     
                     html.Hr(),
                     html.H6("ML Delta Optimization", className="fw-bold mb-2 text-primary"),
@@ -398,6 +402,21 @@ def toggle_ml_controls(ml_optimization_enabled):
 def toggle_ml_dte_with_delta(ml_optimization_enabled):
     """Enable ML DTE optimization when ML delta optimization is enabled."""
     return ml_optimization_enabled
+
+
+# Callback to disable traditional parameters when ML is enabled
+@callback(
+    Output("bbg-dte-min", "disabled"),
+    Output("bbg-dte-max", "disabled"),
+    Output("bbg-put-delta", "disabled"),
+    Output("bbg-call-delta", "disabled"),
+    Input("bbg-ml-optimization", "value"),
+    Input("bbg-ml-dte-optimization", "value"),
+)
+def disable_traditional_params_when_ml_enabled(ml_delta_enabled, ml_dte_enabled):
+    """Disable traditional parameters when ML optimization is enabled."""
+    ml_enabled = ml_delta_enabled or ml_dte_enabled
+    return ml_enabled, ml_enabled, ml_enabled, ml_enabled
 
 
 # Callback to sync ML adoption rate slider and text input
