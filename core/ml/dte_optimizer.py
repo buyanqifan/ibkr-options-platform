@@ -88,6 +88,8 @@ class DTEOptimizerML:
         self.q_table = {}
         self.performance_history = []
         self.last_retrain = None
+        # Set random seed for reproducible results
+        np.random.seed(42)  # Fixed seed for reproducibility
         self._load_model()
 
     def _load_model(self):
