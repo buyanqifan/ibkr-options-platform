@@ -234,12 +234,12 @@ layout = dbc.Container([
                         }
                     ),
 
-                    # ML Exit Optimization Toggle
-                    dbc.Label("Enable ML Exit Optimization"),
+                    # ML Roll Optimization Toggle
+                    dbc.Label("Enable ML Roll Optimization"),
                     dbc.Switch(
-                        id="bbg-ml-exit-optimization",
+                        id="bbg-ml-roll-optimization",
                         value=False,
-                        label="Enable ML-powered dynamic profit target / stop loss",
+                        label="Enable ML-powered intelligent roll management (Roll Forward/Out)",
                         className="mb-3",
                         style={
                             "display": "flex",
@@ -566,7 +566,7 @@ def update_ml_adoption_rate_slider(rate_text):
     State("bbg-disable-stop-loss", "value"),
     State("bbg-ml-optimization", "value"),
     State("bbg-ml-dte-optimization", "value"),
-    State("bbg-ml-exit-optimization", "value"),
+    State("bbg-ml-roll-optimization", "value"),
     State("bbg-ml-adoption-rate-text", "value"),
     State("bbg-cc-optimization", "value"),
     prevent_initial_call=True,
@@ -576,7 +576,7 @@ def run_binbin_backtest(
     stock_pool, custom_stocks, dte_min, dte_max, put_delta, call_delta,
     max_positions, rebalance_threshold, profit_target, stop_loss,
     disable_profit_target, disable_stop_loss,
-    ml_optimization, ml_dte_optimization, ml_exit_optimization, ml_adoption_rate, cc_optimization
+    ml_optimization, ml_dte_optimization, ml_roll_optimization, ml_adoption_rate, cc_optimization
 ):
     """Run Binbin God strategy backtest."""
     if not start_date or not end_date:
@@ -631,7 +631,7 @@ def run_binbin_backtest(
         # ML Delta Optimization parameters
         "ml_delta_optimization": ml_optimization or False,
         "ml_dte_optimization": ml_dte_optimization or False,
-        "ml_exit_optimization": ml_exit_optimization or False,
+        "ml_roll_optimization": ml_roll_optimization or False,
         "ml_adoption_rate": ml_adoption_rate or 0.6,
         "cc_optimization_enabled": cc_optimization if cc_optimization is not None else True,
         "cc_min_delta_cost": 0.15,

@@ -110,10 +110,10 @@ class BinbinGodStrategy(BaseStrategy):
         self.ml_integration = None
         self.ml_dte_optimizer = None  # Add DTE optimizer
 
-        # ML exit optimization (profit target / stop loss) parameters
-        self.ml_exit_optimization = config.get("ml_exit_optimization", False)
-        self.ml_exit_optimizer = None
-        self.ml_exit_confidence_threshold = config.get("ml_exit_confidence_threshold", 0.6)
+        # ML roll optimization parameters (replaces traditional stop loss / profit target)
+        self.ml_roll_optimization = config.get("ml_roll_optimization", False)
+        self.ml_roll_optimizer = None
+        self.ml_roll_confidence_threshold = config.get("ml_roll_confidence_threshold", 0.6)
 
         self.logger = logging.getLogger("binbin_god")
         
@@ -142,20 +142,20 @@ class BinbinGodStrategy(BaseStrategy):
                 self.ml_delta_optimization = False
                 self.ml_dte_optimization = False
 
-        # Initialize ML Exit Optimizer if enabled
-        if self.ml_exit_optimization:
+        # Initialize ML Roll Optimizer if enabled
+        if self.ml_roll_optimization:
             try:
-                from core.ml.exit_optimizer import MLExitOptimizer
-                self.ml_exit_optimizer = MLExitOptimizer(
-                    model_path=config.get("ml_exit_model_path")
+                from core.ml.roll_optimizer import MLRollOptimizer
+                self.ml_roll_optimizer = MLRollOptimizer(
+                    model_path=config.get("ml_roll_model_path")
                 )
-                self.logger.info("ML Exit Optimizer initialized for dynamic profit target / stop loss")
+                self.logger.info("ML Roll Optimizer initialized for intelligent roll management")
             except ImportError as e:
-                self.logger.warning(f"ML Exit optimization not available: {e}")
-                self.ml_exit_optimization = False
+                self.logger.warning(f"ML Roll optimization not available: {e}")
+                self.ml_roll_optimization = False
             except Exception as e:
-                self.logger.warning(f"ML Exit optimization initialization failed: {e}")
-                self.ml_exit_optimization = False
+                self.logger.warning(f"ML Roll optimization initialization failed: {e}")
+                self.ml_roll_optimization = False
 
         # Scoring weights - optimized to avoid correlation
         # IV Rank is most important for options premium (35%)
@@ -995,7 +995,13 @@ class BinbinGodStrategy(BaseStrategy):
         current_dt: datetime,
         market_data: Dict[str, Any] = None,
     ) -> tuple[bool, str]:
-        """Check if position should be exited with ML-optimized targets.
+        """Check if position should be closed (for Wheel strategy, this means roll).
+
+        For Wheel strategy, we don't use traditional stop loss. Instead:
+        - Roll Forward: Premium captured > 80%, roll to new position
+        - Roll Out: Near assignment risk, extend expiry
+        - Let Expire: Hold to expiry for max theta
+        - Close Early: Only for margin management
 
         Args:
             position: Position dictionary
@@ -1005,81 +1011,117 @@ class BinbinGodStrategy(BaseStrategy):
             market_data: Current market data (for ML features)
 
         Returns:
-            (should_exit, reason) tuple
+            (should_close, reason) tuple
         """
 
-        # Calculate P&L
+        # Calculate premium capture
         pnl = current_price - entry_price
-        pnl_pct = (pnl / entry_price) * 100 if entry_price > 0 else 0
+        premium_captured_pct = abs(pnl) / abs(entry_price) * 100 if entry_price else 0
 
-        # ML-based exit optimization
-        if self.ml_exit_optimization and self.ml_exit_optimizer and market_data:
+        # ML-based roll optimization
+        if self.ml_roll_optimization and self.ml_roll_optimizer and market_data:
             try:
                 current_date = current_dt.strftime('%Y-%m-%d') if isinstance(current_dt, datetime) else str(current_dt)[:10]
 
-                # Build features for ML prediction
-                features = self.ml_exit_optimizer.build_features(
-                    position=position,
+                # Add strategy phase to position for ML features
+                position_with_phase = {**position, 'strategy_phase': self.phase}
+
+                # Get roll recommendation
+                should_roll, recommendation = self.ml_roll_optimizer.should_roll(
+                    position=position_with_phase,
                     market_data=market_data,
-                    current_date=current_date
+                    current_date=current_date,
+                    min_confidence=self.ml_roll_confidence_threshold
                 )
 
-                # Check for early exit signals first
-                should_exit_early, early_reason = self.ml_exit_optimizer.should_exit_early(
-                    position=position,
-                    market_data=market_data,
-                    current_date=current_date
-                )
-                if should_exit_early:
-                    self.logger.info(f"ML early exit signal: {early_reason}")
-                    return True, f"ML_{early_reason}"
+                if should_roll:
+                    self.logger.info(
+                        f"ML Roll recommendation: {recommendation.action} "
+                        f"(confidence: {recommendation.confidence:.0%}, "
+                        f"expected improvement: ${recommendation.expected_pnl_improvement:.2f})"
+                    )
 
-                # Get ML-optimized profit target and stop loss
-                ml_profit_target, ml_stop_loss = self.ml_exit_optimizer.predict_optimal_exits(
-                    features=features,
-                    base_profit_target=self.profit_target_pct,
-                    base_stop_loss=self.stop_loss_pct
-                )
+                    # Store roll parameters for execution
+                    position['_roll_recommendation'] = recommendation
+
+                    # Map roll actions to close reasons
+                    action_map = {
+                        "ROLL_FORWARD": "ML_ROLL_FORWARD",
+                        "ROLL_OUT": "ML_ROLL_OUT",
+                        "CLOSE_EARLY": "ML_CLOSE_EARLY",
+                    }
+                    return True, action_map.get(recommendation.action, "ML_ROLL")
 
                 self.logger.debug(
-                    f"ML exit targets: profit={ml_profit_target:.1f}%, stop={ml_stop_loss:.1f}% "
-                    f"(base: profit={self.profit_target_pct:.1f}%, stop={self.stop_loss_pct:.1f}%)"
+                    f"ML Roll: {recommendation.action} - {recommendation.reasoning}"
                 )
 
-                # Check ML-optimized profit target
-                if not self._profit_target_disabled:
-                    profit_threshold = ml_profit_target / 100.0 * abs(entry_price)
-                    if abs(pnl) >= profit_threshold and pnl < 0:  # Premium decayed enough
-                        return True, "ML_PROFIT_TARGET"
-
-                # Check ML-optimized stop loss
-                if not self._stop_loss_disabled:
-                    loss_threshold = ml_stop_loss / 100.0 * abs(entry_price)
-                    if pnl >= loss_threshold:  # Loss exceeded threshold
-                        return True, "ML_STOP_LOSS"
-
             except Exception as e:
-                self.logger.warning(f"ML exit optimization failed, falling back to static: {e}")
-                # Fall through to static logic
+                self.logger.warning(f"ML roll optimization failed: {e}")
+                # Fall through to rule-based logic
 
-        # Static profit target exit (fallback or when ML disabled)
-        if not self._profit_target_disabled and not (self.ml_exit_optimization and self.ml_exit_optimizer):
+        # Rule-based roll logic (fallback when ML disabled or failed)
+        # For Wheel strategy, we only close early in specific cases
+
+        # Expiry check
+        expiry = position.get("expiry")
+        if expiry:
+            if isinstance(expiry, str):
+                try:
+                    expiry_date = datetime.strptime(expiry, '%Y%m%d')
+                except:
+                    expiry_date = current_dt
+            else:
+                expiry_date = expiry
+
+            dte = (expiry_date - current_dt).days if isinstance(current_dt, datetime) else 0
+
+            # Roll Forward: High premium capture with time remaining
+            if premium_captured_pct >= 80 and dte > 7:
+                return True, "ROLL_FORWARD"
+
+            # Near expiry - let it expire (Wheel strategy: time is our friend)
+            if dte <= 0:
+                return True, "EXPIRY"
+
+        # Traditional profit target (user may have disabled it for pure Wheel)
+        if not self._profit_target_disabled:
             profit_threshold = self.profit_target_pct / 100.0 * abs(entry_price)
-            if abs(pnl) >= profit_threshold and pnl < 0:  # Premium decayed enough
+            if abs(pnl) >= profit_threshold and pnl < 0:
                 return True, "PROFIT_TARGET"
 
-        # Static stop loss exit (fallback or when ML disabled)
-        if not self._stop_loss_disabled and not (self.ml_exit_optimization and self.ml_exit_optimizer):
+        # Traditional stop loss (only for extreme cases, user should consider disabling)
+        if not self._stop_loss_disabled:
             loss_threshold = self.stop_loss_pct / 100.0 * abs(entry_price)
-            if pnl >= loss_threshold:  # Loss exceeded threshold
+            if pnl >= loss_threshold:
+                self.logger.warning(
+                    f"Stop loss triggered for {position.get('symbol')}. "
+                    f"Consider if this is appropriate for Wheel strategy."
+                )
                 return True, "STOP_LOSS"
 
-        # Expiry exit
-        expiry = position.get("expiry")
-        if expiry and current_dt >= expiry:
-            return True, "EXPIRY"
-
         return False, ""
+
+    def get_roll_parameters(self, position: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Get roll parameters from ML recommendation.
+
+        Args:
+            position: Position with roll recommendation
+
+        Returns:
+            Dictionary with roll parameters or None
+        """
+        recommendation = position.get('_roll_recommendation')
+        if not recommendation:
+            return None
+
+        return {
+            'action': recommendation.action,
+            'optimal_dte': recommendation.optimal_dte,
+            'optimal_delta': recommendation.optimal_delta,
+            'expected_improvement': recommendation.expected_pnl_improvement,
+            'confidence': recommendation.confidence,
+        }
     
     def on_assignment(self, position: Dict[str, Any]):
         """Called when option is assigned/exercised."""
