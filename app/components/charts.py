@@ -274,6 +274,7 @@ def create_trade_timeline_chart(
     daily_pnl: list[dict],
     underlying_prices: list[dict] | None = None,
     selection_history: list[dict] | None = None,
+    multi_stock_prices: dict | None = None,
     title: str = "Trade Timeline and Performance",
 ) -> go.Figure:
     """Create a comprehensive trade timeline chart showing entry/exit points and performance.
@@ -281,8 +282,9 @@ def create_trade_timeline_chart(
     Args:
         trades: List of trade dictionaries with entry/exit info
         daily_pnl: List of daily P&L data
-        underlying_prices: Optional list of underlying price data
+        underlying_prices: Optional list of underlying price data (for primary stock)
         selection_history: Optional list of stock selection changes for binbin_god
+        multi_stock_prices: Optional dict of {symbol: price_data_list} for multi-stock visualization
         title: Chart title
     """
     if not trades and not daily_pnl:
@@ -309,11 +311,35 @@ def create_trade_timeline_chart(
             go.Scatter(
                 x=price_dates,
                 y=prices,
-                name="Price",
+                name="Primary Stock Price",
                 line=dict(color="#29B6F6", width=1.5),
             ),
             row=1, col=1
         )
+    
+    # Add multi-stock price data if available
+    if multi_stock_prices:
+        # Define colors for different stocks
+        colors = ["#FFA726", "#AB47BC", "#66BB6A", "#FF7043", "#29B6F6", "#FFD54F", "#BA68C8", "#42A5F5"]
+        
+        stock_count = 0
+        for symbol, price_data in multi_stock_prices.items():
+            if price_data and len(price_data) > 0:
+                price_dates = [p["date"] for p in price_data]
+                prices = [p["close"] for p in price_data]
+                
+                color = colors[stock_count % len(colors)]
+                fig.add_trace(
+                    go.Scatter(
+                        x=price_dates,
+                        y=prices,
+                        name=f"{symbol} Price",
+                        line=dict(color=color, width=1, dash="dot"),
+                        opacity=0.7,
+                    ),
+                    row=1, col=1
+                )
+                stock_count += 1
     
     # Add trade entry points
     entry_dates = []

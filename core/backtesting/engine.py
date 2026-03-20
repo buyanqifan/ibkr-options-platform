@@ -455,17 +455,30 @@ class BacktestEngine:
 
         # Get underlying price data for timeline chart
         underlying_prices = []
+        multi_stock_prices = {}
         if bars:
             underlying_prices = [
                 {"date": bar["date"][:10], "close": bar["close"]}
                 for bar in bars
             ]
         
+        # For BinbinGod strategy, collect prices for all stocks in the pool
+        if strategy_name == "binbin_god" and hasattr(strategy, 'mag7_data'):
+            stock_pool = getattr(strategy, 'stock_pool', [])
+            for symbol in stock_pool:
+                stock_bars = strategy.mag7_data.get(symbol, [])
+                if stock_bars:
+                    multi_stock_prices[symbol] = [
+                        {"date": bar["date"][:10], "close": bar["close"]}
+                        for bar in stock_bars
+                    ]
+        
         return {
             "metrics": metrics,
             "trades": trades,
             "daily_pnl": daily_pnl,
             "underlying_prices": underlying_prices,
+            "multi_stock_prices": multi_stock_prices,
             "params": params,
             "strategy_performance": strategy_performance,
             "trading_costs": {  # New: Trading cost breakdown

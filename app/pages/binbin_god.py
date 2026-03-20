@@ -541,10 +541,12 @@ def run_binbin_backtest(
     
     # Trade timeline chart
     underlying_prices = result.get("underlying_prices", [])
+    multi_stock_prices = result.get("multi_stock_prices", {})
     trade_timeline = dcc.Graph(figure=create_trade_timeline_chart(
         trades=trades,
         daily_pnl=daily_pnl,
         underlying_prices=underlying_prices,
+        multi_stock_prices=multi_stock_prices,
         title="BinbinGod Trade Timeline: Entry/Exit Points & Performance"
     ))
     
