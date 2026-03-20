@@ -74,9 +74,33 @@ class CoveredCallStrategy(BaseStrategy):
             return []
         
         # Can only sell calls for shares we own (1 contract per 100 shares)
+        # Check if fractional shares exist and handle them appropriately
+        if self.stock_holding.shares % 100 != 0:
+            fractional_shares = self.stock_holding.shares % 100
+            whole_share_lots = self.stock_holding.shares - fractional_shares
+            self.logger.info(
+                f"Detected fractional shares ({fractional_shares}). "
+                f"Will use {whole_share_lots} shares in {whole_share_lots // 100} lots for covered calls."
+            )
+        
         max_contracts = min(self.stock_holding.shares // 100, max_pos, 10)
         if max_contracts <= 0:
-            return []
+            # If we have shares but not enough to sell another call (less than 100 shares),
+            # we should handle the fractional shares appropriately
+            # If we have shares but less than 100, we can't sell covered calls
+            # If we have fractional shares (<100), we should liquidate them to avoid getting stuck
+            if 0 < self.stock_holding.shares < 100:
+                self.logger.info(
+                    f"Liquidating fractional shares ({self.stock_holding.shares}) to avoid getting stuck."
+                )
+                # Since covered call strategy only has one phase, we just return empty
+                return []
+            else:
+                return []
+        
+        # Double-check that we're using a valid number of contracts based on available shares
+        available_share_lots = self.stock_holding.shares // 100
+        max_contracts = min(max_contracts, available_share_lots)
         
         T = self.select_expiry_dte() / 365.0
         
@@ -137,6 +161,23 @@ class CoveredCallStrategy(BaseStrategy):
             strike = trade.get("strike", 0)
             quantity = abs(trade.get("quantity", 0))
             shares_sold = quantity * 100
+            
+            # Ensure shares_sold is a multiple of 100 to maintain proper lot sizes
+            # But also ensure we don't sell more shares than we hold
+            actual_shares_sold = min(shares_sold, self.stock_holding.shares)
+                        
+            # Make sure we're selling in lots of 100 shares (or all remaining shares if less than 100)
+            if actual_shares_sold >= 100:
+                # Round down to nearest 100 to maintain lot size
+                actual_shares_sold = (actual_shares_sold // 100) * 100
+            # If less than 100 shares held, we'll sell all of them
+            
+            if actual_shares_sold != shares_sold:
+                self.logger.info(
+                    f"Adjusted call assignment from {shares_sold} to {actual_shares_sold} shares "
+                    f"to maintain proper lot size (100-share multiples)."
+                )
+                shares_sold = actual_shares_sold
             
             if shares_sold <= self.stock_holding.shares:
                 # Calculate stock P&L

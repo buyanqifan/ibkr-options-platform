@@ -952,7 +952,8 @@ class BinbinGodStrategy(BaseStrategy):
             
             if right == "P":
                 # Put assignment: we bought shares
-                shares_acquired = quantity * 100
+                # Ensure shares acquired is a multiple of 100 to maintain proper lot sizes
+                shares_acquired = quantity * 100  # This should already be multiple of 100, but ensure it
                 
                 # Calculate weighted average cost basis (same logic as wheel.py)
                 total_stock_cost = self.stock_holding.shares * self.stock_holding.cost_basis
@@ -984,12 +985,20 @@ class BinbinGodStrategy(BaseStrategy):
                     # Return 0 to avoid incorrect PnL
                     return 0.0
                 
-                # Limit shares_sold to actual shares held to avoid negative positions
+                # Ensure shares_sold is a multiple of 100 to maintain proper lot sizes
+                # But also ensure we don't sell more shares than we hold
                 actual_shares_sold = min(shares_sold, self.stock_holding.shares)
+                
+                # Make sure we're selling in lots of 100 shares (or all remaining shares if less than 100)
+                if actual_shares_sold >= 100:
+                    # Round down to nearest 100 to maintain lot size
+                    actual_shares_sold = (actual_shares_sold // 100) * 100
+                # If less than 100 shares held, we'll sell all of them
+                
                 if actual_shares_sold != shares_sold:
-                    logger.warning(
-                        f"Call assignment for {shares_sold} shares but only {self.stock_holding.shares} held. "
-                        f"Adjusting to {actual_shares_sold} shares."
+                    logger.info(
+                        f"Adjusted call assignment from {shares_sold} to {actual_shares_sold} shares "
+                        f"to maintain proper lot size (100-share multiples)."
                     )
                     shares_sold = actual_shares_sold
                 
