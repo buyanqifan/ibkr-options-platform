@@ -406,3 +406,64 @@ class MLExitOptimizer:
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             self.model = None
+    
+    @staticmethod
+    def prepare_training_data(trades_history: list[dict], market_data: dict) -> pd.DataFrame:
+        """Prepare training data from historical trades.
+        
+        Args:
+            trades_history: List of completed trade dictionaries
+            market_data: Historical market data for feature calculation
+            
+        Returns:
+            DataFrame with features and outcome labels
+        """
+        if not trades_history:
+            return pd.DataFrame()
+        
+        training_data = []
+        
+        for trade in trades_history:
+            # Skip if missing essential data
+            if not all(k in trade for k in ['entry_date', 'exit_date', 'symbol', 'pnl']):
+                continue
+            
+            # Build feature vector at entry time
+            entry_date = trade['entry_date']
+            symbol = trade['symbol']
+            
+            # Get market data at entry
+            market_at_entry = market_data.get(symbol, {}).get(entry_date, {})
+            
+            # Calculate features (simplified version - would need full data)
+            features = {
+                'iv_rank': market_at_entry.get('iv_rank', 50),
+                'historical_volatility': market_at_entry.get('hv', 0.3) * 100,
+                'iv_percentile': market_at_entry.get('iv_percentile', 50),
+                'dte': trade.get('days_to_expiry', 30),
+                'dte_percent': 1.0,  # At entry
+                'theta_decay': trade.get('premium', 0) * 0.05 / trade.get('days_to_expiry', 30),
+                'underlying_price': trade.get('underlying_entry', 0),
+                'price_momentum_5d': market_at_entry.get('momentum_5d', 0),
+                'price_momentum_10d': market_at_entry.get('momentum_10d', 0),
+                'price_vs_ma20': market_at_entry.get('vs_ma20', 0),
+                'price_vs_ma50': market_at_entry.get('vs_ma50', 0),
+                'delta': abs(trade.get('delta_at_entry', 0.3)),
+                'gamma': 0.05,  # Would need to calculate
+                'vega': 0.2,    # Would need to calculate
+                'delta_change_ratio': 1.0,  # At entry
+                'current_pnl_pct': 0,  # At entry
+                'days_held': 0,  # At entry
+                'premium_received': trade.get('premium', 0) * 100,
+                'strike_distance_pct': trade.get('strike_distance_pct', 0),
+                'market_regime': 1 if 20 <= market_at_entry.get('iv_rank', 50) <= 50 else (0 if market_at_entry.get('iv_rank', 50) < 20 else 2),
+            }
+            
+            # Label: 1 = profitable trade, 0 = loss
+            outcome = 1 if trade.get('pnl', 0) > 0 else 0
+            
+            # Add to dataset
+            row = {**features, 'outcome': outcome}
+            training_data.append(row)
+        
+        return pd.DataFrame(training_data)

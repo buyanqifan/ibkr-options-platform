@@ -497,6 +497,40 @@ class BacktestEngine:
         trades = [t.to_dict() for t in simulator.closed_trades]
         metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
         
+        # Train ML exit optimizer if enabled and we have trades
+        if ml_exit_optimizer and trades:
+            try:
+                # Prepare training data from this backtest
+                market_data_for_training = {
+                    symbol: {
+                        bar["date"][:10]: {
+                            'price': bar["close"],
+                            'hv': hv[i] if i < len(hv) else 0.3,
+                            'iv_rank': 50,  # Would need real IV rank calculation
+                            'momentum_5d': 0,  # Would calculate from price history
+                            'momentum_10d': 0,
+                            'vs_ma20': 0,
+                            'vs_ma50': 0,
+                        }
+                        for i, bar in enumerate(bars)
+                    }
+                }
+                
+                training_df = MLExitOptimizer.prepare_training_data(trades, market_data_for_training)
+                
+                if len(training_df) > 10:
+                    # Train model
+                    train_stats = ml_exit_optimizer.train_model(training_df)
+                    logger.info(f"ML Exit Optimizer trained: {train_stats}")
+                    
+                    # Add training info to result
+                    strategy_performance["ml_training_stats"] = train_stats
+                else:
+                    logger.warning(f"Insufficient training data: {len(training_df)} trades")
+                    
+            except Exception as e:
+                logger.error(f"ML training failed: {e}")
+        
         # Merge engine-calculated metrics into strategy_performance
         # This ensures performance_metrics in UI shows real data, not placeholders
         if "performance_metrics" not in strategy_performance:
