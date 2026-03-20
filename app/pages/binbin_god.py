@@ -380,6 +380,24 @@ layout = dbc.Container([
                         html.I(className="bi bi-play-fill me-2"),
                         "Run Backtest",
                     ], id="bbg-run-btn", color="primary", className="w-100", size="lg"),
+
+                    # Export button (shown after successful backtest)
+                    html.Div(
+                        id="bbg-export-container",
+                        children=[
+                            dbc.Button(
+                                "📤 Export for AI Analysis",
+                                id="bbg-export-btn",
+                                color="info",
+                                className="w-100 mt-2",
+                                n_clicks=0,
+                            ),
+                        ],
+                        className="d-none",  # Hidden by default
+                    ),
+
+                    # Download component
+                    dcc.Download(id="bbg-download"),
                 ]),
             ]),
         ], md=3),
@@ -421,6 +439,7 @@ layout = dbc.Container([
             
             # Hidden store for results data
             dcc.Store(id="binbin-results-store", data={}),
+            dcc.Store(id="binbin-params-store", data={}),  # Store params for export
         ], md=9),
     ]),
     
@@ -566,9 +585,11 @@ def update_ml_adoption_rate_slider(rate_text):
 
 @callback(
     Output("binbin-results-store", "data"),
+    Output("binbin-params-store", "data"),
     Output("binbin-mag7-analysis", "children"),
     Output("binbin-results-container", "children"),
     Output("bbg-loading-indicator", "style"),
+    Output("bbg-export-container", "className"),
     Input("bbg-run-btn", "n_clicks"),
     State("bbg-start", "value"),
     State("bbg-end", "value"),
@@ -604,12 +625,12 @@ def run_binbin_backtest(
 ):
     """Run Binbin God strategy backtest."""
     if not start_date or not end_date:
-        return no_update, no_update, no_update, no_update
-    
+        return no_update, no_update, no_update, no_update, no_update, no_update
+
     services = get_services_cached()
     if not services:
-        return {}, html.Div(), html.P("Services not initialized", className="text-warning"), {"display": "none"}
-    
+        return {}, {}, html.Div(), html.P("Services not initialized", className="text-warning"), {"display": "none"}, "d-none"
+
     engine = services["backtest_engine"]
     
     # Prepare parameters
@@ -667,10 +688,10 @@ def run_binbin_backtest(
     try:
         result = engine.run(params)
     except Exception as e:
-        return {}, html.Div(), html.P(f"Backtest error: {e}", className="text-danger"), {"display": "none"}
-    
+        return {}, {}, html.Div(), html.P(f"Backtest error: {e}", className="text-danger"), {"display": "none"}, "d-none"
+
     if not result:
-        return {}, html.Div(), html.P("No results generated", className="text-muted"), {"display": "none"}
+        return {}, {}, html.Div(), html.P("No results generated", className="text-muted"), {"display": "none"}, "d-none"
     
     # Build results UI (same structure as backtester.py)
     metrics = result.get("metrics", {})
@@ -857,6 +878,77 @@ def run_binbin_backtest(
             ]))
     
     # Hide loading indicator when backtest completes
-    # Return: result(store), mag7_analysis(display in header), content(main), loading_style
-    return result, mag7_section, content, {"display": "none"}
+    # Return: result(store), params(store), mag7_analysis(display in header), content(main), loading_style, export_btn_class
+    return result, params, mag7_section, content, {"display": "none"}, "d-block mt-2"
+
+
+@callback(
+    Output("bbg-download", "data"),
+    Input("bbg-export-btn", "n_clicks"),
+    State("binbin-results-store", "data"),
+    State("binbin-params-store", "data"),
+    prevent_initial_call=True,
+)
+def export_binbin_backtest_result(n_clicks, result, params):
+    """Export the Binbin God backtest result as JSON for AI analysis."""
+    import json
+    from datetime import datetime
+
+    if not n_clicks or not result or not params:
+        return no_update
+
+    # Build export data structure for AI analysis
+    metrics = result.get("metrics", {})
+    trades = result.get("trades", [])
+    daily_pnl = result.get("daily_pnl", [])
+    strategy_performance = result.get("strategy_performance", {})
+
+    export_data = {
+        "export_info": {
+            "exported_at": datetime.utcnow().isoformat(),
+            "export_version": "1.0",
+            "purpose": "AI analysis and debugging"
+        },
+        "backtest_summary": {
+            "strategy": params.get("strategy"),
+            "symbol": params.get("symbol"),
+            "stock_pool": params.get("stock_pool"),
+            "period": {
+                "start_date": params.get("start_date"),
+                "end_date": params.get("end_date"),
+            },
+            "capital": {
+                "initial": params.get("initial_capital"),
+            },
+        },
+        "parameters": params,
+        "performance_metrics": {
+            "total_return_pct": metrics.get("total_return_pct"),
+            "annualized_return_pct": metrics.get("annualized_return_pct"),
+            "max_drawdown_pct": metrics.get("max_drawdown_pct"),
+            "sharpe_ratio": metrics.get("sharpe_ratio"),
+            "sortino_ratio": metrics.get("sortino_ratio"),
+            "win_rate": metrics.get("win_rate"),
+            "total_trades": metrics.get("total_trades"),
+            "avg_profit": metrics.get("avg_profit"),
+            "avg_loss": metrics.get("avg_loss"),
+            "profit_factor": metrics.get("profit_factor"),
+            "monthly_returns": metrics.get("monthly_returns"),
+        },
+        "trades": trades,
+        "daily_pnl": daily_pnl,
+        "strategy_performance": strategy_performance,
+    }
+
+    # Generate filename
+    symbol = params.get("symbol", "UNKNOWN")
+    strategy = params.get("strategy", "unknown")
+    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"backtest_{strategy}_{symbol}_{date_str}.json"
+
+    return dict(
+        content=json.dumps(export_data, indent=2, ensure_ascii=False, default=str),
+        filename=filename,
+        mime_type="application/json",
+    )
 
