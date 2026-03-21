@@ -722,6 +722,14 @@ class BinbinGodStrategy(BaseStrategy):
         premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
 
+        # SAFETY CHECK: Skip if premium is too low (indicates strike selection error)
+        if premium < 0.01:
+            logger.warning(
+                f"Skipping put signal for {symbol}: premium too low ({premium:.4f}), "
+                f"strike={strike:.2f}, underlying={underlying_price:.2f}"
+            )
+            return []
+
         # Position sizing: use ML optimizer if enabled, otherwise traditional
         if self.ml_position_optimization and self.ml_position_optimizer:
             max_contracts = self._calculate_ml_position_size(
@@ -921,6 +929,14 @@ class BinbinGodStrategy(BaseStrategy):
         
         premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
         delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
+
+        # SAFETY CHECK: Skip if premium is too low (indicates strike selection error)
+        if premium < 0.01:
+            logger.warning(
+                f"Skipping call signal for {symbol}: premium too low ({premium:.4f}), "
+                f"strike={strike:.2f}, underlying={underlying_price:.2f}"
+            )
+            return []
 
         # Position sizing: use ML optimizer if enabled, otherwise traditional
         if self.ml_position_optimization and self.ml_position_optimizer:
@@ -1365,7 +1381,8 @@ class BinbinGodStrategy(BaseStrategy):
         # Determine strike based on phase and right
         if self.phase == "SP" and right == "P":
             # Continue selling puts
-            target_delta = self.put_delta
+            # Note: strike_from_delta expects negative delta for puts
+            target_delta = -abs(self.put_delta)
             strike = OptionsPricer.strike_from_delta(
                 underlying_price, target_dte / 365.0, iv, target_delta, 'P'
             )
@@ -1389,6 +1406,14 @@ class BinbinGodStrategy(BaseStrategy):
             premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
         else:
             premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
+
+        # SAFETY CHECK: Skip roll if premium is too low
+        if premium < 0.01:
+            logger.warning(
+                f"Skipping roll signal for {symbol} {right}: premium too low ({premium:.4f}), "
+                f"strike={strike:.2f}, underlying={underlying_price:.2f}"
+            )
+            return None
 
         # Generate signal
         signal = Signal(
