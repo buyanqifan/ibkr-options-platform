@@ -362,7 +362,7 @@ def create_trade_timeline_chart(
             expiry_short = expiry[2:] if len(expiry) >= 6 else expiry
             option_type = "Put" if right == "P" else "Call"
             contract_name = f"{symbol} {expiry_short} {strike:.0f} {option_type}"
-        except:
+        except (IndexError, TypeError, ValueError):
             contract_name = f"{symbol} {expiry} {strike} {right}"
         
         # Entry point

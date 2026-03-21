@@ -23,6 +23,7 @@ class StockHolding:
     shares: int = 0
     cost_basis: float = 0.0  # average cost per share
     total_premium_collected: float = 0.0  # cumulative premium from both phases
+    symbol: str = ""  # Symbol of the stock being held
 
 @dataclass
 class PerformanceMetrics:
@@ -245,6 +246,7 @@ class WheelStrategy(BaseStrategy):
                 total_stock_cost = self.stock_holding.shares * self.stock_holding.cost_basis
                 total_stock_cost += shares_acquired * strike
                 self.stock_holding.shares += shares_acquired
+                self.stock_holding.symbol = trade.get("symbol", self.symbol)  # Track which stock we're holding
                 if self.stock_holding.shares > 0:
                     self.stock_holding.cost_basis = total_stock_cost / self.stock_holding.shares
                 

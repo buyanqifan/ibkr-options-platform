@@ -69,7 +69,7 @@ class TradeRecord:
             # Add "~" prefix to indicate this is a theoretical/synthetic option
             # Real-world options only trade at discrete strike intervals
             contract_name = f"{self.symbol} {expiry_short} ~{strike_display} {option_type} (Theoretical)"
-        except:
+        except (ValueError, TypeError, AttributeError):
             contract_name = f"{self.symbol} {self.expiry} {self.strike} {self.right}"
         
         return {

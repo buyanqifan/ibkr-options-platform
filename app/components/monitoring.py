@@ -131,7 +131,7 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
             expiry_short = expiry[2:] if len(expiry) >= 6 else expiry
             option_type = "Put" if right == "P" else "Call"
             option_name = f"{symbol} {expiry_short} {strike:.0f} {option_type}"
-        except:
+        except (IndexError, TypeError, ValueError):
             option_name = f"{symbol} {expiry} {strike} {right}"
         
         qty_display = f"{quantity}x"  # Negative = Short, Positive = Long
@@ -230,7 +230,7 @@ def create_holdings_card(holdings_data: Dict[str, Any]) -> dbc.Card:
             expiry_short = expiry[2:] if len(expiry) >= 6 else expiry
             option_type = "Put" if right == "P" else "Call"
             option_name = f"{symbol} {expiry_short} {strike:.0f} {option_type}"
-        except:
+        except (IndexError, TypeError, ValueError):
             option_name = f"{symbol} {expiry} {strike} {right}"
         
         qty_display = f"{quantity}x"  # Negative = Short, Positive = Long

@@ -13,6 +13,7 @@ class StockHolding:
     shares: int = 0
     cost_basis: float = 0.0
     total_premium_collected: float = 0.0
+    symbol: str = ""  # Symbol of the stock being held
 
 
 class CoveredCallStrategy(BaseStrategy):
@@ -48,8 +49,9 @@ class CoveredCallStrategy(BaseStrategy):
         if shares_to_buy > 0:
            self.stock_holding.shares = shares_to_buy
            self.stock_holding.cost_basis = initial_price
+           self.stock_holding.symbol = self.symbol  # Track which stock we're holding
            self.logger.info(
-                f"Initialized with {shares_to_buy} shares @ ${initial_price:.2f} "
+                f"Initialized with {shares_to_buy} shares of {self.symbol} @ ${initial_price:.2f} "
                 f"(cost basis: ${shares_to_buy * initial_price:.2f})"
             )
 

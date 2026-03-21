@@ -400,7 +400,7 @@ class MarketDataCalculator:
                 curr_date = datetime.strptime(current_date, '%Y-%m-%d')
                 days_to_expiry = (expiry_date - curr_date).days
                 time_to_expiry = days_to_expiry / 365.0
-            except:
+            except (ValueError, TypeError):
                 time_to_expiry = 0.01
             
             # Get current IV (use entry IV or estimate)

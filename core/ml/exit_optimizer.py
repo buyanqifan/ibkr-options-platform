@@ -95,7 +95,7 @@ class MLExitOptimizer:
             entry_date = datetime.strptime(position.get('entry_date', ''), '%Y-%m-%d')
             curr_date = datetime.strptime(current_date, '%Y-%m-%d')
             days_held = (curr_date - entry_date).days
-        except:
+        except (ValueError, TypeError):
             days_held = 0
         
         # Time calculations
@@ -104,7 +104,7 @@ class MLExitOptimizer:
             dte = (expiry_date - curr_date).days
             original_dte = (expiry_date - entry_date).days
             dte_percent = dte / original_dte if original_dte > 0 else 0
-        except:
+        except (ValueError, TypeError, UnboundLocalError):
             dte = 0
             dte_percent = 0
         

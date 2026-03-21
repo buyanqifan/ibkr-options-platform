@@ -140,6 +140,17 @@ class BacktestEngine:
         # Estimate historical volatility for IV proxy
         prices = [b["close"] for b in bars]
         hv = self._rolling_hv(prices, window=20)
+        
+        # For multi-stock strategies, calculate HV for each stock
+        stock_hv = {}  # symbol -> list of HV values
+        if strategy_name == "binbin_god" and hasattr(strategy, 'mag7_data'):
+            for sym, sym_bars in strategy.mag7_data.items():
+                if sym_bars:
+                    sym_prices = [b["close"] for b in sym_bars]
+                    stock_hv[sym] = self._rolling_hv(sym_prices, window=20)
+            logger.info(f"Calculated HV for {len(stock_hv)} stocks in pool")
+            # Store stock_hv in strategy so it can access correct IV for each stock
+            strategy.stock_hv = stock_hv
 
         # Initialize position manager for capital allocation and margin tracking
         position_mgr = PositionManager(
@@ -212,7 +223,7 @@ class BacktestEngine:
             is_multi_stock = strategy_name == "binbin_god" and mag7_data
 
             if is_multi_stock:
-                # Multi-stock mode: check each position with its correct underlying price
+                # Multi-stock mode: check each position with its correct underlying price AND IV
                 profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
                 stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
 
@@ -223,12 +234,18 @@ class BacktestEngine:
                     pos_price = self._get_price_for_symbol(pos.symbol, bar_date, mag7_data)
                     if pos_price is None:
                         pos_price = underlying_price  # Fallback to primary stock price
+                    
+                    # Get the correct IV for this position's symbol
+                    pos_iv = iv  # Default to primary stock IV
+                    if pos.symbol in stock_hv:
+                        sym_hv = stock_hv[pos.symbol]
+                        pos_iv = sym_hv[i] if i < len(sym_hv) and sym_hv[i] > 0.01 else 0.3
 
                     trade = simulator.check_exits_for_position(
                         pos,
                         bar_date,
                         pos_price,
-                        iv,
+                        pos_iv,
                         profit_target_to_use,
                         stop_loss_to_use,
                         min_dte=0,
@@ -544,6 +561,12 @@ class BacktestEngine:
             last_date = last_bar["date"][:10]
             last_price = last_bar["close"]
             last_iv = hv[-1] if hv else 0.3
+            
+            # For multi-stock strategies, get price/IV for each position's symbol
+            mag7_data = getattr(strategy, 'mag7_data', None)
+            stock_hv = getattr(strategy, 'stock_hv', {})
+            is_multi_stock = strategy_name == "binbin_god" and mag7_data
+            
             # Close all remaining positions at the end of backtest
             while simulator.open_positions:
                 # Process one position at a time with immediate expiration
@@ -551,9 +574,24 @@ class BacktestEngine:
                 pos = simulator.open_positions.pop(0)
                 temp_simulator.open_position(pos)
                 
+                # Get the correct price and IV for this position's symbol
+                pos_price = last_price
+                pos_iv = last_iv
+                if is_multi_stock:
+                    # Find the price for this position's symbol
+                    symbol_price = self._get_price_for_symbol(pos.symbol, last_date, mag7_data)
+                    if symbol_price is not None:
+                        pos_price = symbol_price
+                    
+                    # Get the correct IV for this position's symbol
+                    if pos.symbol in stock_hv:
+                        sym_hv = stock_hv[pos.symbol]
+                        # Get the last available IV for this symbol
+                        pos_iv = sym_hv[-1] if sym_hv and sym_hv[-1] > 0.01 else 0.3
+                
                 # Force close with min_dte=0 to trigger expiration logic
                 closed_trades = temp_simulator.check_exits(
-                    last_date, last_price, last_iv,
+                    last_date, pos_price, pos_iv,
                     profit_target_pct=9999,
                     stop_loss_pct=9999,
                     min_dte=0,
@@ -576,12 +614,22 @@ class BacktestEngine:
             if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
                 shares = strategy.stock_holding.shares
                 cost_basis = strategy.stock_holding.cost_basis
+                stock_symbol = getattr(strategy.stock_holding, 'symbol', '')
+                
+                # Get the correct price for the stock we're holding
+                liquidation_price = last_price  # Default to main stock price
+                if is_multi_stock and stock_symbol:
+                    # For multi-stock strategies, get the correct price for the held stock
+                    symbol_price = self._get_price_for_symbol(stock_symbol, last_date, mag7_data)
+                    if symbol_price is not None:
+                        liquidation_price = symbol_price
+                        logger.info(f"Using {stock_symbol} price ${liquidation_price:.2f} for stock liquidation (vs main ${last_price:.2f})")
                 
                 # Calculate realized P&L from stock liquidation
-                stock_pnl = (last_price - cost_basis) * shares
+                stock_pnl = (liquidation_price - cost_basis) * shares
                 position_mgr.cumulative_pnl += stock_pnl
                 logger.info(
-                    f"Backtest end: Liquidated {shares} shares @ ${last_price:.2f} "
+                    f"Backtest end: Liquidated {shares} shares of {stock_symbol or 'stock'} @ ${liquidation_price:.2f} "
                     f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
                 )
                 

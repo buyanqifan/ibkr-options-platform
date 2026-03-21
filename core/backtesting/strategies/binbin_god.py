@@ -62,6 +62,7 @@ class StockHolding:
     shares: int = 0
     cost_basis: float = 0.0  # average cost per share
     total_premium_collected: float = 0.0  # cumulative premium from both phases
+    symbol: str = ""  # Symbol of the stock being held (for multi-stock strategies)
 
 
 class BinbinGodStrategy(BaseStrategy):
@@ -571,29 +572,48 @@ class BinbinGodStrategy(BaseStrategy):
                     actual_symbol = self._select_best_stock(market_data, current_date)
                     logger.info(f"SP phase: Selected {actual_symbol} for new put position")
                     
-                    # CRITICAL FIX: Get the actual underlying price for the selected stock
+                    # CRITICAL FIX: Get the actual underlying price AND IV for the selected stock
                     # This ensures correct option pricing and strike selection
                     actual_underlying_price = underlying_price  # Default to passed price
+                    actual_iv = iv  # Default to passed IV
+                    
+                    # Get stock_hv dictionary (set by engine.py)
+                    stock_hv = getattr(self, 'stock_hv', {})
+                    
                     if actual_symbol in pool_data:
                         bars = pool_data[actual_symbol]
-                        for bar in bars:
+                        bar_index = -1
+                        for idx, bar in enumerate(bars):
                             bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
                             if bar_date_str <= current_date:
                                 actual_underlying_price = bar["close"]
-                        logger.info(f"Using {actual_symbol} price: ${actual_underlying_price:.2f}")
+                                bar_index = idx
+                        
+                        # Get the correct IV for this stock at current date
+                        if actual_symbol in stock_hv and bar_index >= 0:
+                            sym_hv = stock_hv[actual_symbol]
+                            if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
+                                actual_iv = sym_hv[bar_index]
+                                logger.info(f"Using {actual_symbol} price: ${actual_underlying_price:.2f}, IV: {actual_iv:.3f}")
+                            else:
+                                logger.warning(f"Invalid IV for {actual_symbol} at index {bar_index}, using fallback")
+                        else:
+                            logger.warning(f"No IV data for {actual_symbol}, using fallback IV: {actual_iv:.3f}")
                     else:
                         logger.warning(f"No price data for {actual_symbol}, using fallback price")
                 else:
                     # Fallback: use first stock in pool
                     actual_symbol = stock_pool[0] if stock_pool else "MSFT"
                     actual_underlying_price = underlying_price
+                    actual_iv = iv
                     logger.warning(f"No market data available, using fallback: {actual_symbol}")
             else:
                 actual_symbol = self.symbol
                 actual_underlying_price = underlying_price
+                actual_iv = iv
             
             return self._generate_backtest_put_signal(
-                actual_symbol, current_date, actual_underlying_price, iv, position_mgr
+                actual_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
             )
         else:  # CC phase
             # In CC phase: use the stock we already hold shares of
@@ -623,6 +643,30 @@ class BinbinGodStrategy(BaseStrategy):
             else:
                 actual_symbol = self.symbol
             
+            # CRITICAL FIX: Get the correct underlying price AND IV for the CC stock
+            actual_underlying_price = underlying_price
+            actual_iv = iv
+            
+            # Get stock_hv dictionary (set by engine.py)
+            stock_hv = getattr(self, 'stock_hv', {})
+            pool_data = getattr(self, 'mag7_data', {})
+            
+            if actual_symbol in pool_data:
+                bars = pool_data[actual_symbol]
+                bar_index = -1
+                for idx, bar in enumerate(bars):
+                    bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
+                    if bar_date_str <= current_date:
+                        actual_underlying_price = bar["close"]
+                        bar_index = idx
+                
+                # Get the correct IV for this stock at current date
+                if actual_symbol in stock_hv and bar_index >= 0:
+                    sym_hv = stock_hv[actual_symbol]
+                    if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
+                        actual_iv = sym_hv[bar_index]
+                        logger.debug(f"CC phase: Using {actual_symbol} price: ${actual_underlying_price:.2f}, IV: {actual_iv:.3f}")
+            
             # CRITICAL: Check if we already have Call positions covering shares
             # This prevents over-selling calls beyond share holdings
             existing_call_contracts = sum(
@@ -640,7 +684,7 @@ class BinbinGodStrategy(BaseStrategy):
                 return []
             
             return self._generate_backtest_call_signal(
-                actual_symbol, current_date, underlying_price, iv, position_mgr, shares_available
+                actual_symbol, current_date, actual_underlying_price, actual_iv, position_mgr, shares_available
             )
     
     def _generate_backtest_put_signal(
@@ -1271,7 +1315,7 @@ class BinbinGodStrategy(BaseStrategy):
             if isinstance(expiry, str):
                 try:
                     expiry_date = datetime.strptime(expiry, '%Y%m%d')
-                except:
+                except (ValueError, TypeError):
                     expiry_date = current_dt
             else:
                 expiry_date = expiry
@@ -1376,7 +1420,7 @@ class BinbinGodStrategy(BaseStrategy):
         # Calculate expiry date
         try:
             curr_date = datetime.strptime(current_date, '%Y-%m-%d')
-        except:
+        except (ValueError, TypeError):
             curr_date = datetime.now()
 
         expiry_date = curr_date + timedelta(days=target_dte)
@@ -1445,14 +1489,17 @@ class BinbinGodStrategy(BaseStrategy):
         right = position.get("right", "")
         quantity = abs(position.get("quantity", 0))
         strike = position.get("strike", 0)
+        symbol = position.get("symbol", "")  # Get symbol from position
         
         if right == "P":
             # Put assignment: we bought shares
             shares_acquired = quantity * 100
             self.stock_holding.shares += shares_acquired
             self.stock_holding.cost_basis = strike
+            self.stock_holding.symbol = symbol  # Track which stock we're holding
             self.phase = "CC"  # Switch to Covered Call phase
-            logger.info(f"Put assigned: Bought {shares_acquired} shares @ ${strike}, switching to CC phase")
+            self._current_cc_stock = symbol  # Remember the stock for CC phase
+            logger.info(f"Put assigned: Bought {shares_acquired} shares of {symbol} @ ${strike}, switching to CC phase")
         
         elif right == "C":
             # Call assignment: we sold shares
@@ -1530,6 +1577,7 @@ class BinbinGodStrategy(BaseStrategy):
                 # The symbol comes from the trade (the stock underlying the option)
                 assigned_symbol = trade.get("symbol", "UNKNOWN")
                 self._current_cc_stock = assigned_symbol
+                self.stock_holding.symbol = assigned_symbol  # Track which stock we're holding
                 
                 logger.info(f"Put assigned: Bought {shares_acquired} shares @ ${strike} on {assigned_symbol}, switching to CC phase")
             

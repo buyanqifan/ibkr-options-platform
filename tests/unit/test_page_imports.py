@@ -98,7 +98,7 @@ class TestHtmlStyleStaticCheck:
 
     def _find_html_style_usage(self, file_path):
         """Parse Python file and find html.Style usage."""
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
         # Simple string search for the problematic pattern
