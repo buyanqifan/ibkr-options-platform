@@ -114,6 +114,7 @@ class MLPositionOptimizer:
             'strike_distance_pct',  # OTM percentage
             'dte',
             'delta',
+            'premium',  # Option premium (required for feature extraction)
             'premium_yield',  # Premium / margin required
             'theta_per_day',  # Daily time decay value
 

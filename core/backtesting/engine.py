@@ -368,6 +368,34 @@ class BacktestEngine:
                         position_mgr.cumulative_pnl += additional_pnl
                         # net_capital is a property (initial_capital + cumulative_pnl), auto-updates
 
+                # Update ML performance tracking for learning
+                # This enables ML optimizers to learn from actual trade outcomes
+                if hasattr(strategy, 'ml_integration') and strategy.ml_integration:
+                    try:
+                        ml_integration = strategy.ml_integration
+                        if hasattr(ml_integration, 'update_performance'):
+                            # Determine actual assignment status
+                            actual_assignment = trade.exit_reason == "ASSIGNMENT"
+                            
+                            # Get bars for this symbol up to current date
+                            symbol_bars = []
+                            if is_multi_stock and mag7_data:
+                                symbol_bars = mag7_data.get(trade.symbol, [])
+                            
+                            ml_integration.update_performance(
+                                delta=abs(trade.delta_at_entry) if trade.delta_at_entry else 0.3,
+                                symbol=trade.symbol,
+                                current_price=trade.underlying_exit,
+                                cost_basis=trade.underlying_entry,  # Use entry price as reference
+                                bars=symbol_bars,
+                                options_data=[],
+                                actual_pnl=trade.pnl,
+                                actual_assignment=actual_assignment
+                            )
+                            logger.debug(f"Updated ML performance: {trade.symbol} pnl={trade.pnl:.2f}")
+                    except Exception as e:
+                        logger.warning(f"Failed to update ML performance: {e}")
+
                 # Generate roll signal for Wheel-style strategies
                 # When profit target is hit, immediately roll to new position
                 roll_signal = None

@@ -347,10 +347,22 @@ class DeltaOptimizerML:
         vol_features = VolatilityFeatures.calculate_volatility_features(df)
         tech_features = TechnicalFeatures.calculate_technical_features(df)
         
-        # Extract key metrics
-        current_vol = vol_features.get('volatility_20d', 0.2)
-        momentum_5d = tech_features.get('momentum_5d', 0.0)
-        momentum_20d = tech_features.get('momentum_20d', 0.0)
+        # Extract key metrics (DataFrame columns: hv_20, return_5d, etc.)
+        # Handle NaN values with safe defaults
+        current_vol = 0.2  # Default moderate volatility
+        if 'hv_20' in vol_features.columns:
+            vol_val = vol_features['hv_20'].iloc[-1]
+            current_vol = vol_val if not pd.isna(vol_val) else 0.2
+        
+        momentum_5d = 0.0  # Default neutral momentum
+        if 'return_5d' in tech_features.columns:
+            mom_val = tech_features['return_5d'].iloc[-1]
+            momentum_5d = mom_val if not pd.isna(mom_val) else 0.0
+        
+        momentum_20d = 0.0
+        if 'return_20d' in tech_features.columns:
+            mom_val = tech_features['return_20d'].iloc[-1]
+            momentum_20d = mom_val if not pd.isna(mom_val) else 0.0
         
         # Determine market regime
         market_regime = self._determine_market_regime(
@@ -367,12 +379,15 @@ class DeltaOptimizerML:
         pe_ratio = fundamentals.get('pe_ratio', 25.0) if fundamentals else 25.0
         iv_rank = options_data[0].get('iv_rank', 50.0) if options_data else 50.0
         
+        # Get 30d volatility (approximate with hv_20)
+        vol_30d = current_vol  # Use same as 20d since no hv_30 available
+        
         return MarketContext(
             symbol=symbol,
             current_price=current_price,
             cost_basis=cost_basis,
             volatility_20d=current_vol,
-            volatility_30d=vol_features.get('volatility_30d', 0.25),
+            volatility_30d=vol_30d,
             momentum_5d=momentum_5d,
             momentum_20d=momentum_20d,
             pe_ratio=pe_ratio,
@@ -537,9 +552,14 @@ class DeltaOptimizerML:
         key = f"{symbol}_{delta}_{regime}"
         
         if key in self.model['delta_performance']:
-            performance = self.model['delta_performance'][key]
-            # Return normalized performance (0-1 scale)
-            return min(1.0, max(0.0, performance + 0.5))  # Shift to positive range
+            performances = self.model['delta_performance'][key]
+            if performances and len(performances) > 0:
+                # Calculate average from list of historical PnLs
+                avg_performance = np.mean(performances)
+                # Return normalized performance (0-1 scale)
+                return min(1.0, max(0.0, avg_performance + 0.5))  # Shift to positive range
+            else:
+                return 0.5  # Empty performance list
         else:
             # Return base score for unseen delta-regime combinations
             return 0.5  # Neutral baseline
