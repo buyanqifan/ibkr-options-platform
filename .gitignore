@@ -26,3 +26,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Backtest results
+backtest_*.json
