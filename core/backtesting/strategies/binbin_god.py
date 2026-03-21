@@ -712,9 +712,11 @@ class BinbinGodStrategy(BaseStrategy):
         
         # Apply ML delta if available and confident
         effective_delta = self.put_delta
-        if ml_result and ml_result.confidence > 0.7:
+        if ml_result and ml_result.confidence >= 0.8:
             effective_delta = ml_result.optimal_delta
             logger.info(f"Using ML optimized put delta: {effective_delta:.3f}")
+        elif ml_result:
+            logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.8, using fallback delta {self.put_delta}")
         
         strike = self.select_strike_with_delta(underlying_price, iv, T, "P", effective_delta)
         self.delta_target = original_delta

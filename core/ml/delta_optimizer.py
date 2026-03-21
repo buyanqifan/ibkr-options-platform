@@ -615,6 +615,12 @@ class DeltaOptimizerML:
         # Sort by score
         delta_scores.sort(key=lambda x: x[1], reverse=True)
         
+        # Check if we have sufficient historical data for reliable prediction
+        has_historical_data = any(
+            f"{context.symbol}_{d[0]}_{context.market_regime}" in self.model['delta_performance']
+            for d in delta_scores[:3]  # Check top 3 candidates
+        )
+        
         # Exploration: occasionally try random delta
         if np.random.random() < self.config.exploration_rate:
             selected_delta = np.random.choice([d[0] for d in delta_scores])
@@ -623,8 +629,14 @@ class DeltaOptimizerML:
         else:
             # Select best delta
             selected_delta = delta_scores[0][0]
-            # Scale confidence with minimum baseline of 0.7 for consistent results
-            confidence = max(0.7, min(1.0, delta_scores[0][1] * 2))
+            
+            # Calculate confidence based on model certainty
+            # Only return high confidence if we have historical data
+            if has_historical_data:
+                confidence = min(1.0, delta_scores[0][1] * 2)
+            else:
+                # Low confidence when no historical data - use fallback delta
+                confidence = 0.5
             
             reasoning = f"Optimal delta {selected_delta:.2f} based on {context.market_regime} market regime and {context.symbol} characteristics"
         
