@@ -1999,10 +1999,8 @@ class BinbinGodStrategy(BaseStrategy):
                 stock_proceeds = strike * shares_sold
                 stock_pnl = stock_proceeds - stock_cost_basis
                 
-                # IMPORTANT: Record stock P&L to be added to cumulative_pnl
-                additional_stock_pnl = stock_pnl
-               
                 # Log complete P&L breakdown
+                # Note: stock_pnl is for logging only; engine handles cumulative_pnl
                 option_pnl = trade.get("pnl", 0)
                 total_trade_pnl = option_pnl + stock_pnl
                 logger.info(
@@ -2010,6 +2008,10 @@ class BinbinGodStrategy(BaseStrategy):
                     f"Total=${total_trade_pnl:+.2f} (bought at ${stock_cost_basis_per_share:.2f}, "
                     f"sold at ${strike:.2f}, {shares_sold} shares of {symbol})"
                 )
+                
+                # IMPORTANT: Return 0 because engine already adds stock_proceeds to cumulative_pnl
+                # The cash flow is handled in engine.py, not here
+                additional_stock_pnl = 0
                
                 # Remove shares using new method
                 self.stock_holding.remove_shares(symbol, shares_sold)

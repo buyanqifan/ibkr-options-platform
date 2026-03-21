@@ -330,6 +330,13 @@ class BacktestEngine:
                     stock_cost = trade.strike * shares_acquired
                     stock_position_id = f"{trade.symbol}_{bar_date}_STOCK"
                     
+                    # CRITICAL FIX: Deduct stock cost from cumulative_pnl
+                    # When we buy shares, cash is converted to stock
+                    # net_capital = initial_capital + cumulative_pnl
+                    # So we need to deduct stock_cost to reflect the cash outflow
+                    position_mgr.cumulative_pnl -= stock_cost
+                    logger.info(f"PUT assignment: Deducted stock cost ${stock_cost:.2f} from cumulative_pnl")
+                    
                     # Allocate stock capital (this is the money used to buy shares)
                     position_mgr.allocate_margin(
                         position_id=stock_position_id,
@@ -352,6 +359,13 @@ class BacktestEngine:
                     if stock_cost_basis and hasattr(stock_cost_basis, 'cost_basis'):
                         # Calculate stock capital to release
                         stock_capital = stock_cost_basis.cost_basis * shares_sold
+                        
+                        # CRITICAL FIX: Add back stock proceeds to cumulative_pnl
+                        # When shares are sold, we receive strike * shares in cash
+                        # This was previously deducted during PUT assignment, so add it back
+                        stock_proceeds = trade.strike * shares_sold
+                        position_mgr.cumulative_pnl += stock_proceeds
+                        logger.info(f"CC assignment: Added stock proceeds ${stock_proceeds:.2f} to cumulative_pnl")
                         
                         # Find and release stock position (release first unreleased stock allocation)
                         for pid, alloc in list(position_mgr.allocations.items()):

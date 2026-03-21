@@ -302,17 +302,8 @@ class WheelStrategy(BaseStrategy):
                 stock_proceeds = strike * shares_sold
                 stock_pnl = stock_proceeds - stock_cost_basis  # Realized stock P&L
                             
-                # IMPORTANT: Record stock P&L to be added to cumulative_pnl
-                additional_stock_pnl = stock_pnl
-                            
-                # Reduce stock holding
-                self.stock_holding.shares = max(0, self.stock_holding.shares - shares_sold)
-                
-                # Add premium from call sale (already included in option P&L)
-                premium_from_call = trade["entry_price"] * shares_sold
-                self.stock_holding.total_premium_collected += premium_from_call
-                
                 # Log the complete P&L breakdown for transparency
+                # Note: stock_pnl is for logging only; engine handles cumulative_pnl
                 option_pnl = trade.get("pnl", 0)
                 total_trade_pnl = option_pnl + stock_pnl
                 self.logger.info(
@@ -320,6 +311,17 @@ class WheelStrategy(BaseStrategy):
                     f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
                     f"sold at ${strike:.2f}, {shares_sold} shares)"
                 )
+                
+                # IMPORTANT: Return 0 because engine already adds stock_proceeds to cumulative_pnl
+                # The cash flow is handled in engine.py, not here
+                additional_stock_pnl = 0
+                            
+                # Reduce stock holding
+                self.stock_holding.shares = max(0, self.stock_holding.shares - shares_sold)
+                
+                # Add premium from call sale (already included in option P&L)
+                premium_from_call = trade["entry_price"] * shares_sold
+                self.stock_holding.total_premium_collected += premium_from_call
                 
                 # If no more shares, switch back to Sell Put phase
                 if self.stock_holding.shares == 0:
