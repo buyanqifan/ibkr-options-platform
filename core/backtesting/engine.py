@@ -392,7 +392,7 @@ class BacktestEngine:
                                 actual_pnl=trade.pnl,
                                 actual_assignment=actual_assignment
                             )
-                            logger.debug(f"Updated ML performance: {trade.symbol} pnl={trade.pnl:.2f}")
+                            logger.info(f"Updated ML performance: {trade.symbol} delta={abs(trade.delta_at_entry) if trade.delta_at_entry else 0.3:.2f} pnl={trade.pnl:.2f}")
                     except Exception as e:
                         logger.warning(f"Failed to update ML performance: {e}")
 
