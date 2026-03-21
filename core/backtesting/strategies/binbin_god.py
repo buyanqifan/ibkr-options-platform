@@ -751,21 +751,34 @@ class BinbinGodStrategy(BaseStrategy):
                 actual_underlying_price = underlying_price
                 actual_iv = iv
                 
+                # CRITICAL DEBUG: Log price retrieval process
+                logger.info(f"CC phase: {stock_symbol} - pool_data has data: {stock_symbol in pool_data}")
+                
                 if stock_symbol in pool_data:
                     bars = pool_data[stock_symbol]
                     bar_index = -1
+                    logger.info(f"CC phase: {stock_symbol} - total bars: {len(bars)}")
+                    
                     for idx, bar in enumerate(bars):
                         bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
                         if bar_date_str <= current_date:
                             actual_underlying_price = bar["close"]
                             bar_index = idx
                     
+                    logger.info(f"CC phase: {stock_symbol} - bar_index: {bar_index}, price: ${actual_underlying_price:.2f}")
+                    
                     # Get the correct IV for this stock at current date
                     if stock_symbol in stock_hv and bar_index >= 0:
                         sym_hv = stock_hv[stock_symbol]
                         if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
                             actual_iv = sym_hv[bar_index]
-                            logger.debug(f"CC phase: {stock_symbol} price: ${actual_underlying_price:.2f}, IV: {actual_iv:.3f}")
+                            logger.info(f"CC phase: {stock_symbol} - IV: {actual_iv:.3f} (from stock_hv)")
+                        else:
+                            logger.warning(f"CC phase: {stock_symbol} - IV not available (bar_index={bar_index}, hv_len={len(sym_hv) if sym_hv else 0})")
+                    else:
+                        logger.warning(f"CC phase: {stock_symbol} - stock_hv not available or bar_index < 0")
+                else:
+                    logger.warning(f"CC phase: {stock_symbol} NOT in pool_data! Using fallback price ${actual_underlying_price:.2f}")
                 
                 # Generate Call signal for this stock with its specific cost basis
                 signals = self._generate_backtest_call_signal(
@@ -1100,9 +1113,12 @@ class BinbinGodStrategy(BaseStrategy):
             max_contracts = min(max_by_shares, self.max_positions)
 
         if max_contracts <= 0:
+            logger.warning(f"CC signal: {symbol} max_contracts={max_contracts} (shares_available={shares_available}, max_positions={self.max_positions})")
             return []
         
         quantity = -max_contracts  # Sell
+        
+        logger.info(f"CC signal: {symbol} - Generated {max_contracts} contracts, strike=${strike:.2f}, premium=${premium:.2f}, delta={delta:.3f}")
         
         return [Signal(
             symbol=symbol,
