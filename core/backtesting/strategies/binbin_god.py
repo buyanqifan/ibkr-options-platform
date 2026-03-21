@@ -1749,19 +1749,28 @@ class BinbinGodStrategy(BaseStrategy):
 
         # Determine strike based on phase and right
         # Use ML Delta Optimizer if available for optimal delta selection
+        # Get bars for ML optimization
+        pool_data = getattr(self, 'mag7_data', {})
+        ml_bars = pool_data.get(symbol, [])
+        if ml_bars:
+            ml_bars = [bar for bar in ml_bars if str(bar.get("date", ""))[:10] <= current_date]
+        
         if self.phase == "SP" and right == "P":
             # Continue selling puts
             if self.ml_delta_optimization and self.ml_integration:
                 try:
-                    # Get ML-optimized delta
-                    ml_result = self.ml_integration.get_optimal_delta(
+                    # Get ML-optimized delta using optimize_put_delta
+                    ml_result = self.ml_integration.optimize_put_delta(
                         symbol=symbol,
-                        current_date=current_date,
-                        underlying_price=underlying_price,
+                        current_price=underlying_price,
+                        cost_basis=self.stock_holding.cost_basis,
+                        bars=ml_bars,
+                        options_data=[],
                         iv=iv,
-                        strategy_phase="SP"
+                        time_to_expiry=target_dte / 365.0
                     )
                     target_delta = -abs(ml_result.optimal_delta)  # Put delta is negative
+                    self.logger.info(f"Roll SP: ML delta={abs(ml_result.optimal_delta):.3f} (confidence: {ml_result.confidence:.2f})")
                 except Exception as e:
                     self.logger.warning(f"ML delta optimization failed in roll: {e}")
                     target_delta = -abs(self.put_delta)
@@ -1776,15 +1785,20 @@ class BinbinGodStrategy(BaseStrategy):
             # Continue selling calls
             if self.ml_delta_optimization and self.ml_integration:
                 try:
-                    # Get ML-optimized delta
-                    ml_result = self.ml_integration.get_optimal_delta(
+                    # Get cost basis for this specific stock
+                    cost_basis = self.stock_holding.holdings.get(symbol, {}).get("cost_basis", underlying_price)
+                    # Get ML-optimized delta using optimize_call_delta
+                    ml_result = self.ml_integration.optimize_call_delta(
                         symbol=symbol,
-                        current_date=current_date,
-                        underlying_price=underlying_price,
+                        current_price=underlying_price,
+                        cost_basis=cost_basis,
+                        bars=ml_bars,
+                        options_data=[],
                         iv=iv,
-                        strategy_phase="CC"
+                        time_to_expiry=target_dte / 365.0
                     )
                     target_delta = abs(ml_result.optimal_delta)  # Call delta is positive
+                    self.logger.info(f"Roll CC: ML delta={ml_result.optimal_delta:.3f} (confidence: {ml_result.confidence:.2f})")
                 except Exception as e:
                     self.logger.warning(f"ML delta optimization failed in roll: {e}")
                     target_delta = self.call_delta
