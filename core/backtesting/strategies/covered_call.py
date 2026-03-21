@@ -27,6 +27,7 @@ class CoveredCallStrategy(BaseStrategy):
 
     def __init__(self, params: dict):
        super().__init__(params)
+       self.symbol = params.get("symbol", "")  # Stock symbol for this strategy
        self.stock_holding = StockHolding()
        self._profit_target_disabled = params.get("profit_target_pct", 50) >= 999999
        self._stop_loss_disabled = params.get("stop_loss_pct", 200) >= 999999

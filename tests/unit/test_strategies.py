@@ -1100,14 +1100,15 @@ class TestBinbinGodStrategy:
         params['symbol'] = 'NVDA'
         strategy = BinbinGodStrategy(params)
         strategy.phase = 'CC'
-        strategy.stock_holding.shares = 100  # Only 100 shares
-        strategy.stock_holding.cost_basis = 150.0
+        # Use new multi-stock holdings API
+        strategy.stock_holding.add_shares('NVDA', 100, 150.0)  # 100 shares @ $150
         
         # Try to assign 2 contracts (200 shares)
         trade = {
             'exit_reason': 'ASSIGNMENT',
             'right': 'C',
             'trade_type': 'BINBIN_CALL',
+            'symbol': 'NVDA',  # Symbol is required for multi-stock tracking
             'strike': 160.0,
             'quantity': -2,  # 2 contracts = 200 shares
             'entry_price': 3.0,

@@ -59,6 +59,7 @@ class WheelStrategy(BaseStrategy):
 
     def __init__(self, params: dict):
         super().__init__(params)
+        self.symbol = params.get("symbol", "")  # Stock symbol for this strategy
         self.phase = "SP"  # Start with Sell Put phase
         self.stock_holding = StockHolding()
         self.put_delta = params.get("put_delta", 0.30)

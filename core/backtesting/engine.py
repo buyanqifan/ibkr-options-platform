@@ -612,38 +612,68 @@ class BacktestEngine:
             # Handle remaining stock position for Wheel/BinbinGod strategies
             # At end of backtest, liquidate any remaining stock holdings
             if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
-                shares = strategy.stock_holding.shares
-                cost_basis = strategy.stock_holding.cost_basis
-                stock_symbol = getattr(strategy.stock_holding, 'symbol', '')
+                # Support multi-stock holdings
+                holdings = getattr(strategy.stock_holding, 'holdings', {})
                 
-                # Get the correct price for the stock we're holding
-                liquidation_price = last_price  # Default to main stock price
-                if is_multi_stock and stock_symbol:
-                    # For multi-stock strategies, get the correct price for the held stock
-                    symbol_price = self._get_price_for_symbol(stock_symbol, last_date, mag7_data)
-                    if symbol_price is not None:
-                        liquidation_price = symbol_price
-                        logger.info(f"Using {stock_symbol} price ${liquidation_price:.2f} for stock liquidation (vs main ${last_price:.2f})")
+                if holdings:
+                    # Multi-stock: liquidate each stock separately
+                    for stock_symbol, holding_info in holdings.items():
+                        shares = holding_info.get("shares", 0)
+                        cost_basis = holding_info.get("cost_basis", 0)
+                        
+                        if shares <= 0:
+                            continue
+                        
+                        # Get the correct price for this stock
+                        liquidation_price = last_price  # Default
+                        if is_multi_stock:
+                            symbol_price = self._get_price_for_symbol(stock_symbol, last_date, mag7_data)
+                            if symbol_price is not None:
+                                liquidation_price = symbol_price
+                        
+                        # Calculate realized P&L from stock liquidation
+                        stock_pnl = (liquidation_price - cost_basis) * shares
+                        position_mgr.cumulative_pnl += stock_pnl
+                        logger.info(
+                            f"Backtest end: Liquidated {shares} shares of {stock_symbol} @ ${liquidation_price:.2f} "
+                            f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
+                        )
+                else:
+                    # Fallback to single-stock logic (backward compatibility)
+                    shares = strategy.stock_holding.shares
+                    cost_basis = strategy.stock_holding.cost_basis
+                    stock_symbol = getattr(strategy.stock_holding, 'symbol', '')
+                    
+                    # Get the correct price for the stock we're holding
+                    liquidation_price = last_price  # Default to main stock price
+                    if is_multi_stock and stock_symbol:
+                        # For multi-stock strategies, get the correct price for the held stock
+                        symbol_price = self._get_price_for_symbol(stock_symbol, last_date, mag7_data)
+                        if symbol_price is not None:
+                            liquidation_price = symbol_price
+                            logger.info(f"Using {stock_symbol} price ${liquidation_price:.2f} for stock liquidation (vs main ${last_price:.2f})")
+                    
+                    # Calculate realized P&L from stock liquidation
+                    stock_pnl = (liquidation_price - cost_basis) * shares
+                    position_mgr.cumulative_pnl += stock_pnl
+                    logger.info(
+                        f"Backtest end: Liquidated {shares} shares of {stock_symbol or 'stock'} @ ${liquidation_price:.2f} "
+                        f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
+                    )
                 
-                # Calculate realized P&L from stock liquidation
-                stock_pnl = (liquidation_price - cost_basis) * shares
-                position_mgr.cumulative_pnl += stock_pnl
-                logger.info(
-                    f"Backtest end: Liquidated {shares} shares of {stock_symbol or 'stock'} @ ${liquidation_price:.2f} "
-                    f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
-                )
-                
-                # Release all stock capital allocations (for BinbinGod, symbol may differ from params symbol)
+                # Release all stock capital allocations
                 released_count = 0
                 for pid, alloc in list(position_mgr.allocations.items()):
                     if "_STOCK" in pid and not alloc.released:
-                        position_mgr.release_margin(pid, stock_pnl if released_count == 0 else 0)
+                        position_mgr.release_margin(pid, 0)  # PnL already added above
                         logger.debug(f"Released stock capital at backtest end: {pid}")
                         released_count += 1
                 
-                # Reset stock holding AFTER getting performance report
+                # Reset stock holding
                 strategy.stock_holding.shares = 0
                 strategy.stock_holding.cost_basis = 0.0
+                if hasattr(strategy.stock_holding, 'holdings'):
+                    strategy.stock_holding.holdings = {}
 
         # Calculate metrics
         # Sort trades by exit_date (then entry_date for same exit date) for consistent ordering
