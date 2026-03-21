@@ -531,10 +531,31 @@ class BacktestEngine:
             # For Wheel strategy, also calculate unrealized P&L from stock holdings
             stock_unrealized_pnl = 0.0
             if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
-                # Calculate unrealized P&L from stock position
-                stock_cost = strategy.stock_holding.shares * strategy.stock_holding.cost_basis
-                stock_market_value = strategy.stock_holding.shares * underlying_price
-                stock_unrealized_pnl = stock_market_value - stock_cost
+                # Support multi-stock holdings
+                holdings = getattr(strategy.stock_holding, 'holdings', None)
+                
+                if holdings and is_multi_stock:
+                    # Multi-stock: calculate each stock's unrealized P&L separately
+                    for stock_symbol, holding_info in holdings.items():
+                        shares = holding_info.get("shares", 0)
+                        cost_basis = holding_info.get("cost_basis", 0)
+                        
+                        if shares <= 0 or cost_basis <= 0:
+                            continue
+                        
+                        # Get the correct price for this stock
+                        stock_price = self._get_price_for_symbol(stock_symbol, bar_date, mag7_data)
+                        if stock_price is None:
+                            stock_price = underlying_price  # Fallback
+                        
+                        stock_cost = shares * cost_basis
+                        stock_market_value = shares * stock_price
+                        stock_unrealized_pnl += stock_market_value - stock_cost
+                else:
+                    # Single stock (backward compatible)
+                    stock_cost = strategy.stock_holding.shares * strategy.stock_holding.cost_basis
+                    stock_market_value = strategy.stock_holding.shares * underlying_price
+                    stock_unrealized_pnl = stock_market_value - stock_cost
             
             portfolio_value = position_mgr.net_capital + open_pnl + stock_unrealized_pnl
             total_open_pnl = open_pnl + stock_unrealized_pnl
