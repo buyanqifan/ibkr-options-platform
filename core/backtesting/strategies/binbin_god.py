@@ -602,6 +602,12 @@ class BinbinGodStrategy(BaseStrategy):
         """
         from datetime import datetime
         
+        # CRITICAL DEBUG: Always log phase and holdings state
+        logger.info(f"generate_signals START: date={current_date}, phase={self.phase}, "
+                   f"total_shares={self.stock_holding.shares}, "
+                   f"held_symbols={self.stock_holding.get_symbols()}, "
+                   f"holdings={self.stock_holding.holdings}")
+        
         # Check if we already have max positions
         wheel_positions = [
             p for p in open_positions 
@@ -708,6 +714,10 @@ class BinbinGodStrategy(BaseStrategy):
             stock_hv = getattr(self, 'stock_hv', {})
             pool_data = getattr(self, 'mag7_data', {})
             
+            # DEBUG: Log pool_data availability
+            logger.info(f"CC phase: pool_data keys={list(pool_data.keys()) if pool_data else 'None'}")
+            logger.info(f"CC phase: stock_hv keys={list(stock_hv.keys()) if stock_hv else 'None'}")
+            
             all_signals = []
             
             # Calculate existing Call coverage per stock
@@ -717,10 +727,14 @@ class BinbinGodStrategy(BaseStrategy):
                     sym = p.symbol
                     existing_call_coverage[sym] = existing_call_coverage.get(sym, 0) + abs(p.quantity)
             
+            # DEBUG: Log existing call coverage
+            logger.info(f"CC phase: existing_call_coverage={existing_call_coverage}")
+            
             # Generate Call signals for each held stock
             for stock_symbol in held_symbols:
                 shares_held = self.stock_holding.get_shares(stock_symbol)
                 stock_cost_basis = self.stock_holding.holdings.get(stock_symbol, {}).get("cost_basis", 0)
+                logger.info(f"CC phase: {stock_symbol} shares_held={shares_held}, cost_basis={stock_cost_basis}")
                 if shares_held <= 0:
                     continue
                 
@@ -919,6 +933,9 @@ class BinbinGodStrategy(BaseStrategy):
         """
         from datetime import timedelta
         from core.backtesting.pricing import OptionsPricer
+        
+        logger.info(f"_generate_backtest_call_signal: symbol={symbol}, date={current_date}, "
+                   f"price={underlying_price:.2f}, iv={iv:.3f}, shares_avail={shares_available}, cost={cost_basis}")
         
         # Get cost basis for this specific stock
         if cost_basis is None:
