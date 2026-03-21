@@ -866,7 +866,7 @@ class BinbinGodStrategy(BaseStrategy):
 
         # 条件1: 检查margin使用率是否低于阈值
         if position_mgr:
-            margin_utilization = position_mgr.total_margin_used / position_mgr.total_capital if position_mgr.total_capital > 0 else 0
+            margin_utilization = position_mgr.total_margin_used / position_mgr.net_capital if position_mgr.net_capital > 0 else 0
             if margin_utilization > self.sp_in_cc_margin_threshold:
                 logger.info(
                     f"SP in CC phase: margin utilization {margin_utilization:.1%} > threshold {self.sp_in_cc_margin_threshold:.1%}, "
