@@ -1723,6 +1723,7 @@ class BinbinGodStrategy(BaseStrategy):
         symbol = closed_trade.get('symbol', '')
         right = closed_trade.get('right', '')  # 'P' or 'C'
         quantity = closed_trade.get('quantity', 0)
+        closed_trade_phase = closed_trade.get('strategy_phase', 'SP')  # Get the phase of the closed trade
 
         # Determine DTE for new position
         if self.ml_dte_optimization and self.ml_dte_optimizer:
@@ -1755,8 +1756,8 @@ class BinbinGodStrategy(BaseStrategy):
         if ml_bars:
             ml_bars = [bar for bar in ml_bars if str(bar.get("date", ""))[:10] <= current_date]
         
-        if self.phase == "SP" and right == "P":
-            # Continue selling puts
+        if (self.phase == "SP" or closed_trade_phase == "CC+SP") and right == "P":
+            # Continue selling puts (including SP opened during CC+SP mode)
             if self.ml_delta_optimization and self.ml_integration:
                 try:
                     # Get ML-optimized delta using optimize_put_delta
@@ -1829,9 +1830,11 @@ class BinbinGodStrategy(BaseStrategy):
             return None
 
         # Generate signal
-        # Determine strategy_phase based on trade_type
+        # Determine strategy_phase based on trade_type and closed_trade_phase
+        # For CC+SP mode, inherit the phase from closed trade
         if trade_type == "BINBIN_PUT":
-            signal_strategy_phase = "SP"
+            # Inherit CC+SP if the closed trade was in CC+SP mode, otherwise SP
+            signal_strategy_phase = closed_trade_phase if closed_trade_phase == "CC+SP" else "SP"
         elif trade_type == "BINBIN_CALL":
             signal_strategy_phase = "CC"
         else:
