@@ -224,10 +224,11 @@ class BacktestEngine:
 
             if is_multi_stock:
                 # Multi-stock mode: check each position with its correct underlying price AND IV
-                # BinbinGod策略：SP和CC阶段都禁用止盈止损，让期权自然到期或被行权
-                # 这样可以实现完整的Wheel策略循环：SP -> CC -> SP
-                profit_target_to_use = 999999  # Always disable for Wheel-style strategies
-                stop_loss_to_use = 999999      # Always disable for Wheel-style strategies
+                # BinbinGod策略(Wheel风格)：
+                # - STOP_LOSS始终禁用：让期权到期或被行权，完成Wheel循环
+                # - PROFIT_TARGET保留用户配置：可以提前获利滚动
+                profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
+                stop_loss_to_use = 999999  # Always disable stop loss for Wheel strategies
 
                 closed = []
                 remaining_positions = []
