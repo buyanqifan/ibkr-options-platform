@@ -1272,9 +1272,13 @@ class BinbinGodStrategy(BaseStrategy):
             )
             return []
 
-        # Position sizing: use ML optimizer if enabled, otherwise traditional
+        # Position sizing for CC: should use ALL available shares
+        # CC has no additional risk (stock is collateral), so maximize premium income
+        max_by_shares = shares_available // 100
+        
         if self.ml_position_optimization and self.ml_position_optimizer:
-            max_contracts = self._calculate_ml_position_size(
+            # ML can provide risk assessment, but CC should default to full coverage
+            ml_contracts = self._calculate_ml_position_size(
                 symbol=symbol,
                 underlying_price=underlying_price,
                 iv=iv,
@@ -1286,13 +1290,16 @@ class BinbinGodStrategy(BaseStrategy):
                 strategy_phase="CC",
                 shares_available=shares_available,
             )
-            # For CC, ensure we don't exceed shares held
-            max_by_shares = shares_available // 100
-            max_contracts = min(max_contracts, max_by_shares)
+            # For CC: use ML as a lower bound only if it suggests extreme caution
+            # Otherwise, use all available shares to maximize premium income
+            if ml_contracts < max_by_shares:
+                self.logger.info(
+                    f"CC phase: ML suggests {ml_contracts} contracts, but using {max_by_shares} "
+                    f"to cover all {shares_available} shares (CC has no additional risk)"
+                )
+            max_contracts = max_by_shares  # Always use all available shares for CC
         else:
-            # Traditional: Covered call: Calculate contracts based on shares available
-            # generate_signals() already checks for existing call positions to prevent over-selling
-            max_by_shares = shares_available // 100
+            # Traditional: Covered call: use all shares available
             max_contracts = min(max_by_shares, self.max_positions)
 
         if max_contracts <= 0:
