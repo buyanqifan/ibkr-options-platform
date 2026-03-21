@@ -426,6 +426,39 @@ class TestBinbinGodStrategyCCSP(unittest.TestCase):
         # Default should be True
         self.assertTrue(strategy.allow_sp_in_cc_phase)
 
+    def test_generate_sp_in_cc_phase_with_position_manager(self):
+        """Test _generate_sp_in_cc_phase with real PositionManager to catch attribute errors."""
+        from core.backtesting.strategies.binbin_god import BinbinGodStrategy
+        from core.backtesting.position_manager import PositionManager
+
+        strategy = BinbinGodStrategy({
+            "initial_capital": 100000,
+            "allow_sp_in_cc_phase": True,
+            "sp_in_cc_margin_threshold": 0.5,
+        })
+
+        # Create a real PositionManager
+        position_mgr = PositionManager(initial_capital=100000)
+
+        # Set up strategy state for CC phase
+        strategy.phase = "CC"
+        strategy.stock_holding.holdings = {"AAPL": {"shares": 100, "cost_basis": 150}}
+
+        # Call the method - this should NOT raise AttributeError about total_capital
+        result = strategy._generate_sp_in_cc_phase(
+            current_date="2024-01-15",
+            underlying_price=150,
+            iv=0.3,
+            wheel_positions=[],
+            position_mgr=position_mgr,
+            held_symbols=["AAPL"],
+            pool_data={},
+            stock_hv={},
+        )
+
+        # Result should be a list (may be empty if conditions not met)
+        self.assertIsInstance(result, list)
+
 
 class TestBuildTrainingDataCCSP(unittest.TestCase):
     """Test _build_training_data supports CC+SP mode."""
