@@ -598,7 +598,12 @@ class BacktestEngine:
                 strategy.stock_holding.cost_basis = 0.0
 
         # Calculate metrics
-        trades = [t.to_dict() for t in simulator.closed_trades]
+        # Sort trades by exit_date (then entry_date for same exit date) for consistent ordering
+        sorted_closed_trades = sorted(
+            simulator.closed_trades,
+            key=lambda t: (t.exit_date, t.entry_date)
+        )
+        trades = [t.to_dict() for t in sorted_closed_trades]
         metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
 
         # Train ML roll optimizer if enabled and we have trades
