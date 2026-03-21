@@ -797,6 +797,13 @@ class BinbinGodStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
         
+        # Get historical bars for ML optimization (backtest mode)
+        pool_data = getattr(self, 'mag7_data', {})
+        ml_bars = pool_data.get(symbol, [])
+        # Filter bars up to current_date
+        if ml_bars:
+            ml_bars = [bar for bar in ml_bars if str(bar.get("date", ""))[:10] <= current_date]
+        
         # ML Delta optimization
         ml_result = None
         if self.ml_delta_optimization and self.ml_integration:
@@ -805,7 +812,7 @@ class BinbinGodStrategy(BaseStrategy):
                     symbol=symbol,
                     current_price=underlying_price,
                     cost_basis=self.stock_holding.cost_basis,
-                    bars=[],  # Will be populated by real-time interface
+                    bars=ml_bars,  # Pass actual bars for backtest
                     options_data=[],  # Will be populated by real-time interface
                     iv=iv
                 )
@@ -822,7 +829,7 @@ class BinbinGodStrategy(BaseStrategy):
                     symbol=symbol,
                     current_price=underlying_price,
                     cost_basis=self.stock_holding.cost_basis,
-                    bars=[],  # Will be populated by real-time interface
+                    bars=ml_bars,  # Pass actual bars for backtest
                     options_data=[],  # Will be populated by real-time interface
                     iv=iv,
                     strategy_phase="SP"
@@ -960,6 +967,13 @@ class BinbinGodStrategy(BaseStrategy):
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
         
+        # Get historical bars for ML optimization (backtest mode)
+        pool_data = getattr(self, 'mag7_data', {})
+        ml_bars = pool_data.get(symbol, [])
+        # Filter bars up to current_date
+        if ml_bars:
+            ml_bars = [bar for bar in ml_bars if str(bar.get("date", ""))[:10] <= current_date]
+        
         # Check if we need CC optimization
         call_delta_target = self.call_delta
         additional_constraints = {}
@@ -972,7 +986,7 @@ class BinbinGodStrategy(BaseStrategy):
                     symbol=symbol,
                     current_price=underlying_price,
                     cost_basis=cost_basis,
-                    bars=[],  # Will be populated by real-time interface
+                    bars=ml_bars,  # Pass actual bars for backtest
                     options_data=[],  # Will be populated by real-time interface
                     iv=iv,
                     strategy_phase="CC"
@@ -999,7 +1013,7 @@ class BinbinGodStrategy(BaseStrategy):
                     symbol=symbol,
                     current_price=underlying_price,
                     cost_basis=cost_basis,
-                    bars=[],  # Will be populated by real-time interface
+                    bars=ml_bars,  # Pass actual bars for backtest
                     options_data=[],  # Will be populated by real-time interface
                     iv=iv
                 )
