@@ -3,6 +3,11 @@ ML-based DTE (Days to Expiration) Optimizer for Options Strategies.
 
 This module provides intelligent DTE selection using machine learning models
 that optimize for risk-adjusted returns across different market conditions.
+
+Supports three strategy phases:
+- "SP": Sell Put phase (standard)
+- "CC": Covered Call phase (standard)
+- "CC+SP": Simultaneous mode (binbingod策略优化 - CC阶段可同时开SP)
 """
 
 import os
@@ -59,7 +64,7 @@ class DTEMarketContext:
     market_regime: str  # "bull", "bear", "neutral", "high_vol"
     days_to_earnings: int
     option_liquidity: float  # 0-1 scale
-    strategy_phase: str  # "SP" for Sell Put, "CC" for Covered Call
+    strategy_phase: str  # "SP" for Sell Put, "CC" for Covered Call, "CC+SP" for simultaneous mode
 
 
 @dataclass
@@ -658,10 +663,13 @@ class DTEOptimizerML:
         return min(1.0, risk_score / 0.1)  # Normalize to 0-1
 
     def _optimize_for_strategy_phase(self, dte: int, strategy_phase: str, context: DTEMarketContext) -> float:
-        """Optimize DTE based on strategy phase."""
-        
+        """Optimize DTE based on strategy phase.
+
+        CC+SP模式使用SP的逻辑，因为在CC阶段开SP时实际是卖Put。
+        """
+
         # Different strategy phases have different optimal DTE preferences
-        if strategy_phase == "SP":  # Sell Put
+        if strategy_phase == "SP" or strategy_phase == "CC+SP":  # Sell Put (包括CC+SP模式)
             # Prefer moderate DTE to balance premium collection and assignment risk
             if 25 <= dte <= 40:
                 return 1.0
@@ -753,8 +761,8 @@ class DTEOptimizerML:
         
         # Adjust for strategy phase
         phase_adjustment = 1.0
-        if context.strategy_phase == "SP" and right == "P":
-            phase_adjustment = 1.0  # Normal assignment for Sell Put
+        if (context.strategy_phase == "SP" or context.strategy_phase == "CC+SP") and right == "P":
+            phase_adjustment = 1.0  # Normal assignment for Sell Put (包括CC+SP模式)
         elif context.strategy_phase == "CC" and right == "C":
             phase_adjustment = 1.1  # Slightly higher assignment risk for Covered Call
 
@@ -782,8 +790,8 @@ class DTEOptimizerML:
         if context.strategy_phase == "CC" and right == "C":
             # Covered calls have assignment risk that may be desired
             dte_risk *= 0.8  # Slightly reduce risk for covered calls
-        elif context.strategy_phase == "SP" and right == "P":
-            # Sell puts have assignment risk that may be desired
+        elif (context.strategy_phase == "SP" or context.strategy_phase == "CC+SP") and right == "P":
+            # Sell puts have assignment risk that may be desired (包括CC+SP模式)
             dte_risk *= 0.9  # Slightly reduce risk for sell puts
 
         # Adjust for liquidity

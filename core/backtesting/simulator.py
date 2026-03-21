@@ -23,6 +23,7 @@ class OptionPosition:
     current_price: float = 0.0
     current_pnl: float = 0.0
     capital_at_entry: float = 0.0  # Total portfolio capital when opening position
+    strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
 
 
 @dataclass
@@ -48,6 +49,7 @@ class TradeRecord:
     position_id: str = ""               # Unique identifier for margin tracking
     capital_at_entry: float = 0.0      # Total capital when opening position
     capital_at_exit: float = 0.0       # Total capital when closing position
+    strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
 
     def to_dict(self) -> dict:
         # Generate formatted option contract name
@@ -75,6 +77,7 @@ class TradeRecord:
         return {
             "symbol": self.symbol,
             "trade_type": self.trade_type,
+            "strategy_phase": self.strategy_phase,  # SP, CC, or CC+SP
             "entry_date": self.entry_date,
             "exit_date": self.exit_date,
             "expiry": self.expiry,
@@ -218,6 +221,7 @@ class TradeSimulator:
                 position_id=getattr(pos, 'position_id', ''),
                 capital_at_entry=getattr(pos, 'capital_at_entry', 0.0),
                 capital_at_exit=0.0,
+                strategy_phase=getattr(pos, 'strategy_phase', 'SP'),  # 传递strategy_phase
             )
             self.closed_trades.append(trade)
             return trade
@@ -333,6 +337,7 @@ class TradeSimulator:
                     position_id=getattr(pos, 'position_id', ''),
                     capital_at_entry=getattr(pos, 'capital_at_entry', 0.0),  # Pass from position
                     capital_at_exit=0.0,  # Will be set by engine after margin release
+                    strategy_phase=getattr(pos, 'strategy_phase', 'SP'),  # 传递strategy_phase
                 )
                 closed.append(trade)
                 self.closed_trades.append(trade)

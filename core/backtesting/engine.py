@@ -449,6 +449,7 @@ class BacktestEngine:
                                 delta_at_entry=roll_signal.delta,
                                 position_id=roll_position_id,  # Use the same position_id for margin tracking
                                 capital_at_entry=position_mgr.net_capital,
+                                strategy_phase=getattr(roll_signal, 'strategy_phase', 'SP'),  # SP, CC, or CC+SP
                             )
                             simulator.open_position(roll_pos)
 
@@ -539,6 +540,7 @@ class BacktestEngine:
                             delta_at_entry=sig.delta,
                             position_id=position_id,  # Use the same position_id for margin tracking
                             capital_at_entry=position_mgr.net_capital,  # Record total capital at entry
+                            strategy_phase=getattr(sig, 'strategy_phase', 'SP'),  # SP, CC, or CC+SP
                         )
                         simulator.open_position(pos)
                         

@@ -1107,6 +1107,7 @@ class BinbinGodStrategy(BaseStrategy):
             premium=premium,
             underlying_price=underlying_price,
             margin_requirement=strike * 100,
+            strategy_phase=strategy_phase,  # SP or CC+SP
         )]
     
     def _generate_backtest_call_signal(
@@ -1312,6 +1313,7 @@ class BinbinGodStrategy(BaseStrategy):
             premium=premium,
             underlying_price=underlying_price,
             margin_requirement=0.0,  # No additional margin - shares are collateral
+            strategy_phase="CC",  # Covered Call phase
         )]
     
     def generate_signal(

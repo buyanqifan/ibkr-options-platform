@@ -20,6 +20,7 @@ class Signal:
     premium: float       # expected premium per share
     underlying_price: float = 0.0  # Stock price at entry (for tracking in backtest)
     margin_requirement: float = None  # Optional: strategy can provide specific margin requirement
+    strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
 
 
 class BaseStrategy(ABC):

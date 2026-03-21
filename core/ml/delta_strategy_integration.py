@@ -243,6 +243,9 @@ class BinGodDeltaIntegration:
                         strategy_phase: str = "SP") -> DTEOptimizationResult:
         """
         Optimize DTE selection for put options using ML models.
+
+        Args:
+            strategy_phase: "SP" for Sell Put phase, "CC+SP" for simultaneous mode
         """
         
         if not self.ml_dte_optimization_enabled or not self.dte_optimizer:

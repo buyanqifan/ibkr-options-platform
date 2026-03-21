@@ -40,6 +40,7 @@ class BacktestTrade(Base):
     symbol = Column(String(20), nullable=False)
     strategy_name = Column(String(50))
     trade_type = Column(String(20))        # SELL_PUT, COVERED_CALL, etc.
+    strategy_phase = Column(String(10))    # SP, CC, or CC+SP (simultaneous mode)
     entry_date = Column(String(10), nullable=False)
     exit_date = Column(String(10))
     expiry = Column(String(10))
