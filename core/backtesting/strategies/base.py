@@ -263,9 +263,11 @@ class BaseStrategy(ABC):
                     f"ml={ml_result.optimal_delta:.3f}, final={final_delta:.3f}"
                 )
                 return final_delta
-            elif ml_result and ml_result.confidence > 0.7:
+            elif ml_result and ml_result.confidence >= 0.8:
                 self.logger.info(f"ML delta (high confidence): {ml_result.optimal_delta:.3f}")
                 return ml_result.optimal_delta
+            elif ml_result:
+                self.logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.8, using traditional")
                 
         except Exception as e:
             self.logger.warning(f"ML delta optimization failed, using traditional: {e}")

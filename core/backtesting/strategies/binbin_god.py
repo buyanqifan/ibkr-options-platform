@@ -899,13 +899,15 @@ class BinbinGodStrategy(BaseStrategy):
                 )
                 
                 # Combine CC optimization with ML if available
-                if ml_result and ml_result.confidence > 0.7:
+                if ml_result and ml_result.confidence >= 0.8:
                     # Use ML result with CC protective adjustments
                     call_delta_target = max(self.cc_min_delta_cost, ml_result.optimal_delta)
                     logger.info(f"Combined ML + CC optimization: delta = {call_delta_target:.3f}")
                 else:
                     # Traditional CC optimization
                     call_delta_target = self.cc_min_delta_cost
+                    if ml_result:
+                        logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.8, using CC fallback delta")
                     
                 # Add minimum strike constraint: try to get strike close to cost basis
                 min_strike_desired = self.stock_holding.cost_basis * (1 - self.cc_min_strike_premium)
