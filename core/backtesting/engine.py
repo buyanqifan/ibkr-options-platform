@@ -297,7 +297,8 @@ class BacktestEngine:
                 adjusted_pnl = trade.pnl - exit_cost
                 
                 # Create position ID and release margin
-                position_id = f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
+                # Use position_id from trade record (must match the one used during allocation)
+                position_id = trade.position_id if trade.position_id else f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
                 position_mgr.release_margin(position_id, adjusted_pnl)  # Use adjusted P&L
                 
                 # Handle stock capital allocation for Wheel strategy
@@ -401,6 +402,7 @@ class BacktestEngine:
                                 underlying_entry=roll_underlying_price,
                                 iv_at_entry=roll_signal.iv,
                                 delta_at_entry=roll_signal.delta,
+                                position_id=roll_position_id,  # Use the same position_id for margin tracking
                                 capital_at_entry=position_mgr.net_capital,
                             )
                             simulator.open_position(roll_pos)
@@ -481,6 +483,7 @@ class BacktestEngine:
                             underlying_entry=entry_underlying_price,
                             iv_at_entry=sig.iv,
                             delta_at_entry=sig.delta,
+                            position_id=position_id,  # Use the same position_id for margin tracking
                             capital_at_entry=position_mgr.net_capital,  # Record total capital at entry
                         )
                         simulator.open_position(pos)

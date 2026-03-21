@@ -19,6 +19,7 @@ class OptionPosition:
     underlying_entry: float
     iv_at_entry: float
     delta_at_entry: float
+    position_id: str = ""  # Unique identifier for margin tracking (must match allocation)
     current_price: float = 0.0
     current_pnl: float = 0.0
     capital_at_entry: float = 0.0  # Total portfolio capital when opening position
@@ -44,6 +45,7 @@ class TradeRecord:
     underlying_exit: float
     iv_at_entry: float
     delta_at_entry: float
+    position_id: str = ""               # Unique identifier for margin tracking
     capital_at_entry: float = 0.0      # Total capital when opening position
     capital_at_exit: float = 0.0       # Total capital when closing position
 
@@ -213,6 +215,7 @@ class TradeSimulator:
                 underlying_exit=underlying_price,
                 iv_at_entry=pos.iv_at_entry,
                 delta_at_entry=pos.delta_at_entry,
+                position_id=getattr(pos, 'position_id', ''),
                 capital_at_entry=getattr(pos, 'capital_at_entry', 0.0),
                 capital_at_exit=0.0,
             )
@@ -327,6 +330,7 @@ class TradeSimulator:
                     underlying_exit=underlying_price,
                     iv_at_entry=pos.iv_at_entry,
                     delta_at_entry=pos.delta_at_entry,
+                    position_id=getattr(pos, 'position_id', ''),
                     capital_at_entry=getattr(pos, 'capital_at_entry', 0.0),  # Pass from position
                     capital_at_exit=0.0,  # Will be set by engine after margin release
                 )
