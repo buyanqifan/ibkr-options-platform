@@ -480,6 +480,7 @@ class BinbinGodStrategy(BaseStrategy):
         delta: float,
         position_mgr,
         strategy_phase: str,
+        shares_available: int = None,
     ) -> int:
         """Calculate position size using ML optimizer for BinbinGod strategy.
 
@@ -493,18 +494,28 @@ class BinbinGodStrategy(BaseStrategy):
             delta: Option delta
             position_mgr: Position manager
             strategy_phase: "SP" or "CC"
+            shares_available: For CC phase, max shares that can be covered
 
         Returns:
             Recommended number of contracts
         """
-        # Base position from position manager
-        if position_mgr:
-            base_position = position_mgr.calculate_position_size(
-                margin_per_contract=strike * 100 if strategy_phase == "SP" else 0,
-                max_positions=self.max_positions,
-            )
+        # Base position calculation differs by phase
+        if strategy_phase == "CC":
+            # For CC: base position limited by shares available
+            if shares_available and shares_available > 0:
+                base_position = min(shares_available // 100, self.max_positions)
+            else:
+                shares = self.stock_holding.get_shares(symbol)
+                base_position = min(shares // 100, self.max_positions) if shares > 0 else 0
         else:
-            base_position = self.max_positions
+            # For SP: use margin-based calculation
+            if position_mgr:
+                base_position = position_mgr.calculate_position_size(
+                    margin_per_contract=strike * 100,
+                    max_positions=self.max_positions,
+                )
+            else:
+                base_position = self.max_positions
 
         if base_position <= 0:
             return 0
@@ -548,7 +559,8 @@ class BinbinGodStrategy(BaseStrategy):
             max_position = self.max_positions
             if strategy_phase == "CC":
                 # For CC, limit by shares held
-                max_position = min(max_position, self.stock_holding.shares // 100)
+                shares = self.stock_holding.get_shares(symbol)
+                max_position = min(max_position, shares // 100) if shares > 0 else 0
 
             num_contracts, recommendation = self.ml_position_optimizer.get_position_size(
                 symbol=symbol,
@@ -1102,6 +1114,7 @@ class BinbinGodStrategy(BaseStrategy):
                 delta=delta,
                 position_mgr=position_mgr,
                 strategy_phase="CC",
+                shares_available=shares_available,
             )
             # For CC, ensure we don't exceed shares held
             max_by_shares = shares_available // 100
