@@ -607,7 +607,15 @@ class BinbinGodStrategy(BaseStrategy):
             p for p in open_positions 
             if p.trade_type in ("BINBIN_PUT", "BINBIN_CALL")
         ]
+        
+        # Debug log for CC phase
+        if self.phase == "CC":
+            logger.info(f"generate_signals CC: date={current_date}, wheel_positions={len(wheel_positions)}, "
+                       f"max_positions={self.max_positions}, phase={self.phase}, "
+                       f"held_symbols={self.stock_holding.get_symbols()}")
+        
         if len(wheel_positions) >= self.max_positions:
+            logger.info(f"Max positions reached: {len(wheel_positions)} >= {self.max_positions}")
             return []
         
         # Select best stock dynamically based on phase
@@ -687,6 +695,8 @@ class BinbinGodStrategy(BaseStrategy):
             # Support multi-stock holdings
             
             held_symbols = self.stock_holding.get_symbols()
+            logger.info(f"CC phase check: held_symbols={held_symbols}, holdings={self.stock_holding.holdings}")
+            
             if not held_symbols:
                 logger.warning("CC phase but no stocks held, returning to SP phase")
                 self.phase = "SP"
