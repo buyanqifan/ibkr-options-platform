@@ -176,9 +176,4 @@ class OptionsPricer:
             K = K - diff / ddelta_dK
             K = max(S * 0.5, min(K, S * 2.0))  # Bound the strike
 
-        # SAFETY CHECK: For calls, ensure strike is OTM (K >= S)
-        # This prevents deep ITM calls which would guarantee assignment
-        if right == 'C' and K < S:
-            K = S * 1.01  # At least 1% OTM
-
         return K
