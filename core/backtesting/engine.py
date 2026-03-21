@@ -446,7 +446,14 @@ class BacktestEngine:
                 bar_date, underlying_price, iv, simulator.open_positions,
                 position_mgr=position_mgr
             )
+            
+            # DEBUG: Log number of signals generated
+            if signals:
+                logger.info(f"Generated {len(signals)} signals on {bar_date}")
             for sig in signals:
+                    # DEBUG: Log each signal being processed
+                    logger.info(f"Processing signal: {sig.symbol} {sig.trade_type} {sig.right} strike={sig.strike:.2f} qty={sig.quantity} margin_req={sig.margin_requirement}")
+                    
                     # Use strategy-provided margin requirement if available
                     # Note: margin_requirement can be 0 for covered calls (shares already owned)
                     if sig.margin_requirement is not None:
@@ -472,6 +479,7 @@ class BacktestEngine:
                     
                     # Allocate margin before opening position
                     position_id = f"{sig.symbol}_{bar_date}_{sig.strike}_{sig.right}"
+                    logger.info(f"Attempting to allocate margin: position_id={position_id}, total_margin=${total_margin:.2f}")
                     if position_mgr.allocate_margin(
                         position_id=position_id,
                         strategy=strategy.name,
@@ -479,6 +487,7 @@ class BacktestEngine:
                         entry_date=bar_date,
                         margin_amount=total_margin,
                     ):
+                        logger.info(f"Margin allocated successfully for {position_id}")
                         # Get correct underlying price for this symbol (important for multi-stock strategies)
                         entry_underlying_price = underlying_price  # Default: use primary stock
                         if is_multi_stock:
