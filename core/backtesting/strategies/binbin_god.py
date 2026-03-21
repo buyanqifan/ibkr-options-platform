@@ -2,7 +2,7 @@
 
 This strategy intelligently selects the best stock from MAG7 universe based on:
 - P/E Ratio (20% weight) - Value stocks preferred
-- Option IV (40% weight) - Higher premium income  
+- Option IV (40% weight) - Higher premium income
 - Momentum (20% weight) - Positive trend
 - Stability (20% weight) - Risk management
 
@@ -15,6 +15,14 @@ Phase 1 (SP): Sell OTM puts, collect premium
 Phase 2 (CC): Sell OTM calls against owned shares
   - If expires worthless: keep premium + shares, continue selling calls
   - If assigned: sell shares at strike, return to Phase 1
+
+binbingod策略优化 - CC阶段可同时开SP:
+  - SP和CC不是对立的，可以同时操作
+  - 在CC阶段，条件允许（有足够margin）的情况下也可以开SP
+  - 配置参数:
+    - allow_sp_in_cc_phase: 是否允许CC阶段开SP（默认True）
+    - sp_in_cc_margin_threshold: margin使用上限阈值（默认0.5）
+    - sp_in_cc_max_positions: CC阶段最多开几个SP仓位（默认3）
 """
 
 from dataclasses import dataclass
@@ -170,6 +178,11 @@ class BinbinGodStrategy(BaseStrategy):
         self.cc_min_delta_cost = config.get("cc_min_delta_cost", 0.15)  # Min delta when cost > price
         self.cc_cost_basis_threshold = config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
         self.cc_min_strike_premium = config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
+
+        # SP in CC phase parameters (binbingod策略优化：CC阶段可同时开SP)
+        self.allow_sp_in_cc_phase = config.get("allow_sp_in_cc_phase", True)  # 允许CC阶段开SP
+        self.sp_in_cc_margin_threshold = config.get("sp_in_cc_margin_threshold", 0.5)  # CC阶段开SP的margin使用上限阈值
+        self.sp_in_cc_max_positions = config.get("sp_in_cc_max_positions", 3)  # CC阶段最多开几个SP仓位
         
         # ML delta optimization parameters - use BaseStrategy's implementation
         self.ml_delta_optimization = config.get("ml_delta_optimization", False)
@@ -794,15 +807,156 @@ class BinbinGodStrategy(BaseStrategy):
                 
                 # Generate Call signal for this stock with its specific cost basis
                 signals = self._generate_backtest_call_signal(
-                    stock_symbol, current_date, actual_underlying_price, actual_iv, 
+                    stock_symbol, current_date, actual_underlying_price, actual_iv,
                     position_mgr, shares_available, stock_cost_basis
                 )
                 if signals:
                     all_signals.extend(signals)
                     logger.info(f"CC phase: Generated {len(signals)} Call signal(s) for {stock_symbol}")
-            
+
+            # ========== binbingod策略优化: CC阶段条件允许时开SP ==========
+            # SP和CC不是对立的，可以同时操作
+            # 条件: 1) allow_sp_in_cc_phase开启
+            #       2) margin使用率低于阈值
+            #       3) 当前SP positions数量未达到上限
+            if self.allow_sp_in_cc_phase:
+                sp_signals = self._generate_sp_in_cc_phase(
+                    current_date, underlying_price, iv, wheel_positions, position_mgr,
+                    held_symbols, pool_data, stock_hv
+                )
+                if sp_signals:
+                    all_signals.extend(sp_signals)
+                    logger.info(f"CC phase: Generated {len(sp_signals)} SP signal(s) (simultaneous CC+SP mode)")
+
             return all_signals
-    
+
+    def _generate_sp_in_cc_phase(
+        self,
+        current_date: str,
+        underlying_price: float,
+        iv: float,
+        wheel_positions: list,
+        position_mgr,
+        held_symbols: list,
+        pool_data: dict,
+        stock_hv: dict,
+    ) -> list[Signal]:
+        """在CC阶段生成SP信号（binbingod策略优化）。
+
+        SP和CC不是对立的，可以同时操作。条件允许时，在持有股票卖CC的同时，
+        也可以开新的SP仓位，增加资金利用效率和收益。
+
+        Args:
+            current_date: 当前日期
+            underlying_price: 基础价格（fallback）
+            iv: 隐含波动率（fallback）
+            wheel_positions: 当前持有的Wheel策略仓位
+            position_mgr: 仓位管理器
+            held_symbols: 当前持有的股票列表
+            pool_data: 股票池数据
+            stock_hv: 股票历史波动率字典
+
+        Returns:
+            SP信号列表（可能为空）
+        """
+        from datetime import timedelta
+        from core.backtesting.pricing import OptionsPricer
+
+        # 条件1: 检查margin使用率是否低于阈值
+        if position_mgr:
+            margin_utilization = position_mgr.total_margin_used / position_mgr.total_capital if position_mgr.total_capital > 0 else 0
+            if margin_utilization > self.sp_in_cc_margin_threshold:
+                logger.info(
+                    f"SP in CC phase: margin utilization {margin_utilization:.1%} > threshold {self.sp_in_cc_margin_threshold:.1%}, "
+                    f"skipping SP"
+                )
+                return []
+        else:
+            # 没有position_mgr时，保守起见不允许开SP
+            logger.debug("SP in CC phase: no position_mgr, skipping SP")
+            return []
+
+        # 条件2: 检查当前SP positions数量
+        current_sp_positions = sum(
+            1 for p in wheel_positions
+            if p.trade_type == "BINBIN_PUT"
+        )
+
+        if current_sp_positions >= self.sp_in_cc_max_positions:
+            logger.info(
+                f"SP in CC phase: already have {current_sp_positions} SP positions, "
+                f"max allowed is {self.sp_in_cc_max_positions}"
+            )
+            return []
+
+        # 条件3: 检查总仓位数量
+        total_wheel_positions = len(wheel_positions)
+        if total_wheel_positions >= self.max_positions:
+            logger.info(f"SP in CC phase: max positions {self.max_positions} reached")
+            return []
+
+        # 选择最佳股票开SP
+        # 优先选择当前未持有的股票（分散风险）
+        stock_pool = getattr(self, 'stock_pool', MAG7_STOCKS)
+        available_stocks = [s for s in stock_pool if s not in held_symbols]
+
+        # 如果所有股票都已持有，则选择持有的股票中得分最高的
+        if not available_stocks:
+            available_stocks = stock_pool
+
+        # 构建market_data用于评分
+        market_data = {}
+        for sym in available_stocks:
+            bars = pool_data.get(sym, [])
+            if bars:
+                filtered_bars = [bar for bar in bars if str(bar.get("date", ""))[:10] <= current_date]
+                if filtered_bars:
+                    market_data[sym] = filtered_bars
+
+        if not market_data:
+            logger.warning("SP in CC phase: no market data available for stock selection")
+            return []
+
+        # 选择最佳股票
+        best_symbol = self._select_best_stock(market_data, current_date)
+
+        # 获取选中股票的价格和IV
+        actual_underlying_price = underlying_price
+        actual_iv = iv
+
+        if best_symbol in pool_data:
+            bars = pool_data[best_symbol]
+            bar_index = -1
+            for idx, bar in enumerate(bars):
+                bar_date_str = str(bar.get("date", ""))[:10] if bar.get("date") else ""
+                if bar_date_str <= current_date:
+                    actual_underlying_price = bar["close"]
+                    bar_index = idx
+
+            if best_symbol in stock_hv and bar_index >= 0:
+                sym_hv = stock_hv[best_symbol]
+                if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
+                    actual_iv = sym_hv[bar_index]
+
+        # 生成SP信号
+        logger.info(
+            f"SP in CC phase: Selected {best_symbol} for new SP position "
+            f"(price: ${actual_underlying_price:.2f}, IV: {actual_iv:.3f})"
+        )
+
+        # 使用_generate_backtest_put_signal生成信号
+        sp_signals = self._generate_backtest_put_signal(
+            best_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
+        )
+
+        if sp_signals:
+            logger.info(
+                f"SP in CC phase: Successfully generated {len(sp_signals)} SP signal(s) for {best_symbol} "
+                f"(simultaneous with CC positions)"
+            )
+
+        return sp_signals
+
     def _generate_backtest_put_signal(
         self,
         symbol: str,

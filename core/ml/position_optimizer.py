@@ -2,9 +2,14 @@
 
 Uses machine learning to predict optimal position size based on:
 - Market conditions (IV Rank, VIX, volatility regime)
-- Strategy phase (SP/CC)
+- Strategy phase (SP/CC/CC+SP simultaneous)
 - Portfolio state (drawdown, margin utilization)
 - Historical performance patterns
+
+binbingod策略优化: 支持CC阶段同时开SP（SP和CC不是对立的，可以同时操作）
+- strategy_phase: "SP" = 卖Put阶段
+                  "CC" = 卖Covered Call阶段
+                  "CC+SP" = 同时操作模式（在CC阶段条件允许时开SP）
 
 Output: Optimal number of contracts and risk-adjusted position multiplier.
 """
@@ -53,7 +58,7 @@ class TrainingSample:
     portfolio_beta: float
 
     # Strategy features
-    strategy_phase: int  # 0=SP, 1=CC
+    strategy_phase: int  # 0=SP, 1=CC, 2=CC+SP (simultaneous mode)
     shares_held: int
     cost_basis: float
 
@@ -211,7 +216,14 @@ class MLPositionOptimizer:
             features['portfolio_concentration'] = 0
 
         # === Strategy Phase ===
-        features['strategy_phase'] = 0 if strategy_phase == "SP" else 1
+        # 支持同时操作模式: CC+SP
+        # strategy_phase: 0=SP only, 1=CC only, 2=CC+SP (simultaneous)
+        if strategy_phase == "SP":
+            features['strategy_phase'] = 0
+        elif strategy_phase == "CC":
+            features['strategy_phase'] = 1
+        else:  # CC+SP simultaneous mode
+            features['strategy_phase'] = 2
 
         # === Option Features ===
         underlying_price = option_info.get('underlying_price', market_data.get('price', 100))
@@ -443,13 +455,18 @@ class MLPositionOptimizer:
             reasoning_parts.append(f"Moderate margin ({margin_util*100:.0f}%): -20% position")
 
         # === Strategy phase adjustment ===
+        # 支持三种模式: SP only, CC only, CC+SP simultaneous
         if strategy_phase == "SP":
             # SP phase: more conservative (cash required)
             multiplier *= 0.9
             reasoning_parts.append("SP phase: -10% (cash reserve)")
-        else:
+        elif strategy_phase == "CC":
             # CC phase: can be slightly more aggressive (stock collateral)
             reasoning_parts.append("CC phase: standard (stock collateral)")
+        else:  # CC+SP simultaneous mode (binbingod策略优化)
+            # 同时操作模式: 需要更谨慎，因为同时占用股票抵押和现金抵押
+            multiplier *= 0.85
+            reasoning_parts.append("CC+SP simultaneous: -15% (dual margin usage)")
 
         # === Assignment probability adjustment ===
         assign_prob = features['assignment_probability'].values[0]
