@@ -379,7 +379,7 @@ class AdaptiveDeltaStrategy:
         """
         Select put delta using adaptive combination of traditional and ML methods.
         """
-        if ml_result.confidence < 0.7:  # Low confidence ML results
+        if ml_result.confidence < 0.4:  # Lowered from 0.7 to allow ML to work during learning
             logger.warning(f"Low ML confidence ({ml_result.confidence:.2f}), using traditional delta")
             return traditional_delta
         
@@ -400,7 +400,7 @@ class AdaptiveDeltaStrategy:
         """
         Select call delta using adaptive combination of traditional and ML methods.
         """
-        if ml_result.confidence < 0.7:  # Low confidence ML results
+        if ml_result.confidence < 0.4:  # Lowered from 0.7 to allow ML to work during learning
             logger.warning(f"Low ML confidence ({ml_result.confidence:.2f}), using traditional delta")
             return traditional_delta
         

@@ -1030,7 +1030,7 @@ class BinbinGodStrategy(BaseStrategy):
                            f"(confidence: {ml_dte_result.confidence:.2f})")
                 
                 # Update DTE values based on ML recommendation
-                if ml_dte_result.confidence > 0.6:  # Only apply if confidence is reasonable
+                if ml_dte_result.confidence >= 0.4:  # Lowered from 0.6 to allow ML to work during learning
                     dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
                     T = dte_days / 365.0
                     expiry_date = entry + timedelta(days=dte_days)
@@ -1046,11 +1046,12 @@ class BinbinGodStrategy(BaseStrategy):
         
         # Apply ML delta if available and confident
         effective_delta = self.put_delta
-        if ml_result and ml_result.confidence >= 0.8:
+        # Lowered threshold from 0.8 to 0.5 to allow ML to work during learning phase
+        if ml_result and ml_result.confidence >= 0.5:
             effective_delta = ml_result.optimal_delta
-            logger.info(f"Using ML optimized put delta: {effective_delta:.3f}")
+            logger.info(f"Using ML optimized put delta: {effective_delta:.3f} (confidence: {ml_result.confidence:.2f})")
         elif ml_result:
-            logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.8, using fallback delta {self.put_delta}")
+            logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.5, using fallback delta {self.put_delta}")
         
         strike = self.select_strike_with_delta(underlying_price, iv, T, "P", effective_delta)
         self.delta_target = original_delta
@@ -1188,7 +1189,7 @@ class BinbinGodStrategy(BaseStrategy):
                            f"(confidence: {ml_dte_result.confidence:.2f})")
                 
                 # Update DTE values based on ML recommendation
-                if ml_dte_result.confidence > 0.6:  # Only apply if confidence is reasonable
+                if ml_dte_result.confidence >= 0.4:  # Lowered from 0.6 to allow ML to work during learning
                     dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
                     T = dte_days / 365.0
                     expiry_date = entry + timedelta(days=dte_days)
@@ -1227,15 +1228,16 @@ class BinbinGodStrategy(BaseStrategy):
                 )
                 
                 # Combine CC optimization with ML if available
-                if ml_result and ml_result.confidence >= 0.8:
+                # Lowered threshold from 0.8 to 0.5 to allow ML to work during learning phase
+                if ml_result and ml_result.confidence >= 0.5:
                     # Use ML result with CC protective adjustments
                     call_delta_target = max(self.cc_min_delta_cost, ml_result.optimal_delta)
-                    logger.info(f"Combined ML + CC optimization: delta = {call_delta_target:.3f}")
+                    logger.info(f"Combined ML + CC optimization: delta = {call_delta_target:.3f} (confidence: {ml_result.confidence:.2f})")
                 else:
                     # Traditional CC optimization
                     call_delta_target = self.cc_min_delta_cost
                     if ml_result:
-                        logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.8, using CC fallback delta")
+                        logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.5, using CC fallback delta")
                     
                 # Add minimum strike constraint: try to get strike close to cost basis
                 min_strike_desired = cost_basis * (1 - self.cc_min_strike_premium)
