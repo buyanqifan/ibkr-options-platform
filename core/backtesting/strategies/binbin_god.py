@@ -1780,16 +1780,6 @@ class BinbinGodStrategy(BaseStrategy):
             strike = OptionsPricer.strike_from_delta(
                 underlying_price, target_dte / 365.0, iv, target_delta, 'P'
             )
-            
-            # SAFETY CHECK: For puts, ensure strike is OTM (strike <= underlying_price)
-            # This prevents deep ITM puts which guarantee assignment
-            if strike > underlying_price:
-                logger.warning(
-                    f"Roll SP: Strike ${strike:.2f} is ITM (underlying ${underlying_price:.2f}). "
-                    f"Forcing OTM strike to avoid guaranteed assignment."
-                )
-                strike = underlying_price * 0.98  # At least 2% OTM
-            
             trade_type = "BINBIN_PUT"
 
         elif self.phase == "CC" and right == 'C':
@@ -1818,16 +1808,6 @@ class BinbinGodStrategy(BaseStrategy):
             strike = OptionsPricer.strike_from_delta(
                 underlying_price, target_dte / 365.0, iv, target_delta, 'C'
             )
-            
-            # SAFETY CHECK: For calls, ensure strike is OTM (strike >= underlying_price)
-            # This prevents deep ITM calls which guarantee assignment
-            if strike < underlying_price:
-                logger.warning(
-                    f"Roll CC: Strike ${strike:.2f} is ITM (underlying ${underlying_price:.2f}). "
-                    f"Forcing OTM strike to avoid guaranteed assignment."
-                )
-                strike = underlying_price * 1.02  # At least 2% OTM
-            
             trade_type = "BINBIN_CALL"
 
         else:
@@ -1849,9 +1829,6 @@ class BinbinGodStrategy(BaseStrategy):
             )
             return None
 
-        # Calculate actual delta at the selected strike
-        actual_delta = OptionsPricer.delta(underlying_price, strike, T, iv, right)
-
         # Generate signal
         # Determine strategy_phase based on trade_type and closed_trade_phase
         # For CC+SP mode, inherit the phase from closed trade
@@ -1871,7 +1848,7 @@ class BinbinGodStrategy(BaseStrategy):
             right=right,
             quantity=quantity,  # Same size
             premium=premium,
-            delta=actual_delta,  # Use actual calculated delta, not target_delta
+            delta=target_delta,
             iv=iv,
             margin_requirement=strike * 100 if right == 'P' else None,
             strategy_phase=signal_strategy_phase,
