@@ -166,6 +166,14 @@ class CoveredCallStrategy(BaseStrategy):
             quantity = abs(trade.get("quantity", 0))
             shares_sold = quantity * 100
             
+            # CRITICAL: Defensive check - if no shares held, this is an error
+            if self.stock_holding.shares <= 0:
+                self.logger.warning(
+                    f"Call assigned but no shares held! This indicates a bug. "
+                    f"shares={self.stock_holding.shares}"
+                )
+                return 0.0
+            
             # Ensure shares_sold is a multiple of 100 to maintain proper lot sizes
             # But also ensure we don't sell more shares than we hold
             actual_shares_sold = min(shares_sold, self.stock_holding.shares)

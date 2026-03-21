@@ -991,33 +991,6 @@ class BinbinGodStrategy(BaseStrategy):
                 logger.warning(f"ML optimization failed: {e}")
                 ml_result = None
         
-        # ML DTE optimization for Covered Calls
-        ml_dte_result = None
-        if self.ml_dte_optimization and self.ml_integration:
-            try:
-                ml_dte_result = self.ml_integration.optimize_call_dte(
-                    symbol=symbol,
-                    current_price=underlying_price,
-                    cost_basis=cost_basis,
-                    bars=[],  # Will be populated by real-time interface
-                    options_data=[],  # Will be populated by real-time interface
-                    iv=iv,
-                    strategy_phase="CC"
-                )
-                logger.info(f"ML optimized DTE for CC: {ml_dte_result.optimal_dte_min}-{ml_dte_result.optimal_dte_max} days "
-                           f"(confidence: {ml_dte_result.confidence:.2f})")
-                
-                # Update DTE values based on ML recommendation
-                if ml_dte_result.confidence > 0.6:  # Only apply if confidence is reasonable
-                    dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
-                    T = dte_days / 365.0
-                    expiry_date = entry + timedelta(days=dte_days)
-                    expiry_str = expiry_date.strftime("%Y%m%d")
-                    logger.info(f"Updated DTE to {dte_days} days based on ML recommendation")
-            except Exception as e:
-                logger.warning(f"ML DTE optimization failed: {e}")
-                ml_dte_result = None
-        
         if self.cc_optimization_enabled and cost_basis > 0:
             # Check if current price is below cost basis (loss position)
             price_cost_ratio = underlying_price / cost_basis
@@ -1601,6 +1574,11 @@ class BinbinGodStrategy(BaseStrategy):
         strike = position.get("strike", 0)
         symbol = position.get("symbol", "")  # Get symbol from position
         
+        # Defensive check: ensure symbol is present
+        if not symbol:
+            logger.warning(f"Assignment position missing symbol field: {position}")
+            return
+        
         if right == "P":
             # Put assignment: we bought shares
             shares_acquired = quantity * 100
@@ -1674,6 +1652,11 @@ class BinbinGodStrategy(BaseStrategy):
             quantity = abs(trade.get("quantity", 0))
             strike = trade.get("strike", 0)
             symbol = trade.get("symbol", "")  # Get symbol from trade
+            
+            # Defensive check: ensure symbol is present
+            if not symbol:
+                logger.warning(f"Assignment trade missing symbol field: {trade}")
+                return 0.0
             
             if right == "P":
                 # Put assignment: we bought shares
