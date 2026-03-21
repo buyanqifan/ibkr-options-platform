@@ -2101,6 +2101,15 @@ class BinbinGodStrategy(BaseStrategy):
             if abs(d - target_delta) < 0.005:
                 break
 
+        # SAFETY CHECK: For calls, ensure strike is at least OTM (strike >= underlying_price)
+        # This prevents selecting deep ITM calls which would guarantee assignment
+        if right == "C" and mid < underlying_price:
+            logger.warning(
+                f"SAFETY: Selected strike ${mid:.2f} is ITM (underlying ${underlying_price:.2f}). "
+                f"Forcing OTM strike to avoid guaranteed assignment."
+            )
+            mid = underlying_price * 1.02  # At least 2% OTM
+
         # Round to nearest 0.5 or 1.0
         if underlying_price > 100:
             return round(mid)
