@@ -571,9 +571,11 @@ class BinbinGodStrategy(BaseStrategy):
             # Get ML recommendation
             max_position = self.max_positions
             if strategy_phase == "CC":
-                # For CC, limit by shares held
+                # For CC only, limit by shares held
                 shares = self.stock_holding.get_shares(symbol)
                 max_position = min(max_position, shares // 100) if shares > 0 else 0
+            # For SP or CC+SP mode, max_position is already self.max_positions
+            # CC+SP模式开的是SP，不需要shares限制
 
             num_contracts, recommendation = self.ml_position_optimizer.get_position_size(
                 symbol=symbol,
@@ -944,9 +946,10 @@ class BinbinGodStrategy(BaseStrategy):
             f"(price: ${actual_underlying_price:.2f}, IV: {actual_iv:.3f})"
         )
 
-        # 使用_generate_backtest_put_signal生成信号
+        # 使用_generate_backtest_put_signal生成信号，传入"CC+SP"模式
         sp_signals = self._generate_backtest_put_signal(
-            best_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
+            best_symbol, current_date, actual_underlying_price, actual_iv, position_mgr,
+            strategy_phase="CC+SP"  # 标记为同时操作模式
         )
 
         if sp_signals:
@@ -964,8 +967,18 @@ class BinbinGodStrategy(BaseStrategy):
         underlying_price: float,
         iv: float,
         position_mgr=None,
+        strategy_phase: str = "SP",  # 支持SP或CC+SP模式
     ) -> list[Signal]:
-        """Generate Sell Put signal for backtesting."""
+        """Generate Sell Put signal for backtesting.
+        
+        Args:
+            symbol: Stock symbol
+            current_date: Current date string
+            underlying_price: Current stock price
+            iv: Implied volatility
+            position_mgr: Position manager
+            strategy_phase: "SP" for pure SP mode, "CC+SP" for simultaneous mode
+        """
         from datetime import timedelta
         from core.backtesting.pricing import OptionsPricer
         
@@ -1064,7 +1077,7 @@ class BinbinGodStrategy(BaseStrategy):
                 dte=dte_days,
                 delta=delta,
                 position_mgr=position_mgr,
-                strategy_phase="SP",
+                strategy_phase=strategy_phase,  # 使用传入的strategy_phase (SP或CC+SP)
             )
         else:
             # Traditional position sizing using position manager

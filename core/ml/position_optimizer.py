@@ -113,7 +113,7 @@ class MLPositionOptimizer:
             'portfolio_concentration',  # Herfindahl index of positions
 
             # Strategy phase
-            'strategy_phase',  # 0=SP, 1=CC
+            'strategy_phase',  # 0=SP, 1=CC, 2=CC+SP (simultaneous mode)
 
             # Stock/Option features
             'strike_distance_pct',  # OTM percentage
@@ -233,9 +233,10 @@ class MLPositionOptimizer:
         dte = option_info.get('dte', 30)
 
         # Strike distance (OTM percentage)
-        if strategy_phase == "SP":  # Put: strike < price
+        # 对于CC+SP模式，我们是在开SP（卖Put），所以使用SP的逻辑
+        if strategy_phase == "SP" or strategy_phase == "CC+SP":  # Put: strike < price
             features['strike_distance_pct'] = (underlying_price - strike) / underlying_price * 100
-        else:  # Call: strike > price
+        else:  # Call: strike > price (CC only)
             features['strike_distance_pct'] = (strike - underlying_price) / underlying_price * 100
 
         features['dte'] = dte
@@ -243,7 +244,8 @@ class MLPositionOptimizer:
         features['premium'] = premium
 
         # Premium yield: premium / margin required
-        if strategy_phase == "SP":
+        # 对于CC+SP模式，开SP需要cash-secured margin
+        if strategy_phase == "SP" or strategy_phase == "CC+SP":
             margin_required = strike * 100  # Cash-secured put
         else:
             margin_required = 0  # Covered call (stock is collateral)
@@ -269,7 +271,8 @@ class MLPositionOptimizer:
         # Break-even distance
         # For SP: break-even = strike - premium
         # For CC: break-even = cost_basis (if we have it)
-        if strategy_phase == "SP":
+        # 对于CC+SP模式，我们是在开SP，使用SP的逻辑
+        if strategy_phase == "SP" or strategy_phase == "CC+SP":
             breakeven = strike - premium
             features['break_even_distance_pct'] = (underlying_price - breakeven) / underlying_price * 100
         else:
@@ -571,7 +574,8 @@ class MLPositionOptimizer:
         premium = features['premium'].values[0]
 
         # Max loss for put assignment = strike * 100 - premium * 100
-        if strategy_phase == "SP":
+        # 对于CC+SP模式，我们是在开SP，使用SP的逻辑
+        if strategy_phase == "SP" or strategy_phase == "CC+SP":
             max_loss = (strike - premium) * 100 * num_contracts
         else:
             # For CC, max loss is opportunity cost (stock called away below potential highs)
@@ -670,7 +674,18 @@ class MLPositionOptimizer:
                 market_data = trade.get('market_data_at_entry', {})
                 portfolio_state = trade.get('portfolio_state_at_entry', {})
                 option_info = trade.get('option_info', {})
-                strategy_phase = "SP" if trade.get('trade_type', '').endswith('PUT') else "CC"
+
+                # Determine strategy phase
+                # 如果历史数据中有标记是在CC阶段开的SP，使用CC+SP模式
+                is_put = trade.get('trade_type', '').endswith('PUT')
+                is_cc_phase_sp = trade.get('cc_phase_sp', False)  # 标记是否在CC阶段开的SP
+
+                if is_put and is_cc_phase_sp:
+                    strategy_phase = "CC+SP"
+                elif is_put:
+                    strategy_phase = "SP"
+                else:
+                    strategy_phase = "CC"
 
                 features = self.build_features(market_data, portfolio_state, strategy_phase, option_info)
 
