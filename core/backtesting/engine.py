@@ -360,16 +360,18 @@ class BacktestEngine:
                                 logger.debug(f"Released stock capital: {pid}")
                                 break
                 
-                # Update trade record with capital information at exit
-                trade.capital_at_exit = position_mgr.net_capital  # Record total capital after closing
-                
                 # Notify strategy of closed trade (for stateful strategies like Wheel)
+                # IMPORTANT: Do this BEFORE recording capital_at_exit so additional_pnl is included
                 if hasattr(strategy, 'on_trade_closed'):
                     additional_pnl = strategy.on_trade_closed(trade.to_dict())
                     # For Wheel/CoveredCall/BinbinGod strategies: add stock P&L from call assignment
                     if additional_pnl and additional_pnl != 0:
                         position_mgr.cumulative_pnl += additional_pnl
                         # net_capital is a property (initial_capital + cumulative_pnl), auto-updates
+                
+                # Update trade record with capital information at exit
+                # AFTER additional_pnl is added to ensure correct capital tracking
+                trade.capital_at_exit = position_mgr.net_capital  # Record total capital after closing
 
                 # Update ML performance tracking for learning
                 # This enables ML optimizers to learn from actual trade outcomes
