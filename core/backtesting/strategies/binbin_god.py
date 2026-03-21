@@ -1739,10 +1739,25 @@ class BinbinGodStrategy(BaseStrategy):
         expiry_str = expiry_date.strftime('%Y%m%d')
 
         # Determine strike based on phase and right
+        # Use ML Delta Optimizer if available for optimal delta selection
         if self.phase == "SP" and right == "P":
             # Continue selling puts
-            # Note: strike_from_delta expects negative delta for puts
-            target_delta = -abs(self.put_delta)
+            if self.ml_delta_optimization and self.ml_integration:
+                try:
+                    # Get ML-optimized delta
+                    ml_result = self.ml_integration.get_optimal_delta(
+                        symbol=symbol,
+                        current_date=current_date,
+                        underlying_price=underlying_price,
+                        iv=iv,
+                        strategy_phase="SP"
+                    )
+                    target_delta = -abs(ml_result.optimal_delta)  # Put delta is negative
+                except Exception as e:
+                    self.logger.warning(f"ML delta optimization failed in roll: {e}")
+                    target_delta = -abs(self.put_delta)
+            else:
+                target_delta = -abs(self.put_delta)
             strike = OptionsPricer.strike_from_delta(
                 underlying_price, target_dte / 365.0, iv, target_delta, 'P'
             )
@@ -1750,7 +1765,22 @@ class BinbinGodStrategy(BaseStrategy):
 
         elif self.phase == "CC" and right == 'C':
             # Continue selling calls
-            target_delta = self.call_delta
+            if self.ml_delta_optimization and self.ml_integration:
+                try:
+                    # Get ML-optimized delta
+                    ml_result = self.ml_integration.get_optimal_delta(
+                        symbol=symbol,
+                        current_date=current_date,
+                        underlying_price=underlying_price,
+                        iv=iv,
+                        strategy_phase="CC"
+                    )
+                    target_delta = abs(ml_result.optimal_delta)  # Call delta is positive
+                except Exception as e:
+                    self.logger.warning(f"ML delta optimization failed in roll: {e}")
+                    target_delta = self.call_delta
+            else:
+                target_delta = self.call_delta
             strike = OptionsPricer.strike_from_delta(
                 underlying_price, target_dte / 365.0, iv, target_delta, 'C'
             )
