@@ -1829,6 +1829,14 @@ class BinbinGodStrategy(BaseStrategy):
             return None
 
         # Generate signal
+        # Determine strategy_phase based on trade_type
+        if trade_type == "BINBIN_PUT":
+            signal_strategy_phase = "SP"
+        elif trade_type == "BINBIN_CALL":
+            signal_strategy_phase = "CC"
+        else:
+            signal_strategy_phase = self.phase  # Fallback to current phase
+        
         signal = Signal(
             symbol=symbol,
             trade_type=trade_type,
@@ -1840,6 +1848,7 @@ class BinbinGodStrategy(BaseStrategy):
             delta=target_delta,
             iv=iv,
             margin_requirement=strike * 100 if right == 'P' else None,
+            strategy_phase=signal_strategy_phase,
         )
 
         logger.info(
