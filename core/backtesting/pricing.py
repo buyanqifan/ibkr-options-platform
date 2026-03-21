@@ -141,12 +141,17 @@ class OptionsPricer:
         if right == 'P':
             # Put delta is negative
             # For OTM put, strike < S
+            # norm.ppf(|delta|) gives us the z-score
+            # For OTM put (|delta| < 0.5), we need strike below S
             target_abs_delta = abs(target_delta)
-            K = S * math.exp(-norm.ppf(target_abs_delta) * sigma * math.sqrt(T))
+            # Use abs to ensure we get strike < S
+            K = S * math.exp(-abs(norm.ppf(target_abs_delta)) * sigma * math.sqrt(T))
         else:
             # Call delta is positive
             # For OTM call, strike > S
-            K = S * math.exp(norm.ppf(target_delta) * sigma * math.sqrt(T))
+            # norm.ppf(delta) is negative when delta < 0.5
+            # We need to use |norm.ppf(delta)| to get strike > S
+            K = S * math.exp(abs(norm.ppf(target_delta)) * sigma * math.sqrt(T))
 
         # Newton-Raphson iteration
         for _ in range(max_iter):
