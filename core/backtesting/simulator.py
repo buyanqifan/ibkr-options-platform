@@ -154,11 +154,7 @@ class TradeSimulator:
         # For short positions, profit = entry_premium - current_premium
         if pos.quantity < 0:
             pnl_per_share = pos.entry_price - current_opt_price
-            # pnl_pct should be relative to risk capital (strike), not premium
-            # This gives a more meaningful percentage for Wheel strategy
-            # For short options, risk is roughly strike price per share
-            risk_per_share = pos.strike if pos.right == "P" else pos.strike
-            pnl_pct = (pnl_per_share / risk_per_share * 100) if risk_per_share > 0 else 0
+            pnl_pct = (pnl_per_share / pos.entry_price * 100) if pos.entry_price > 0 else 0
         else:
             pnl_per_share = current_opt_price - pos.entry_price
             pnl_pct = (pnl_per_share / pos.entry_price * 100) if pos.entry_price > 0 else 0
@@ -274,9 +270,7 @@ class TradeSimulator:
             # For short positions, profit = entry_premium - current_premium
             if pos.quantity < 0:
                 pnl_per_share = pos.entry_price - current_opt_price
-                # pnl_pct should be relative to risk capital (strike), not premium
-                risk_per_share = pos.strike if pos.right == "P" else pos.strike
-                pnl_pct = (pnl_per_share / risk_per_share * 100) if risk_per_share > 0 else 0
+                pnl_pct = (pnl_per_share / pos.entry_price * 100) if pos.entry_price > 0 else 0
             else:
                 pnl_per_share = current_opt_price - pos.entry_price
                 pnl_pct = (pnl_per_share / pos.entry_price * 100) if pos.entry_price > 0 else 0
