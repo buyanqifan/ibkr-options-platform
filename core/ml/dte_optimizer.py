@@ -735,39 +735,58 @@ class DTEOptimizerML:
         
         return premium
 
-    def _estimate_assignment_probability(self, 
+    def _estimate_assignment_probability(self,
                                          dte: int,
                                          context: DTEMarketContext,
                                          right: str,
                                          iv: float) -> float:
-        """Estimate probability of option assignment."""
-        
-        # Calculate a typical delta for this strategy
-        if right == "P":
-            delta = 0.30  # Typical put delta
-        else:
-            delta = 0.30  # Typical call delta
-            
-        # Base assignment probability based on delta
-        base_prob = delta
-        
-        # Adjust for market regime
-        regime_adjustment = {
-            'bull': 1.2 if right == "C" else 0.8,  # Higher call assignment in bull
-            'bear': 1.2 if right == "P" else 0.8,  # Higher put assignment in bear
-            'neutral': 1.0,
-            'high_vol': 0.9  # Slightly lower assignment in high volatility
-        }
-        
-        # Adjust for strategy phase
-        phase_adjustment = 1.0
-        if (context.strategy_phase == "SP" or context.strategy_phase == "CC+SP") and right == "P":
-            phase_adjustment = 1.0  # Normal assignment for Sell Put (包括CC+SP模式)
-        elif context.strategy_phase == "CC" and right == "C":
-            phase_adjustment = 1.1  # Slightly higher assignment risk for Covered Call
+        """Estimate probability of option assignment using optionlab.
 
-        adjusted_prob = base_prob * regime_adjustment.get(context.market_regime, 1.0) * phase_adjustment
-        return min(1.0, adjusted_prob)
+        Uses Black-Scholes ITM probability with market regime adjustments.
+        """
+        if dte <= 0 or iv <= 0:
+            return 0.0
+
+        try:
+            # Calculate strike from typical delta
+            delta = 0.30  # Typical delta for strategy
+            if right == "P":
+                strike = context.current_price * (1 - delta)  # OTM put
+            else:
+                strike = context.current_price * (1 + delta)  # OTM call
+
+            T = dte / 365.0
+
+            # Use optionlab's ITM probability
+            itm_prob = OptionsPricer.itm_probability(
+                S=context.current_price,
+                K=strike,
+                T=T,
+                sigma=iv,
+                right=right,
+            )
+
+            # Adjust for market regime (empirical adjustments)
+            regime_adjustment = {
+                'bull': 1.2 if right == "C" else 0.8,  # Higher call assignment in bull
+                'bear': 1.2 if right == "P" else 0.8,  # Higher put assignment in bear
+                'neutral': 1.0,
+                'high_vol': 0.9  # Slightly lower assignment in high volatility
+            }
+
+            # Adjust for strategy phase
+            phase_adjustment = 1.0
+            if (context.strategy_phase == "SP" or context.strategy_phase == "CC+SP") and right == "P":
+                phase_adjustment = 1.0  # Normal assignment for Sell Put (包括CC+SP模式)
+            elif context.strategy_phase == "CC" and right == "C":
+                phase_adjustment = 1.1  # Slightly higher assignment risk for Covered Call
+
+            adjusted_prob = itm_prob * regime_adjustment.get(context.market_regime, 1.0) * phase_adjustment
+            return min(1.0, adjusted_prob)
+        except Exception as e:
+            logger.debug(f"ITM probability calculation failed: {e}")
+            # Fallback to delta approximation
+            return min(1.0, 0.30)
 
     def _calculate_risk_score(self, 
                               dte: int,

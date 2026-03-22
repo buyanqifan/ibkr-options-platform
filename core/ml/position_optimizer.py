@@ -23,6 +23,9 @@ import logging
 import pickle
 from pathlib import Path
 
+from core.backtesting.payoff import PayoffCalculator
+from core.backtesting.pricing import OptionsPricer
+
 logger = logging.getLogger(__name__)
 
 
@@ -262,18 +265,36 @@ class MLPositionOptimizer:
         features['vs_ma50'] = momentum.get('vs_ma50', 0)
 
         # === Risk Features ===
-        # Assignment probability (approximation based on delta and DTE)
+        # Assignment probability using optionlab ITM probability
         # Higher delta and lower DTE = higher assignment probability
         features['assignment_probability'] = self._estimate_assignment_probability(
-            abs(delta), dte, features['strike_distance_pct']
+            underlying_price=underlying_price,
+            strike=strike,
+            dte=dte,
+            iv=iv,
+            right='P' if strategy_phase in ("SP", "CC+SP") else 'C',
         )
 
-        # Break-even distance
-        # For SP: break-even = strike - premium
-        # For CC: break-even = cost_basis (if we have it)
+        # Break-even distance using PayoffCalculator
         # 对于CC+SP模式，我们是在开SP，使用SP的逻辑
         if strategy_phase == "SP" or strategy_phase == "CC+SP":
-            breakeven = strike - premium
+            # Use PayoffCalculator for accurate break-even
+            try:
+                payoff_result = PayoffCalculator.calculate_single_option_payoff(
+                    option_type='put',
+                    strike=strike,
+                    premium=premium,
+                    action='sell',
+                    stock_price=underlying_price,
+                    volatility=iv,
+                    days_to_expiry=dte,
+                )
+                if payoff_result.break_even_points:
+                    breakeven = payoff_result.break_even_points[0]
+                else:
+                    breakeven = strike - premium  # Fallback
+            except Exception:
+                breakeven = strike - premium  # Fallback
             features['break_even_distance_pct'] = (underlying_price - breakeven) / underlying_price * 100
         else:
             cost_basis = portfolio_state.get('cost_basis', underlying_price)
@@ -285,36 +306,49 @@ class MLPositionOptimizer:
 
     def _estimate_assignment_probability(
         self,
-        delta: float,
+        underlying_price: float,
+        strike: float,
         dte: int,
-        strike_distance_pct: float,
+        iv: float,
+        right: str = 'P',
     ) -> float:
-        """Estimate probability of assignment.
+        """Estimate probability of assignment using optionlab ITM probability.
+
+        Uses Black-Scholes model to calculate the probability that the option
+        will be in-the-money at expiry, which equals the probability of assignment
+        for short positions.
 
         Args:
-            delta: Option delta
+            underlying_price: Current underlying price
+            strike: Strike price
             dte: Days to expiry
-            strike_distance_pct: Distance from ATM (%)
+            iv: Implied volatility (decimal, e.g., 0.25 for 25%)
+            right: Option type ('P' for put, 'C' for call)
 
         Returns:
-            Estimated assignment probability (0-1)
+            Probability of assignment (0-1)
         """
-        # Base probability from delta (delta ≈ probability of ITM at expiry)
-        base_prob = delta
+        if dte <= 0 or iv <= 0:
+            return 0.0
 
-        # Adjust for DTE (more time = more uncertainty)
-        dte_factor = 1 + (dte - 30) / 100  # Normalize around 30 DTE
+        T = dte / 365.0
 
-        # Adjust for strike distance
-        if strike_distance_pct > 5:  # > 5% OTM
-            distance_factor = 0.7
-        elif strike_distance_pct > 2:
-            distance_factor = 0.9
-        else:
-            distance_factor = 1.0
-
-        prob = base_prob * dte_factor * distance_factor
-        return max(0, min(1, prob))
+        try:
+            # Use optionlab's ITM probability calculation
+            itm_prob = OptionsPricer.itm_probability(
+                S=underlying_price,
+                K=strike,
+                T=T,
+                sigma=iv,
+                right=right,
+            )
+            return float(itm_prob)
+        except Exception as e:
+            logger.debug(f"Failed to calculate ITM probability: {e}")
+            # Fallback to simple delta approximation
+            # For OTM options, delta roughly equals ITM probability
+            delta_approx = abs(underlying_price - strike) / underlying_price
+            return max(0, min(1, delta_approx))
 
     def predict_position_size(
         self,
@@ -511,27 +545,110 @@ class MLPositionOptimizer:
         )
 
     def _calculate_expected_return(self, features: pd.DataFrame, strategy_phase: str) -> float:
-        """Calculate expected return per contract."""
+        """Calculate expected return per contract using optionlab.
+
+        Uses PayoffCalculator's expected_profit_if_profitable and expected_loss_if_unprofitable
+        for more accurate expected return calculation.
+        """
         premium = features['premium'].values[0]
-        premium_yield = features['premium_yield'].values[0]
         assignment_prob = features['assignment_probability'].values[0]
+        strike = features.get('strike', 100).values[0] if 'strike' in features.columns else 100
+        dte = features['dte'].values[0]
+        iv = features.get('historical_volatility', 100).values[0] / 100  # Convert to decimal
 
-        # Expected return = premium * (1 - assignment_prob) + stock_pnl * assignment_prob
-        # For simplicity, assume stock P&L averages to 0 over many cycles
-        expected_return = premium * 100 * (1 - assignment_prob * 0.5)  # Per contract
+        # Get underlying price from strike_distance_pct
+        strike_dist = features.get('strike_distance_pct', 5).values[0]
+        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+            underlying_price = strike / (1 - strike_dist / 100)
+        else:
+            underlying_price = strike / (1 + strike_dist / 100)
 
-        return expected_return
+        try:
+            # Use PayoffCalculator for accurate expected return
+            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+                payoff_result = PayoffCalculator.calculate_single_option_payoff(
+                    option_type='put',
+                    strike=strike,
+                    premium=premium,
+                    action='sell',
+                    stock_price=underlying_price,
+                    volatility=iv,
+                    days_to_expiry=int(dte),
+                )
+            else:  # CC
+                payoff_result = PayoffCalculator.calculate_single_option_payoff(
+                    option_type='call',
+                    strike=strike,
+                    premium=premium,
+                    action='sell',
+                    stock_price=underlying_price,
+                    volatility=iv,
+                    days_to_expiry=int(dte),
+                )
+
+            # Expected return = prob_profit * expected_profit + (1 - prob_profit) * expected_loss
+            prob_profit = payoff_result.profit_probability
+            expected_profit = payoff_result.expected_profit
+            expected_loss = payoff_result.expected_loss
+
+            # Weighted expected return
+            expected_return = prob_profit * expected_profit + (1 - prob_profit) * expected_loss
+            return expected_return
+        except Exception as e:
+            logger.debug(f"PayoffCalculator failed for expected return: {e}")
+            # Fallback to simple calculation
+            expected_return = premium * 100 * (1 - assignment_prob * 0.5)
+            return expected_return
 
     def _calculate_expected_risk(self, features: pd.DataFrame, strategy_phase: str) -> float:
-        """Calculate expected maximum drawdown per contract."""
+        """Calculate expected maximum drawdown per contract using optionlab.
+
+        Uses PayoffCalculator's maximum loss for accurate risk calculation.
+        """
         strike = features.get('strike', 100).values[0] if 'strike' in features.columns else 100
-        iv = features['historical_volatility'].values[0] / 100  # Convert to decimal
+        premium = features['premium'].values[0]
+        dte = features['dte'].values[0]
+        iv = features.get('historical_volatility', 100).values[0] / 100  # Convert to decimal
 
-        # Expected max move: 2 standard deviations
-        max_move = 2 * iv
-        expected_risk = strike * 100 * max_move  # Per contract
+        # Get underlying price from strike_distance_pct
+        strike_dist = features.get('strike_distance_pct', 5).values[0]
+        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+            underlying_price = strike / (1 - strike_dist / 100)
+        else:
+            underlying_price = strike / (1 + strike_dist / 100)
 
-        return expected_risk
+        try:
+            # Use PayoffCalculator for accurate max loss
+            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+                payoff_result = PayoffCalculator.calculate_single_option_payoff(
+                    option_type='put',
+                    strike=strike,
+                    premium=premium,
+                    action='sell',
+                    stock_price=underlying_price,
+                    volatility=iv,
+                    days_to_expiry=int(dte),
+                )
+            else:  # CC
+                payoff_result = PayoffCalculator.calculate_single_option_payoff(
+                    option_type='call',
+                    strike=strike,
+                    premium=premium,
+                    action='sell',
+                    stock_price=underlying_price,
+                    volatility=iv,
+                    days_to_expiry=int(dte),
+                )
+
+            # Max loss is the absolute value of minimum_return (which is negative for losses)
+            max_loss = abs(payoff_result.max_loss)
+            return max_loss
+        except Exception as e:
+            logger.debug(f"PayoffCalculator failed for expected risk: {e}")
+            # Fallback to simple calculation: 2 standard deviations
+            max_move = 2 * iv
+            expected_risk = strike * 100 * max_move
+            return expected_risk
 
     def _calculate_kelly_fraction(self, features: pd.DataFrame, strategy_phase: str) -> float:
         """Calculate Kelly optimal fraction.
@@ -569,19 +686,62 @@ class MLPositionOptimizer:
         return var_95
 
     def _calculate_max_loss(self, features: pd.DataFrame, strategy_phase: str, num_contracts: int) -> float:
-        """Calculate worst-case loss scenario."""
+        """Calculate worst-case loss scenario using PayoffCalculator.
+        
+        Uses optionlab for accurate max loss calculation. Falls back to
+        simple calculation if required parameters are missing.
+        """
         strike = features.get('strike', 100).values[0] if 'strike' in features.columns else 100
         premium = features['premium'].values[0]
-
-        # Max loss for put assignment = strike * 100 - premium * 100
-        # 对于CC+SP模式，我们是在开SP，使用SP的逻辑
+        dte = features['dte'].values[0] if 'dte' in features.columns else 30
+        
+        # Get volatility (historical_volatility is in percentage, convert to decimal)
+        vol = features['historical_volatility'].values[0] / 100 if 'historical_volatility' in features.columns else 0.25
+        
+        # Get underlying price from strike_distance_pct
+        # strike_distance_pct = (underlying - strike) / underlying * 100 for put
+        strike_dist = features['strike_distance_pct'].values[0] if 'strike_distance_pct' in features.columns else 5
         if strategy_phase == "SP" or strategy_phase == "CC+SP":
-            max_loss = (strike - premium) * 100 * num_contracts
+            underlying_price = strike / (1 - strike_dist / 100)
         else:
-            # For CC, max loss is opportunity cost (stock called away below potential highs)
-            max_loss = premium * 100 * num_contracts  # Conservative estimate
+            underlying_price = strike / (1 + strike_dist / 100)
 
-        return max_loss
+        # Try using PayoffCalculator for accurate max loss
+        try:
+            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+                payoff_result = PayoffCalculator.calculate_single_option_payoff(
+                    option_type='put',
+                    strike=strike,
+                    premium=premium,
+                    action='sell',
+                    stock_price=underlying_price,
+                    volatility=vol,
+                    days_to_expiry=int(dte),
+                    n=num_contracts,
+                )
+                # max_loss from PayoffCalculator is already positive
+                return abs(payoff_result.max_loss)
+            else:
+                # For CC, max loss is opportunity cost (stock called away below potential highs)
+                payoff_result = PayoffCalculator.calculate_single_option_payoff(
+                    option_type='call',
+                    strike=strike,
+                    premium=premium,
+                    action='sell',
+                    stock_price=underlying_price,
+                    volatility=vol,
+                    days_to_expiry=int(dte),
+                    n=num_contracts,
+                )
+                # For CC, the max_loss from PayoffCalculator represents potential upside loss
+                return abs(payoff_result.max_loss)
+        except Exception as e:
+            logger.debug(f"PayoffCalculator failed, using fallback: {e}")
+            # Fallback to simple calculation
+            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+                return (strike - premium) * 100 * num_contracts
+            else:
+                return premium * 100 * num_contracts
 
     def _generate_reasoning(self, features: pd.DataFrame, multiplier: float, strategy_phase: str) -> str:
         """Generate human-readable reasoning for the recommendation."""

@@ -23,7 +23,6 @@ class StockHolding:
     shares: int = 0
     cost_basis: float = 0.0  # average cost per share
     total_premium_collected: float = 0.0  # cumulative premium from both phases
-    symbol: str = ""  # Symbol of the stock being held
 
 @dataclass
 class PerformanceMetrics:
@@ -59,7 +58,6 @@ class WheelStrategy(BaseStrategy):
 
     def __init__(self, params: dict):
         super().__init__(params)
-        self.symbol = params.get("symbol", "")  # Stock symbol for this strategy
         self.phase = "SP"  # Start with Sell Put phase
         self.stock_holding = StockHolding()
         self.put_delta = params.get("put_delta", 0.30)
@@ -247,7 +245,6 @@ class WheelStrategy(BaseStrategy):
                 total_stock_cost = self.stock_holding.shares * self.stock_holding.cost_basis
                 total_stock_cost += shares_acquired * strike
                 self.stock_holding.shares += shares_acquired
-                self.stock_holding.symbol = trade.get("symbol", self.symbol)  # Track which stock we're holding
                 if self.stock_holding.shares > 0:
                     self.stock_holding.cost_basis = total_stock_cost / self.stock_holding.shares
                 
@@ -302,19 +299,8 @@ class WheelStrategy(BaseStrategy):
                 stock_proceeds = strike * shares_sold
                 stock_pnl = stock_proceeds - stock_cost_basis  # Realized stock P&L
                             
-                # Log the complete P&L breakdown for transparency
-                # Note: stock_pnl is for logging only; engine handles cumulative_pnl
-                option_pnl = trade.get("pnl", 0)
-                total_trade_pnl = option_pnl + stock_pnl
-                self.logger.info(
-                    f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
-                    f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
-                    f"sold at ${strike:.2f}, {shares_sold} shares)"
-                )
-                
-                # IMPORTANT: Return 0 because engine already adds stock_proceeds to cumulative_pnl
-                # The cash flow is handled in engine.py, not here
-                additional_stock_pnl = 0
+                # IMPORTANT: Record stock P&L to be added to cumulative_pnl
+                additional_stock_pnl = stock_pnl
                             
                 # Reduce stock holding
                 self.stock_holding.shares = max(0, self.stock_holding.shares - shares_sold)
@@ -322,6 +308,15 @@ class WheelStrategy(BaseStrategy):
                 # Add premium from call sale (already included in option P&L)
                 premium_from_call = trade["entry_price"] * shares_sold
                 self.stock_holding.total_premium_collected += premium_from_call
+                
+                # Log the complete P&L breakdown for transparency
+                option_pnl = trade.get("pnl", 0)
+                total_trade_pnl = option_pnl + stock_pnl
+                self.logger.info(
+                    f"Call assigned: Option P&L=${option_pnl:+.2f}, Stock P&L=${stock_pnl:+.2f}, "
+                    f"Total=${total_trade_pnl:+.2f} (bought at ${self.stock_holding.cost_basis:.2f}, "
+                    f"sold at ${strike:.2f}, {shares_sold} shares)"
+                )
                 
                 # If no more shares, switch back to Sell Put phase
                 if self.stock_holding.shares == 0:

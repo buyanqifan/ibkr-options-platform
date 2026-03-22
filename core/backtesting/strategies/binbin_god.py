@@ -2009,9 +2009,8 @@ class BinbinGodStrategy(BaseStrategy):
                     f"sold at ${strike:.2f}, {shares_sold} shares of {symbol})"
                 )
                 
-                # IMPORTANT: Return 0 because engine already adds stock_proceeds to cumulative_pnl
-                # The cash flow is handled in engine.py, not here
-                additional_stock_pnl = 0
+                # IMPORTANT: Return stock P&L to be added to cumulative_pnl by the engine
+                additional_stock_pnl = stock_pnl
                
                 # Remove shares using new method
                 self.stock_holding.remove_shares(symbol, shares_sold)

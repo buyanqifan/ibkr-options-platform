@@ -93,7 +93,6 @@ class BacktestStorage:
                     symbol=trade.get("symbol", params.get("symbol", "")),
                     strategy_name=params.get("strategy", "unknown"),
                     trade_type=trade.get("trade_type", ""),
-                    strategy_phase=trade.get("strategy_phase", ""),  # SP, CC, or CC+SP
                     entry_date=trade.get("entry_date", ""),
                     exit_date=trade.get("exit_date", ""),
                     expiry=trade.get("expiry", ""),
@@ -174,7 +173,6 @@ class BacktestStorage:
                         "id": t.id,
                         "symbol": t.symbol,
                         "trade_type": t.trade_type,
-                        "strategy_phase": t.strategy_phase,  # SP, CC, or CC+SP
                         "entry_date": t.entry_date,
                         "exit_date": t.exit_date,
                         "expiry": t.expiry,

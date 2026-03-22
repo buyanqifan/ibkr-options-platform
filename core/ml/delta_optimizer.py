@@ -679,27 +679,49 @@ class DeltaOptimizerML:
         
         return premium
     
-    def _estimate_assignment_probability(self, 
+    def _estimate_assignment_probability(self,
                                        delta: float,
                                        context: MarketContext,
                                        right: str,
                                        iv: float,
                                        time_to_expiry: float) -> float:
-        """Estimate probability of option assignment."""
-        
-        # Simplified model: assignment probability increases with delta
-        base_prob = delta
-        
-        # Adjust for market regime
-        regime_adjustment = {
-            'bull': 1.2 if right == "C" else 0.8,  # Higher call assignment in bull
-            'bear': 1.2 if right == "P" else 0.8,  # Higher put assignment in bear
-            'neutral': 1.0,
-            'high_vol': 0.7  # Lower assignment in high volatility
-        }
-        
-        adjusted_prob = base_prob * regime_adjustment.get(context.market_regime, 1.0)
-        return min(1.0, adjusted_prob)
+        """Estimate probability of option assignment using optionlab.
+
+        Uses Black-Scholes ITM probability with market regime adjustments.
+        """
+        if time_to_expiry <= 0 or iv <= 0:
+            return 0.0
+
+        try:
+            # Calculate strike from delta for ITM probability calculation
+            if right == "P":
+                strike = context.current_price * (1 - delta)  # OTM put
+            else:
+                strike = context.current_price * (1 + delta)  # OTM call
+
+            # Use optionlab's ITM probability
+            itm_prob = OptionsPricer.itm_probability(
+                S=context.current_price,
+                K=strike,
+                T=time_to_expiry,
+                sigma=iv,
+                right=right,
+            )
+
+            # Adjust for market regime (empirical adjustments)
+            regime_adjustment = {
+                'bull': 1.2 if right == "C" else 0.8,  # Higher call assignment in bull
+                'bear': 1.2 if right == "P" else 0.8,  # Higher put assignment in bear
+                'neutral': 1.0,
+                'high_vol': 0.7  # Lower assignment in high volatility
+            }
+
+            adjusted_prob = itm_prob * regime_adjustment.get(context.market_regime, 1.0)
+            return min(1.0, adjusted_prob)
+        except Exception as e:
+            logger.debug(f"ITM probability calculation failed: {e}")
+            # Fallback to delta approximation
+            return min(1.0, delta)
     
     def _calculate_risk_score(self, 
                             delta: float,

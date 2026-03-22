@@ -140,17 +140,6 @@ class BacktestEngine:
         # Estimate historical volatility for IV proxy
         prices = [b["close"] for b in bars]
         hv = self._rolling_hv(prices, window=20)
-        
-        # For multi-stock strategies, calculate HV for each stock
-        stock_hv = {}  # symbol -> list of HV values
-        if strategy_name == "binbin_god" and hasattr(strategy, 'mag7_data'):
-            for sym, sym_bars in strategy.mag7_data.items():
-                if sym_bars:
-                    sym_prices = [b["close"] for b in sym_bars]
-                    stock_hv[sym] = self._rolling_hv(sym_prices, window=20)
-            logger.info(f"Calculated HV for {len(stock_hv)} stocks in pool")
-            # Store stock_hv in strategy so it can access correct IV for each stock
-            strategy.stock_hv = stock_hv
 
         # Initialize position manager for capital allocation and margin tracking
         position_mgr = PositionManager(
@@ -223,12 +212,9 @@ class BacktestEngine:
             is_multi_stock = strategy_name == "binbin_god" and mag7_data
 
             if is_multi_stock:
-                # Multi-stock mode: check each position with its correct underlying price AND IV
-                # BinbinGod策略(Wheel风格)：
-                # - STOP_LOSS始终禁用：让期权到期或被行权，完成Wheel循环
-                # - PROFIT_TARGET保留用户配置：可以提前获利滚动
+                # Multi-stock mode: check each position with its correct underlying price
                 profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
-                stop_loss_to_use = 999999  # Always disable stop loss for Wheel strategies
+                stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
 
                 closed = []
                 remaining_positions = []
@@ -237,18 +223,12 @@ class BacktestEngine:
                     pos_price = self._get_price_for_symbol(pos.symbol, bar_date, mag7_data)
                     if pos_price is None:
                         pos_price = underlying_price  # Fallback to primary stock price
-                    
-                    # Get the correct IV for this position's symbol
-                    pos_iv = iv  # Default to primary stock IV
-                    if pos.symbol in stock_hv:
-                        sym_hv = stock_hv[pos.symbol]
-                        pos_iv = sym_hv[i] if i < len(sym_hv) and sym_hv[i] > 0.01 else 0.3
 
                     trade = simulator.check_exits_for_position(
                         pos,
                         bar_date,
                         pos_price,
-                        pos_iv,
+                        iv,
                         profit_target_to_use,
                         stop_loss_to_use,
                         min_dte=0,
@@ -317,8 +297,7 @@ class BacktestEngine:
                 adjusted_pnl = trade.pnl - exit_cost
                 
                 # Create position ID and release margin
-                # Use position_id from trade record (must match the one used during allocation)
-                position_id = trade.position_id if trade.position_id else f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
+                position_id = f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
                 position_mgr.release_margin(position_id, adjusted_pnl)  # Use adjusted P&L
                 
                 # Handle stock capital allocation for Wheel strategy
@@ -329,13 +308,6 @@ class BacktestEngine:
                     shares_acquired = abs(trade.quantity) * 100
                     stock_cost = trade.strike * shares_acquired
                     stock_position_id = f"{trade.symbol}_{bar_date}_STOCK"
-                    
-                    # CRITICAL FIX: Deduct stock cost from cumulative_pnl
-                    # When we buy shares, cash is converted to stock
-                    # net_capital = initial_capital + cumulative_pnl
-                    # So we need to deduct stock_cost to reflect the cash outflow
-                    position_mgr.cumulative_pnl -= stock_cost
-                    logger.info(f"PUT assignment: Deducted stock cost ${stock_cost:.2f} from cumulative_pnl")
                     
                     # Allocate stock capital (this is the money used to buy shares)
                     position_mgr.allocate_margin(
@@ -360,13 +332,6 @@ class BacktestEngine:
                         # Calculate stock capital to release
                         stock_capital = stock_cost_basis.cost_basis * shares_sold
                         
-                        # CRITICAL FIX: Add back stock proceeds to cumulative_pnl
-                        # When shares are sold, we receive strike * shares in cash
-                        # This was previously deducted during PUT assignment, so add it back
-                        stock_proceeds = trade.strike * shares_sold
-                        position_mgr.cumulative_pnl += stock_proceeds
-                        logger.info(f"CC assignment: Added stock proceeds ${stock_proceeds:.2f} to cumulative_pnl")
-                        
                         # Find and release stock position (release first unreleased stock allocation)
                         for pid, alloc in list(position_mgr.allocations.items()):
                             if "_STOCK" in pid and not alloc.released:
@@ -374,46 +339,16 @@ class BacktestEngine:
                                 logger.debug(f"Released stock capital: {pid}")
                                 break
                 
+                # Update trade record with capital information at exit
+                trade.capital_at_exit = position_mgr.net_capital  # Record total capital after closing
+                
                 # Notify strategy of closed trade (for stateful strategies like Wheel)
-                # IMPORTANT: Do this BEFORE recording capital_at_exit so additional_pnl is included
                 if hasattr(strategy, 'on_trade_closed'):
                     additional_pnl = strategy.on_trade_closed(trade.to_dict())
                     # For Wheel/CoveredCall/BinbinGod strategies: add stock P&L from call assignment
                     if additional_pnl and additional_pnl != 0:
                         position_mgr.cumulative_pnl += additional_pnl
                         # net_capital is a property (initial_capital + cumulative_pnl), auto-updates
-                
-                # Update trade record with capital information at exit
-                # AFTER additional_pnl is added to ensure correct capital tracking
-                trade.capital_at_exit = position_mgr.net_capital  # Record total capital after closing
-
-                # Update ML performance tracking for learning
-                # This enables ML optimizers to learn from actual trade outcomes
-                if hasattr(strategy, 'ml_integration') and strategy.ml_integration:
-                    try:
-                        ml_integration = strategy.ml_integration
-                        if hasattr(ml_integration, 'update_performance'):
-                            # Determine actual assignment status
-                            actual_assignment = trade.exit_reason == "ASSIGNMENT"
-                            
-                            # Get bars for this symbol up to current date
-                            symbol_bars = []
-                            if is_multi_stock and mag7_data:
-                                symbol_bars = mag7_data.get(trade.symbol, [])
-                            
-                            ml_integration.update_performance(
-                                delta=abs(trade.delta_at_entry) if trade.delta_at_entry else 0.3,
-                                symbol=trade.symbol,
-                                current_price=trade.underlying_exit,
-                                cost_basis=trade.underlying_entry,  # Use entry price as reference
-                                bars=symbol_bars,
-                                options_data=[],
-                                actual_pnl=trade.pnl,
-                                actual_assignment=actual_assignment
-                            )
-                            logger.info(f"Updated ML performance: {trade.symbol} delta={abs(trade.delta_at_entry) if trade.delta_at_entry else 0.3:.2f} pnl={trade.pnl:.2f}")
-                    except Exception as e:
-                        logger.warning(f"Failed to update ML performance: {e}")
 
                 # Generate roll signal for Wheel-style strategies
                 # When profit target is hit, immediately roll to new position
@@ -466,9 +401,7 @@ class BacktestEngine:
                                 underlying_entry=roll_underlying_price,
                                 iv_at_entry=roll_signal.iv,
                                 delta_at_entry=roll_signal.delta,
-                                position_id=roll_position_id,  # Use the same position_id for margin tracking
                                 capital_at_entry=position_mgr.net_capital,
-                                strategy_phase=getattr(roll_signal, 'strategy_phase', 'SP'),  # SP, CC, or CC+SP
                             )
                             simulator.open_position(roll_pos)
 
@@ -494,14 +427,7 @@ class BacktestEngine:
                 bar_date, underlying_price, iv, simulator.open_positions,
                 position_mgr=position_mgr
             )
-            
-            # DEBUG: Log number of signals generated
-            if signals:
-                logger.info(f"Generated {len(signals)} signals on {bar_date}")
             for sig in signals:
-                    # DEBUG: Log each signal being processed
-                    logger.info(f"Processing signal: {sig.symbol} {sig.trade_type} {sig.right} strike={sig.strike:.2f} qty={sig.quantity} margin_req={sig.margin_requirement}")
-                    
                     # Use strategy-provided margin requirement if available
                     # Note: margin_requirement can be 0 for covered calls (shares already owned)
                     if sig.margin_requirement is not None:
@@ -527,7 +453,6 @@ class BacktestEngine:
                     
                     # Allocate margin before opening position
                     position_id = f"{sig.symbol}_{bar_date}_{sig.strike}_{sig.right}"
-                    logger.info(f"Attempting to allocate margin: position_id={position_id}, total_margin=${total_margin:.2f}")
                     if position_mgr.allocate_margin(
                         position_id=position_id,
                         strategy=strategy.name,
@@ -535,7 +460,6 @@ class BacktestEngine:
                         entry_date=bar_date,
                         margin_amount=total_margin,
                     ):
-                        logger.info(f"Margin allocated successfully for {position_id}")
                         # Get correct underlying price for this symbol (important for multi-stock strategies)
                         entry_underlying_price = underlying_price  # Default: use primary stock
                         if is_multi_stock:
@@ -557,9 +481,7 @@ class BacktestEngine:
                             underlying_entry=entry_underlying_price,
                             iv_at_entry=sig.iv,
                             delta_at_entry=sig.delta,
-                            position_id=position_id,  # Use the same position_id for margin tracking
                             capital_at_entry=position_mgr.net_capital,  # Record total capital at entry
-                            strategy_phase=getattr(sig, 'strategy_phase', 'SP'),  # SP, CC, or CC+SP
                         )
                         simulator.open_position(pos)
                         
@@ -589,31 +511,10 @@ class BacktestEngine:
             # For Wheel strategy, also calculate unrealized P&L from stock holdings
             stock_unrealized_pnl = 0.0
             if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
-                # Support multi-stock holdings
-                holdings = getattr(strategy.stock_holding, 'holdings', None)
-                
-                if holdings and is_multi_stock:
-                    # Multi-stock: calculate each stock's unrealized P&L separately
-                    for stock_symbol, holding_info in holdings.items():
-                        shares = holding_info.get("shares", 0)
-                        cost_basis = holding_info.get("cost_basis", 0)
-                        
-                        if shares <= 0 or cost_basis <= 0:
-                            continue
-                        
-                        # Get the correct price for this stock
-                        stock_price = self._get_price_for_symbol(stock_symbol, bar_date, mag7_data)
-                        if stock_price is None:
-                            stock_price = underlying_price  # Fallback
-                        
-                        stock_cost = shares * cost_basis
-                        stock_market_value = shares * stock_price
-                        stock_unrealized_pnl += stock_market_value - stock_cost
-                else:
-                    # Single stock (backward compatible)
-                    stock_cost = strategy.stock_holding.shares * strategy.stock_holding.cost_basis
-                    stock_market_value = strategy.stock_holding.shares * underlying_price
-                    stock_unrealized_pnl = stock_market_value - stock_cost
+                # Calculate unrealized P&L from stock position
+                stock_cost = strategy.stock_holding.shares * strategy.stock_holding.cost_basis
+                stock_market_value = strategy.stock_holding.shares * underlying_price
+                stock_unrealized_pnl = stock_market_value - stock_cost
             
             portfolio_value = position_mgr.net_capital + open_pnl + stock_unrealized_pnl
             total_open_pnl = open_pnl + stock_unrealized_pnl
@@ -640,12 +541,6 @@ class BacktestEngine:
             last_date = last_bar["date"][:10]
             last_price = last_bar["close"]
             last_iv = hv[-1] if hv else 0.3
-            
-            # For multi-stock strategies, get price/IV for each position's symbol
-            mag7_data = getattr(strategy, 'mag7_data', None)
-            stock_hv = getattr(strategy, 'stock_hv', {})
-            is_multi_stock = strategy_name == "binbin_god" and mag7_data
-            
             # Close all remaining positions at the end of backtest
             while simulator.open_positions:
                 # Process one position at a time with immediate expiration
@@ -653,24 +548,9 @@ class BacktestEngine:
                 pos = simulator.open_positions.pop(0)
                 temp_simulator.open_position(pos)
                 
-                # Get the correct price and IV for this position's symbol
-                pos_price = last_price
-                pos_iv = last_iv
-                if is_multi_stock:
-                    # Find the price for this position's symbol
-                    symbol_price = self._get_price_for_symbol(pos.symbol, last_date, mag7_data)
-                    if symbol_price is not None:
-                        pos_price = symbol_price
-                    
-                    # Get the correct IV for this position's symbol
-                    if pos.symbol in stock_hv:
-                        sym_hv = stock_hv[pos.symbol]
-                        # Get the last available IV for this symbol
-                        pos_iv = sym_hv[-1] if sym_hv and sym_hv[-1] > 0.01 else 0.3
-                
                 # Force close with min_dte=0 to trigger expiration logic
                 closed_trades = temp_simulator.check_exits(
-                    last_date, pos_price, pos_iv,
+                    last_date, last_price, last_iv,
                     profit_target_pct=9999,
                     stop_loss_pct=9999,
                     min_dte=0,
@@ -691,76 +571,31 @@ class BacktestEngine:
             # Handle remaining stock position for Wheel/BinbinGod strategies
             # At end of backtest, liquidate any remaining stock holdings
             if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
-                # Support multi-stock holdings
-                holdings = getattr(strategy.stock_holding, 'holdings', {})
+                shares = strategy.stock_holding.shares
+                cost_basis = strategy.stock_holding.cost_basis
                 
-                if holdings:
-                    # Multi-stock: liquidate each stock separately
-                    for stock_symbol, holding_info in holdings.items():
-                        shares = holding_info.get("shares", 0)
-                        cost_basis = holding_info.get("cost_basis", 0)
-                        
-                        if shares <= 0:
-                            continue
-                        
-                        # Get the correct price for this stock
-                        liquidation_price = last_price  # Default
-                        if is_multi_stock:
-                            symbol_price = self._get_price_for_symbol(stock_symbol, last_date, mag7_data)
-                            if symbol_price is not None:
-                                liquidation_price = symbol_price
-                        
-                        # Calculate realized P&L from stock liquidation
-                        stock_pnl = (liquidation_price - cost_basis) * shares
-                        position_mgr.cumulative_pnl += stock_pnl
-                        logger.info(
-                            f"Backtest end: Liquidated {shares} shares of {stock_symbol} @ ${liquidation_price:.2f} "
-                            f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
-                        )
-                else:
-                    # Fallback to single-stock logic (backward compatibility)
-                    shares = strategy.stock_holding.shares
-                    cost_basis = strategy.stock_holding.cost_basis
-                    stock_symbol = getattr(strategy.stock_holding, 'symbol', '')
-                    
-                    # Get the correct price for the stock we're holding
-                    liquidation_price = last_price  # Default to main stock price
-                    if is_multi_stock and stock_symbol:
-                        # For multi-stock strategies, get the correct price for the held stock
-                        symbol_price = self._get_price_for_symbol(stock_symbol, last_date, mag7_data)
-                        if symbol_price is not None:
-                            liquidation_price = symbol_price
-                            logger.info(f"Using {stock_symbol} price ${liquidation_price:.2f} for stock liquidation (vs main ${last_price:.2f})")
-                    
-                    # Calculate realized P&L from stock liquidation
-                    stock_pnl = (liquidation_price - cost_basis) * shares
-                    position_mgr.cumulative_pnl += stock_pnl
-                    logger.info(
-                        f"Backtest end: Liquidated {shares} shares of {stock_symbol or 'stock'} @ ${liquidation_price:.2f} "
-                        f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
-                    )
+                # Calculate realized P&L from stock liquidation
+                stock_pnl = (last_price - cost_basis) * shares
+                position_mgr.cumulative_pnl += stock_pnl
+                logger.info(
+                    f"Backtest end: Liquidated {shares} shares @ ${last_price:.2f} "
+                    f"(cost: ${cost_basis:.2f}), P&L: ${stock_pnl:+.2f}"
+                )
                 
-                # Release all stock capital allocations
+                # Release all stock capital allocations (for BinbinGod, symbol may differ from params symbol)
                 released_count = 0
                 for pid, alloc in list(position_mgr.allocations.items()):
                     if "_STOCK" in pid and not alloc.released:
-                        position_mgr.release_margin(pid, 0)  # PnL already added above
+                        position_mgr.release_margin(pid, stock_pnl if released_count == 0 else 0)
                         logger.debug(f"Released stock capital at backtest end: {pid}")
                         released_count += 1
                 
-                # Reset stock holding
+                # Reset stock holding AFTER getting performance report
                 strategy.stock_holding.shares = 0
                 strategy.stock_holding.cost_basis = 0.0
-                if hasattr(strategy.stock_holding, 'holdings'):
-                    strategy.stock_holding.holdings = {}
 
         # Calculate metrics
-        # Sort trades by exit_date (then entry_date for same exit date) for consistent ordering
-        sorted_closed_trades = sorted(
-            simulator.closed_trades,
-            key=lambda t: (t.exit_date, t.entry_date)
-        )
-        trades = [t.to_dict() for t in sorted_closed_trades]
+        trades = [t.to_dict() for t in simulator.closed_trades]
         metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
 
         # Train ML roll optimizer if enabled and we have trades
