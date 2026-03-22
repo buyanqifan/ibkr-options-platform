@@ -30,7 +30,10 @@ class PerformanceMetrics:
             }
 
         # Basic trade stats
-        pnls = [t["pnl"] for t in trades]
+        # Filter out stock trades (right="S") - they are auxiliary records for visibility
+        # The stock P&L is already included in the option trade records via trade.pnl += stock_pnl
+        option_trades = [t for t in trades if t.get("right") != "S"]
+        pnls = [t["pnl"] for t in option_trades]
         wins = [p for p in pnls if p > 0]
         losses = [p for p in pnls if p <= 0]
 
@@ -112,8 +115,8 @@ class PerformanceMetrics:
             "max_drawdown_pct": round(max_dd, 2),
             "sharpe_ratio": round(sharpe, 2),
             "sortino_ratio": round(sortino, 2),
-            "win_rate": round(len(wins) / len(trades) * 100, 1) if trades else 0,
-            "total_trades": len(trades),
+            "win_rate": round(len(wins) / len(option_trades) * 100, 1) if option_trades else 0,
+            "total_trades": len(option_trades),
             "avg_profit": round(np.mean(wins), 2) if wins else 0,
             "avg_loss": round(np.mean(losses), 2) if losses else 0,
             "profit_factor": round(sum(wins) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else 999,
