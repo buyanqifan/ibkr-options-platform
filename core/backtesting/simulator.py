@@ -52,25 +52,30 @@ class TradeRecord:
     strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
 
     def to_dict(self) -> dict:
-        # Generate formatted option contract name
-        # Note: This is a theoretical option based on BS model pricing
-        # Real options have discrete strikes (e.g., $2.5/$5 intervals), not continuous values
+        # Generate formatted contract name based on type
         try:
-            expiry_short = self.expiry[2:] if len(self.expiry) >= 6 else self.expiry
-            option_type = "Put" if self.right == "P" else "Call"
-            
-            # Format strike with appropriate precision
-            # Use integer if whole number, otherwise keep 1-2 decimals
-            if self.strike == int(self.strike):
-                strike_display = int(self.strike)
-            elif self.strike * 10 == int(self.strike * 10):
-                strike_display = round(self.strike, 1)  # e.g., 745.5
+            if self.right == "S":
+                # Stock trade
+                if self.trade_type == "STOCK_BUY":
+                    contract_name = f"{self.symbol} STOCK BUY @ ${self.strike:.2f}"
+                elif self.trade_type == "STOCK_SELL":
+                    contract_name = f"{self.symbol} STOCK SELL @ ${self.strike:.2f}"
+                else:
+                    contract_name = f"{self.symbol} STOCK"
             else:
-                strike_display = round(self.strike, 2)  # e.g., 745.37
-            
-            # Add "~" prefix to indicate this is a theoretical/synthetic option
-            # Real-world options only trade at discrete strike intervals
-            contract_name = f"{self.symbol} {expiry_short} ~{strike_display} {option_type} (Theoretical)"
+                # Option trade
+                expiry_short = self.expiry[2:] if len(self.expiry) >= 6 else self.expiry
+                option_type = "Put" if self.right == "P" else "Call"
+                    
+                # Format strike with appropriate precision
+                if self.strike == int(self.strike):
+                    strike_display = int(self.strike)
+                elif self.strike * 10 == int(self.strike * 10):
+                    strike_display = round(self.strike, 1)
+                else:
+                    strike_display = round(self.strike, 2)
+                    
+                contract_name = f"{self.symbol} {expiry_short} ~{strike_display} {option_type} (Theoretical)"
         except (ValueError, TypeError, AttributeError):
             contract_name = f"{self.symbol} {self.expiry} {self.strike} {self.right}"
         

@@ -410,24 +410,35 @@ def create_trade_history_table(trades: list) -> html.Div:
         symbol = trade.get("symbol", "N/A")
         expiry = trade.get("expiry", "N/A")
         strike = trade.get("strike", 0)
-        right = trade.get("right", "N/A")  # P (Put) or C (Call)
+        right = trade.get("right", "N/A")  # P (Put) or C (Call) or S (Stock)
         quantity = trade.get("quantity", 0)
-        trade_type = trade.get("type", "N/A")
+        trade_type = trade.get("trade_type", "N/A")
         
-        # Format option name: e.g., "AAPL 240115 150 Put"
-        option_name = f"{symbol} {expiry[2:]} {strike:.0f} {'Put' if right == 'P' else 'Call'}"
+        # Format contract name based on type
+        if right == "S":
+            # Stock trade
+            if "BUY" in trade_type:
+                contract_name = f"{symbol} STOCK BUY @ ${strike:.2f}"
+            elif "SELL" in trade_type:
+                contract_name = f"{symbol} STOCK SELL @ ${strike:.2f}"
+            else:
+                contract_name = f"{symbol} STOCK"
+        else:
+            # Option trade
+            option_type = "Put" if right == "P" else "Call"
+            expiry_short = expiry[2:] if len(expiry) >= 6 else expiry
+            contract_name = f"{symbol} {expiry_short} {strike:.0f} {option_type}"
         
         # Format quantity with direction
         qty_display = f"{quantity}x"
         
         rows.append(
             html.Tr([
-                html.Td(trade.get("date", "N/A")),
-                html.Td(option_name, title=f"{trade_type}"),
+                html.Td(trade.get("exit_date", "N/A")),
+                html.Td(contract_name, title=f"{trade_type}"),
                 html.Td(qty_display),
                 html.Td(trade.get("exit_reason", "N/A")),
                 html.Td(f"${trade.get('pnl', 0):+.2f}", className=pnl_class),
-                html.Td(f"${trade.get('cumulative_pnl', 0):+.2f}"),
             ])
         )
     
@@ -435,11 +446,10 @@ def create_trade_history_table(trades: list) -> html.Div:
         html.Thead([
             html.Tr([
                 html.Th("Date"), 
-                html.Th("Option Contract"), 
+                html.Th("Contract"), 
                 html.Th("Qty"),
                 html.Th("Exit Reason"), 
-                html.Th("P&L"), 
-                html.Th("Cumulative P&L")
+                html.Th("P&L")
             ])
         ]),
         html.Tbody(rows),
