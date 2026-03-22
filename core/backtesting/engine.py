@@ -297,8 +297,22 @@ class BacktestEngine:
                 adjusted_pnl = trade.pnl - exit_cost
                 
                 # Create position ID and release margin
-                position_id = f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
-                position_mgr.release_margin(position_id, adjusted_pnl)  # Use adjusted P&L
+                # Use the position_id from trade record if available (more reliable)
+                # For ROLL positions, position_id contains "_ROLL_" which is different from reconstructed ID
+                if hasattr(trade, 'position_id') and trade.position_id:
+                    position_id = trade.position_id
+                else:
+                    position_id = f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
+                
+                release_success = position_mgr.release_margin(position_id, adjusted_pnl)  # Use adjusted P&L
+                if not release_success:
+                    logger.error(f"Failed to release margin for {position_id}, trying fallback...")
+                    # Fallback: search for matching allocation by symbol and strike
+                    for pid, alloc in list(position_mgr.allocations.items()):
+                        if trade.symbol in pid and str(trade.strike) in pid and not alloc.released:
+                            position_mgr.release_margin(pid, adjusted_pnl)
+                            logger.info(f"Released margin using fallback: {pid}")
+                            break
                 
                 # Handle stock capital allocation for Wheel strategy
                 # When Put is assigned, we buy shares - the margin should be converted to stock capital
@@ -402,6 +416,7 @@ class BacktestEngine:
                                 iv_at_entry=roll_signal.iv,
                                 delta_at_entry=roll_signal.delta,
                                 capital_at_entry=position_mgr.net_capital,
+                                position_id=roll_position_id,  # Store position_id for reliable margin tracking
                             )
                             simulator.open_position(roll_pos)
 
@@ -482,6 +497,7 @@ class BacktestEngine:
                             iv_at_entry=sig.iv,
                             delta_at_entry=sig.delta,
                             capital_at_entry=position_mgr.net_capital,  # Record total capital at entry
+                            position_id=position_id,  # Store position_id for reliable margin tracking
                         )
                         simulator.open_position(pos)
                         

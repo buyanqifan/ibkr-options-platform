@@ -143,6 +143,9 @@ class PositionManager:
         Returns:
             True if allocation successful, False if insufficient margin
         """
+        logger.debug(f"allocate_margin called for: {position_id}, amount: ${margin_amount:.2f}")
+        logger.debug(f"Current available_margin: ${self.available_margin:.2f}, total_margin_used: ${self.total_margin_used:.2f}")
+        
         if margin_amount > self.available_margin:
             logger.warning(
                 f"Insufficient margin: requested {margin_amount:.2f}, available {self.available_margin:.2f}"
@@ -150,9 +153,10 @@ class PositionManager:
             return False
         
         if position_id in self.allocations and not self.allocations[position_id].released:
-            logger.warning(f"Position {position_id} already exists")
+            logger.warning(f"Position {position_id} already exists and not released")
             return False
         
+        old_margin_used = self.total_margin_used
         self.allocations[position_id] = CapitalAllocation(
             strategy=strategy,
             symbol=symbol,
@@ -163,7 +167,8 @@ class PositionManager:
         
         logger.info(
             f"Allocated ${margin_amount:.2f} margin for {position_id} "
-            f"(utilization: {self.margin_utilization:.1f}%)"
+            f"(margin_used: {old_margin_used:.2f} -> {self.total_margin_used:.2f}, "
+            f"utilization: {self.margin_utilization:.1f}%)"
         )
         return True
     
@@ -178,8 +183,14 @@ class PositionManager:
         Returns:
             True if release successful
         """
+        # DEBUG: Log all current allocations
+        logger.debug(f"release_margin called for: {position_id}")
+        logger.debug(f"Current allocations: {list(self.allocations.keys())}")
+        logger.debug(f"Current total_margin_used: {self.total_margin_used:.2f}")
+        
         if position_id not in self.allocations:
-            logger.warning(f"Position {position_id} not found")
+            logger.error(f"*** MARGIN LEAK: Position {position_id} not found in allocations! ***")
+            logger.error(f"Available allocations: {list(self.allocations.keys())}")
             return False
         
         allocation = self.allocations[position_id]
@@ -188,6 +199,7 @@ class PositionManager:
             return False
         
         # Release margin
+        old_margin_used = self.total_margin_used
         self.total_margin_used -= allocation.allocated_margin
         allocation.released = True
         
@@ -196,7 +208,8 @@ class PositionManager:
         
         logger.info(
             f"Released ${allocation.allocated_margin:.2f} margin for {position_id}, "
-            f"PnL: ${pnl:.2f}"
+            f"PnL: ${pnl:.2f}, "
+            f"margin_used: {old_margin_used:.2f} -> {self.total_margin_used:.2f}"
         )
         return True
     
