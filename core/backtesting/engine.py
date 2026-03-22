@@ -531,10 +531,22 @@ class BacktestEngine:
             # For Wheel strategy, also calculate unrealized P&L from stock holdings
             stock_unrealized_pnl = 0.0
             if hasattr(strategy, 'stock_holding') and strategy.stock_holding.shares > 0:
-                # Calculate unrealized P&L from stock position
-                stock_cost = strategy.stock_holding.shares * strategy.stock_holding.cost_basis
-                stock_market_value = strategy.stock_holding.shares * underlying_price
-                stock_unrealized_pnl = stock_market_value - stock_cost
+                # CRITICAL FIX: In multi-stock mode, use the correct price for each stock holding
+                # The legacy approach used underlying_price which could be wrong for multi-stock
+                if hasattr(strategy.stock_holding, 'holdings') and strategy.stock_holding.holdings:
+                    # Multi-stock mode: calculate unrealized P&L for each stock separately
+                    for sym, holding in strategy.stock_holding.holdings.items():
+                        sym_price = underlying_price  # Default to primary stock
+                        if is_multi_stock and mag7_data:
+                            sym_price = self._get_price_for_symbol(sym, bar_date, mag7_data) or underlying_price
+                        sym_market_value = holding["shares"] * sym_price
+                        sym_cost = holding["shares"] * holding["cost_basis"]
+                        stock_unrealized_pnl += sym_market_value - sym_cost
+                else:
+                    # Single-stock mode (legacy behavior)
+                    stock_cost = strategy.stock_holding.shares * strategy.stock_holding.cost_basis
+                    stock_market_value = strategy.stock_holding.shares * underlying_price
+                    stock_unrealized_pnl = stock_market_value - stock_cost
             
             portfolio_value = position_mgr.net_capital + open_pnl + stock_unrealized_pnl
             total_open_pnl = open_pnl + stock_unrealized_pnl
