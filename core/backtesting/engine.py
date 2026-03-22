@@ -351,6 +351,8 @@ class BacktestEngine:
                     # For Wheel/CoveredCall/BinbinGod strategies: add stock P&L from call assignment
                     if additional_pnl and additional_pnl != 0:
                         position_mgr.cumulative_pnl += additional_pnl
+                        # Also add stock P&L to trade.pnl so metrics calculation includes it
+                        trade.pnl += additional_pnl
                         # net_capital is a property (initial_capital + cumulative_pnl), auto-updates
                 
                 # Update trade record with capital information at exit
