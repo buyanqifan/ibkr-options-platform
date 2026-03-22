@@ -477,6 +477,10 @@ class BacktestEngine:
                             entry_date=bar_date,
                             margin_amount=total_margin,
                         ):
+                            # Calculate entry costs for P&L breakdown
+                            roll_entry_commission = cost_model.calculate_commission(roll_signal.quantity)
+                            roll_entry_slippage = cost_model.calculate_slippage(roll_signal.quantity)
+                            
                             roll_pos = OptionPosition(
                                 symbol=roll_signal.symbol,
                                 entry_date=bar_date,
@@ -492,13 +496,15 @@ class BacktestEngine:
                                 capital_at_entry=position_mgr.net_capital,
                                 position_id=roll_position_id,  # Store position_id for reliable margin tracking
                                 strategy_phase=getattr(roll_signal, 'strategy_phase', 'SP'),  # Pass strategy phase from signal
+                                entry_commission=roll_entry_commission,
+                                entry_slippage=roll_entry_slippage,
                             )
                             simulator.open_position(roll_pos)
 
                             # Track roll costs
                             roll_cost = cost_model.calculate_total_cost(roll_signal.quantity)
-                            total_commission += cost_model.calculate_commission(roll_signal.quantity)
-                            total_slippage += cost_model.calculate_slippage(roll_signal.quantity)
+                            total_commission += roll_entry_commission
+                            total_slippage += roll_entry_slippage
 
                             logger.info(
                                 f"Rolled position: {trade.symbol} {trade.exit_reason} -> "
@@ -558,6 +564,10 @@ class BacktestEngine:
                                 entry_underlying_price = symbol_price
                                 logger.debug(f"Using {sig.symbol} price ${entry_underlying_price:.2f} for entry (vs primary ${underlying_price:.2f})")
 
+                        # Calculate entry costs for P&L breakdown
+                        entry_commission = cost_model.calculate_commission(sig.quantity)
+                        entry_slippage = cost_model.calculate_slippage(sig.quantity)
+
                         # Margin allocated successfully, open position
                         pos = OptionPosition(
                             symbol=sig.symbol,
@@ -574,13 +584,15 @@ class BacktestEngine:
                             capital_at_entry=position_mgr.net_capital,  # Record total capital at entry
                             position_id=position_id,  # Store position_id for reliable margin tracking
                             strategy_phase=getattr(sig, 'strategy_phase', 'SP'),  # Pass strategy phase from signal
+                            entry_commission=entry_commission,
+                            entry_slippage=entry_slippage,
                         )
                         simulator.open_position(pos)
                         
                         # Calculate and track trading costs (commission + slippage)
-                        entry_cost = cost_model.calculate_total_cost(sig.quantity)
-                        total_commission += cost_model.calculate_commission(sig.quantity)
-                        total_slippage += cost_model.calculate_slippage(sig.quantity)
+                        entry_cost = entry_commission + entry_slippage
+                        total_commission += entry_commission
+                        total_slippage += entry_slippage
 
                         # Deduct entry cost from cumulative P&L (trading costs reduce realized gains)
                         position_mgr.cumulative_pnl -= entry_cost

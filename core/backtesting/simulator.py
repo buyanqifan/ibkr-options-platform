@@ -24,11 +24,62 @@ class OptionPosition:
     current_pnl: float = 0.0
     capital_at_entry: float = 0.0  # Total portfolio capital when opening position
     strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
+    # Entry costs tracking for P&L breakdown
+    entry_commission: float = 0.0  # Commission paid at entry
+    entry_slippage: float = 0.0    # Slippage at entry
+
+
+@dataclass
+class PnLBreakdown:
+    """Detailed P&L breakdown for transparency and verification."""
+    option_pnl: float = 0.0        # P&L from option premium
+    stock_pnl: float = 0.0         # P&L from stock position (CC assignment, etc.)
+    entry_commission: float = 0.0  # Commission at entry
+    exit_commission: float = 0.0   # Commission at exit
+    entry_slippage: float = 0.0    # Slippage at entry
+    exit_slippage: float = 0.0     # Slippage at exit
+    margin_interest: float = 0.0   # Margin interest accrued
+    
+    @property
+    def total_commission(self) -> float:
+        return self.entry_commission + self.exit_commission
+    
+    @property
+    def total_slippage(self) -> float:
+        return self.entry_slippage + self.exit_slippage
+    
+    @property
+    def total_costs(self) -> float:
+        return self.total_commission + self.total_slippage + self.margin_interest
+    
+    @property
+    def gross_pnl(self) -> float:
+        return self.option_pnl + self.stock_pnl
+    
+    @property
+    def net_pnl(self) -> float:
+        return self.gross_pnl - self.total_costs
+    
+    def to_dict(self) -> dict:
+        return {
+            "option_pnl": round(self.option_pnl, 2),
+            "stock_pnl": round(self.stock_pnl, 2),
+            "gross_pnl": round(self.gross_pnl, 2),
+            "entry_commission": round(self.entry_commission, 2),
+            "exit_commission": round(self.exit_commission, 2),
+            "total_commission": round(self.total_commission, 2),
+            "entry_slippage": round(self.entry_slippage, 2),
+            "exit_slippage": round(self.exit_slippage, 2),
+            "total_slippage": round(self.total_slippage, 2),
+            "margin_interest": round(self.margin_interest, 2),
+            "total_costs": round(self.total_costs, 2),
+            "net_pnl": round(self.net_pnl, 2),
+        }
 
 
 @dataclass
 class TradeRecord:
-    """Completed trade record."""
+    """Completed trade record with detailed P&L breakdown."""
     symbol: str
     trade_type: str
     entry_date: str
@@ -50,6 +101,7 @@ class TradeRecord:
     capital_at_entry: float = 0.0      # Total capital when opening position
     capital_at_exit: float = 0.0       # Total capital when closing position
     strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
+    pnl_breakdown: PnLBreakdown = None  # Detailed P&L breakdown for verification
 
     def to_dict(self) -> dict:
         # Generate formatted contract name based on type
@@ -79,7 +131,7 @@ class TradeRecord:
         except (ValueError, TypeError, AttributeError):
             contract_name = f"{self.symbol} {self.expiry} {self.strike} {self.right}"
         
-        return {
+        result = {
             "symbol": self.symbol,
             "trade_type": self.trade_type,
             "strategy_phase": self.strategy_phase,  # SP, CC, or CC+SP
@@ -102,6 +154,12 @@ class TradeRecord:
             "capital_at_entry": round(self.capital_at_entry, 2),
             "capital_at_exit": round(self.capital_at_exit, 2),
         }
+        
+        # Add P&L breakdown if available
+        if self.pnl_breakdown:
+            result["pnl_breakdown"] = self.pnl_breakdown.to_dict()
+        
+        return result
 
 
 class TradeSimulator:
@@ -217,6 +275,17 @@ class TradeSimulator:
             total_pnl = pnl_per_share * abs(pos.quantity) * 100  # options multiplier
             total_pnl_pct = pnl_pct
 
+            # Create P&L breakdown for transparency
+            pnl_breakdown = PnLBreakdown(
+                option_pnl=total_pnl,
+                stock_pnl=0.0,  # Will be updated by engine for assignments
+                entry_commission=getattr(pos, 'entry_commission', 0.0),
+                exit_commission=0.0,  # Will be updated by engine
+                entry_slippage=getattr(pos, 'entry_slippage', 0.0),
+                exit_slippage=0.0,  # Will be updated by engine
+                margin_interest=0.0,
+            )
+
             trade = TradeRecord(
                 symbol=pos.symbol,
                 trade_type=pos.trade_type,
@@ -239,6 +308,7 @@ class TradeSimulator:
                 capital_at_entry=getattr(pos, 'capital_at_entry', 0.0),
                 capital_at_exit=0.0,
                 strategy_phase=getattr(pos, 'strategy_phase', 'SP'),  # 传递strategy_phase
+                pnl_breakdown=pnl_breakdown,
             )
             self.closed_trades.append(trade)
             return trade
@@ -341,6 +411,17 @@ class TradeSimulator:
                 total_pnl = pnl_per_share * abs(pos.quantity) * 100  # options multiplier
                 total_pnl_pct = pnl_pct
 
+                # Create P&L breakdown for transparency
+                pnl_breakdown = PnLBreakdown(
+                    option_pnl=total_pnl,
+                    stock_pnl=0.0,  # Will be updated by engine for assignments
+                    entry_commission=getattr(pos, 'entry_commission', 0.0),
+                    exit_commission=0.0,  # Will be updated by engine
+                    entry_slippage=getattr(pos, 'entry_slippage', 0.0),
+                    exit_slippage=0.0,  # Will be updated by engine
+                    margin_interest=0.0,
+                )
+
                 trade = TradeRecord(
                     symbol=pos.symbol,
                     trade_type=pos.trade_type,
@@ -363,6 +444,7 @@ class TradeSimulator:
                     capital_at_entry=getattr(pos, 'capital_at_entry', 0.0),  # Pass from position
                     capital_at_exit=0.0,  # Will be set by engine after margin release
                     strategy_phase=getattr(pos, 'strategy_phase', 'SP'),  # 传递strategy_phase
+                    pnl_breakdown=pnl_breakdown,
                 )
                 closed.append(trade)
                 self.closed_trades.append(trade)
