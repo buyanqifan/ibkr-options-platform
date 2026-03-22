@@ -141,6 +141,17 @@ class BacktestEngine:
         prices = [b["close"] for b in bars]
         hv = self._rolling_hv(prices, window=20)
 
+        # For multi-stock strategies, calculate HV for each stock
+        if strategy_name == "binbin_god" and "AUTO" in symbol:
+            stock_hv = {}
+            for pool_symbol in valid_stocks:
+                pool_bars = pool_data.get(pool_symbol, [])
+                if pool_bars:
+                    pool_prices = [b["close"] for b in pool_bars]
+                    stock_hv[pool_symbol] = self._rolling_hv(pool_prices, window=20)
+            strategy.stock_hv = stock_hv
+            logger.info(f"BinbinGod: Calculated HV for {list(stock_hv.keys())}")
+
         # Initialize position manager for capital allocation and margin tracking
         position_mgr = PositionManager(
             initial_capital=initial_capital,
