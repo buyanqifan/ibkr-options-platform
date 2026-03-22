@@ -3,7 +3,7 @@
 import numpy as np
 from datetime import datetime, date
 from core.backtesting.pricing import OptionsPricer
-from core.backtesting.simulator import TradeSimulator, OptionPosition
+from core.backtesting.simulator import TradeSimulator, OptionPosition, TradeRecord
 from core.backtesting.metrics import PerformanceMetrics
 from core.backtesting.strategies.base import BaseStrategy
 from core.backtesting.strategies.sell_put import SellPutStrategy
@@ -337,34 +337,102 @@ class BacktestEngine:
                         f"Allocated stock capital: {stock_position_id} = ${stock_cost:.2f} "
                         f"({shares_acquired} shares @ ${trade.strike:.2f})"
                     )
+                    
+                    # Create stock buy trade record
+                    stock_buy_trade = TradeRecord(
+                        symbol=trade.symbol,
+                        trade_type="STOCK_BUY",
+                        entry_date=bar_date,
+                        exit_date=bar_date,
+                        expiry=bar_date,
+                        strike=trade.strike,  # Purchase price = strike
+                        right="S",  # S for Stock
+                        entry_price=trade.strike,
+                        exit_price=trade.strike,
+                        quantity=shares_acquired,
+                        pnl=0,  # No P&L at purchase
+                        pnl_pct=0,
+                        exit_reason="PUT_ASSIGNMENT",
+                        underlying_entry=trade.strike,
+                        underlying_exit=trade.strike,
+                        iv_at_entry=trade.iv_at_entry,
+                        delta_at_entry=0,
+                        position_id=stock_position_id,
+                        capital_at_entry=position_mgr.net_capital,
+                        capital_at_exit=position_mgr.net_capital,
+                        strategy_phase=trade.strategy_phase,
+                    )
+                    simulator.closed_trades.append(stock_buy_trade)
                 
                 # When Call is assigned, we sell shares - release stock capital
                 if trade.exit_reason == "ASSIGNMENT" and trade.trade_type in ("WHEEL_CALL", "BINBIN_CALL"):
                     # Call assigned: release stock capital
                     shares_sold = abs(trade.quantity) * 100
-                    stock_cost_basis = getattr(strategy, 'stock_holding', None)
+                    stock_holding = getattr(strategy, 'stock_holding', None)
+                    stock_sell_price = trade.strike  # Sell at strike price
+                    stock_buy_price = 0
                     
-                    if stock_cost_basis and hasattr(stock_cost_basis, 'cost_basis'):
-                        # Calculate stock capital to release
-                        stock_capital = stock_cost_basis.cost_basis * shares_sold
+                    # Get the cost basis for this specific stock
+                    if stock_holding:
+                        # For multi-stock mode, get cost basis from holdings dict
+                        if hasattr(stock_holding, 'holdings') and stock_holding.holdings:
+                            stock_buy_price = stock_holding.holdings.get(trade.symbol, {}).get("cost_basis", 0)
+                        elif hasattr(stock_holding, 'cost_basis'):
+                            # Single stock mode
+                            stock_buy_price = stock_holding.cost_basis
                         
-                        # Find and release stock position (release first unreleased stock allocation)
-                        for pid, alloc in list(position_mgr.allocations.items()):
-                            if "_STOCK" in pid and not alloc.released:
-                                position_mgr.release_margin(pid, 0)  # Release with 0 P&L (stock P&L handled separately)
-                                logger.debug(f"Released stock capital: {pid}")
-                                break
-                
-                # Notify strategy of closed trade (for stateful strategies like Wheel)
-                # Must be called BEFORE setting capital_at_exit to get correct state updates
-                if hasattr(strategy, 'on_trade_closed'):
-                    additional_pnl = strategy.on_trade_closed(trade.to_dict())
-                    # For Wheel/CoveredCall/BinbinGod strategies: add stock P&L from call assignment
-                    if additional_pnl and additional_pnl != 0:
-                        position_mgr.cumulative_pnl += additional_pnl
-                        # Also add stock P&L to trade.pnl so metrics calculation includes it
-                        trade.pnl += additional_pnl
-                        # net_capital is a property (initial_capital + cumulative_pnl), auto-updates
+                        if stock_buy_price > 0:
+                            # Calculate stock capital to release
+                            stock_capital = stock_buy_price * shares_sold
+                            
+                            # Find and release stock position (release first unreleased stock allocation)
+                            for pid, alloc in list(position_mgr.allocations.items()):
+                                if "_STOCK" in pid and not alloc.released:
+                                    position_mgr.release_margin(pid, 0)  # Release with 0 P&L (stock P&L handled separately)
+                                    logger.debug(f"Released stock capital: {pid}")
+                                    break
+                    
+                    # Get stock P&L from strategy.on_trade_closed (will be called below)
+                    # We need to call it first to get the actual stock P&L
+                    if hasattr(strategy, 'on_trade_closed'):
+                        stock_pnl = strategy.on_trade_closed(trade.to_dict())
+                        if stock_pnl and stock_pnl != 0:
+                            position_mgr.cumulative_pnl += stock_pnl
+                            trade.pnl += stock_pnl
+                            
+                            # Create stock sell trade record
+                            stock_position_id = f"{trade.symbol}_{bar_date}_STOCK"
+                            stock_sell_trade = TradeRecord(
+                                symbol=trade.symbol,
+                                trade_type="STOCK_SELL",
+                                entry_date=bar_date,  # Same day as buy for simplicity
+                                exit_date=bar_date,
+                                expiry=bar_date,
+                                strike=stock_sell_price,
+                                right="S",  # S for Stock
+                                entry_price=stock_buy_price,
+                                exit_price=stock_sell_price,
+                                quantity=shares_sold,
+                                pnl=stock_pnl,
+                                pnl_pct=(stock_pnl / (stock_buy_price * shares_sold) * 100) if stock_buy_price > 0 else 0,
+                                exit_reason="CALL_ASSIGNMENT",
+                                underlying_entry=stock_buy_price,
+                                underlying_exit=stock_sell_price,
+                                iv_at_entry=trade.iv_at_entry,
+                                delta_at_entry=0,
+                                position_id=stock_position_id,
+                                capital_at_entry=position_mgr.net_capital - stock_pnl,
+                                capital_at_exit=position_mgr.net_capital,
+                                strategy_phase=trade.strategy_phase,
+                            )
+                            simulator.closed_trades.append(stock_sell_trade)
+                else:
+                    # Non-assignment trades: call on_trade_closed normally
+                    if hasattr(strategy, 'on_trade_closed'):
+                        additional_pnl = strategy.on_trade_closed(trade.to_dict())
+                        if additional_pnl and additional_pnl != 0:
+                            position_mgr.cumulative_pnl += additional_pnl
+                            trade.pnl += additional_pnl
                 
                 # Update trade record with capital information at exit
                 # After stock capital is allocated and strategy state is updated
