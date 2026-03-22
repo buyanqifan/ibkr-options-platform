@@ -191,10 +191,20 @@ class TradeSimulator:
             # Check assignment for short puts (stock price below strike)
             if pos.right == "P" and pos.quantity < 0 and underlying_price < pos.strike:
                 exit_reason = "ASSIGNMENT"
+                # CRITICAL FIX: When assigned, we don't buy back the option
+                # The option pnl should be the premium received, not (entry - intrinsic)
+                # Recalculate pnl_per_share for assignment case
+                pnl_per_share = pos.entry_price  # Premium received = profit
+                exit_price = 0.0  # No cost to close when assigned
 
             # Check assignment for short calls (stock price above strike)
             if pos.right == "C" and pos.quantity < 0 and underlying_price > pos.strike:
                 exit_reason = "ASSIGNMENT"
+                # CRITICAL FIX: When assigned, we don't buy back the option
+                # The option pnl should be the premium received, not (entry - intrinsic)
+                # Recalculate pnl_per_share for assignment case
+                pnl_per_share = pos.entry_price  # Premium received = profit
+                exit_price = 0.0  # No cost to close when assigned
 
         if exit_reason:
             total_pnl = pnl_per_share * abs(pos.quantity) * 100  # options multiplier
