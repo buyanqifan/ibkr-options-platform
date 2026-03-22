@@ -213,8 +213,10 @@ class BacktestEngine:
 
             if is_multi_stock:
                 # Multi-stock mode: check each position with its correct underlying price
-                profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
-                stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
+                # CRITICAL: For Wheel-like strategies (binbin_god), disable profit target/stop loss in BOTH SP and CC phases
+                # Wheel strategy philosophy: hold through drawdowns, let time work for us
+                profit_target_to_use = 999999  # Always disable profit target for Wheel-like strategies
+                stop_loss_to_use = 999999      # Always disable stop loss for Wheel-like strategies
 
                 closed = []
                 remaining_positions = []
@@ -255,17 +257,15 @@ class BacktestEngine:
                         min_dte=0,
                     )
                 else:  # CC phase
-                    # Covered Call phase: use normal profit target/stop loss (unless disabled by user)
-                    # Check if user explicitly disabled profit target/stop loss
-                    profit_target_to_use = 999999 if strategy._profit_target_disabled else strategy.profit_target_pct
-                    stop_loss_to_use = 999999 if strategy._stop_loss_disabled else strategy.stop_loss_pct
-                    
+                    # Covered Call phase: ALSO disable profit target/stop loss for Wheel strategy
+                    # Wheel strategy philosophy: hold through drawdowns, wait for stock recovery
+                    # Stock recovery will eventually make the call expire worthless or allow roll
                     closed = simulator.check_exits(
                         bar_date,
                         underlying_price,
                         iv,
-                        profit_target_to_use,
-                        stop_loss_to_use,
+                        profit_target_pct=999999,  # Disable profit target
+                        stop_loss_pct=999999,      # Disable stop loss
                         min_dte=0,
                     )
             else:
