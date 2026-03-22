@@ -380,7 +380,8 @@ class DTEOptimizerML:
 
         if len(bars) < 30:
             # Fallback to simplified market context when insufficient data
-            logger.warning(f"Insufficient bars ({len(bars)}), using simplified market context")
+            # This is a normal condition early in backtest, use debug level
+            logger.debug(f"Insufficient bars ({len(bars)}), using simplified market context")
             return self._create_simplified_context(symbol, current_price, cost_basis, strategy_phase)
 
         # Convert to DataFrame for feature calculation

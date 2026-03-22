@@ -706,7 +706,8 @@ class BinbinGodStrategy(BaseStrategy):
                             else:
                                 logger.warning(f"Invalid IV for {actual_symbol} at index {bar_index}, using fallback")
                         else:
-                            logger.warning(f"No IV data for {actual_symbol}, using fallback IV: {actual_iv:.3f}")
+                            # This can happen early in backtest when bar_index is -1
+                            logger.debug(f"No IV data for {actual_symbol}, using fallback IV: {actual_iv:.3f} (early backtest period)")
                     else:
                         logger.warning(f"No price data for {actual_symbol}, using fallback price")
                 else:
@@ -803,7 +804,9 @@ class BinbinGodStrategy(BaseStrategy):
                         else:
                             logger.warning(f"CC phase: {stock_symbol} - IV not available (bar_index={bar_index}, hv_len={len(sym_hv) if sym_hv else 0})")
                     else:
-                        logger.warning(f"CC phase: {stock_symbol} - stock_hv not available or bar_index < 0")
+                        # This can happen early in backtest when bar_index is -1 (no matching date found)
+                        # It's a normal condition, use debug level to reduce noise
+                        logger.debug(f"CC phase: {stock_symbol} - stock_hv not available or bar_index < 0 (early backtest period)")
                 else:
                     logger.warning(f"CC phase: {stock_symbol} NOT in pool_data! Using fallback price ${actual_underlying_price:.2f}")
                 
