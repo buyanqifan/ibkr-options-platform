@@ -213,10 +213,11 @@ class BacktestEngine:
 
             if is_multi_stock:
                 # Multi-stock mode: check each position with its correct underlying price
-                # CRITICAL: For Wheel-like strategies (binbin_god), disable profit target/stop loss in BOTH SP and CC phases
-                # Wheel strategy philosophy: hold through drawdowns, let time work for us
-                profit_target_to_use = 999999  # Always disable profit target for Wheel-like strategies
-                stop_loss_to_use = 999999      # Always disable stop loss for Wheel-like strategies
+                # For Wheel-like strategies (binbin_god):
+                # - Disable stop loss: hold through drawdowns, let time work for us
+                # - Enable profit target: roll to new position when profitable
+                profit_target_to_use = strategy.profit_target_pct  # Enable profit target for rolling
+                stop_loss_to_use = 999999      # Disable stop loss for Wheel-like strategies
 
                 closed = []
                 remaining_positions = []
@@ -241,33 +242,23 @@ class BacktestEngine:
                         remaining_positions.append(pos)
 
                 simulator.open_positions = remaining_positions
-            # For Wheel strategy SP phase, skip profit target/stop loss - only check assignment at expiry
+            # For Wheel strategy SP phase, skip stop loss - only check assignment at expiry
+            # But enable profit target for rolling
             elif strategy.name == "wheel":
                 # Check which phase the Wheel strategy is in
                 wheel_phase = getattr(strategy, 'phase', 'SP')  # Default to SP if not found
                 
-                if wheel_phase == "SP":
-                    # Sell Put phase: disable profit target/stop loss (want assignment)
-                    closed = simulator.check_exits(
-                        bar_date,
-                        underlying_price,
-                        iv,
-                        profit_target_pct=999999,  # Disable profit target
-                        stop_loss_pct=999999,      # Disable stop loss
-                        min_dte=0,
-                    )
-                else:  # CC phase
-                    # Covered Call phase: ALSO disable profit target/stop loss for Wheel strategy
-                    # Wheel strategy philosophy: hold through drawdowns, wait for stock recovery
-                    # Stock recovery will eventually make the call expire worthless or allow roll
-                    closed = simulator.check_exits(
-                        bar_date,
-                        underlying_price,
-                        iv,
-                        profit_target_pct=999999,  # Disable profit target
-                        stop_loss_pct=999999,      # Disable stop loss
-                        min_dte=0,
-                    )
+                # For Wheel strategy:
+                # - Disable stop loss: hold through drawdowns
+                # - Enable profit target: roll when profitable
+                closed = simulator.check_exits(
+                    bar_date,
+                    underlying_price,
+                    iv,
+                    profit_target_pct=strategy.profit_target_pct,  # Enable profit target for rolling
+                    stop_loss_pct=999999,  # Disable stop loss
+                    min_dte=0,
+                )
             else:
                 # Normal strategies use configured profit target and stop loss
                 # Unless user explicitly disabled them
@@ -509,6 +500,9 @@ class BacktestEngine:
                         entry_cost = cost_model.calculate_total_cost(sig.quantity)
                         total_commission += cost_model.calculate_commission(sig.quantity)
                         total_slippage += cost_model.calculate_slippage(sig.quantity)
+
+                        # Deduct entry cost from cumulative P&L (trading costs reduce realized gains)
+                        position_mgr.cumulative_pnl -= entry_cost
                         
                         logger.debug(
                             f"Opened {sig.symbol} {sig.trade_type}: "
