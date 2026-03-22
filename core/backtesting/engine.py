@@ -353,16 +353,18 @@ class BacktestEngine:
                                 logger.debug(f"Released stock capital: {pid}")
                                 break
                 
-                # Update trade record with capital information at exit
-                trade.capital_at_exit = position_mgr.net_capital  # Record total capital after closing
-                
                 # Notify strategy of closed trade (for stateful strategies like Wheel)
+                # Must be called BEFORE setting capital_at_exit to get correct state updates
                 if hasattr(strategy, 'on_trade_closed'):
                     additional_pnl = strategy.on_trade_closed(trade.to_dict())
                     # For Wheel/CoveredCall/BinbinGod strategies: add stock P&L from call assignment
                     if additional_pnl and additional_pnl != 0:
                         position_mgr.cumulative_pnl += additional_pnl
                         # net_capital is a property (initial_capital + cumulative_pnl), auto-updates
+                
+                # Update trade record with capital information at exit
+                # After stock capital is allocated and strategy state is updated
+                trade.capital_at_exit = position_mgr.net_capital
 
                 # Generate roll signal for Wheel-style strategies
                 # When profit target is hit, immediately roll to new position
@@ -417,6 +419,7 @@ class BacktestEngine:
                                 delta_at_entry=roll_signal.delta,
                                 capital_at_entry=position_mgr.net_capital,
                                 position_id=roll_position_id,  # Store position_id for reliable margin tracking
+                                strategy_phase=getattr(roll_signal, 'strategy_phase', 'SP'),  # Pass strategy phase from signal
                             )
                             simulator.open_position(roll_pos)
 
@@ -498,6 +501,7 @@ class BacktestEngine:
                             delta_at_entry=sig.delta,
                             capital_at_entry=position_mgr.net_capital,  # Record total capital at entry
                             position_id=position_id,  # Store position_id for reliable margin tracking
+                            strategy_phase=getattr(sig, 'strategy_phase', 'SP'),  # Pass strategy phase from signal
                         )
                         simulator.open_position(pos)
                         
