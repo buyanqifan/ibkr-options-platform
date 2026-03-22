@@ -297,8 +297,12 @@ class DeltaOptimizerML:
         if not actions:
             return None
         
-        best_delta = max(actions.items(), key=lambda x: x[1])
-        return best_delta[0]
+        best_delta_key = max(actions.items(), key=lambda x: x[1])[0]
+        # Extract numeric value from key like "delta_0.30"
+        try:
+            return float(best_delta_key.replace("delta_", ""))
+        except (ValueError, AttributeError):
+            return None
     
     def _calculate_rule_based_delta(self, context: MarketContext, right: str) -> float:
         """Calculate delta using rule-based approach."""
