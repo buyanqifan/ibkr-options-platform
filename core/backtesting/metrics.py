@@ -110,6 +110,7 @@ class PerformanceMetrics:
         monthly_pct = {k: (v / initial_capital) * 100 for k, v in monthly_returns.items()}
 
         return {
+            "total_pnl": round(total_pnl, 2),
             "total_return_pct": round(total_return_pct, 2),
             "annualized_return_pct": round(annualized, 2),
             "max_drawdown_pct": round(max_dd, 2),
@@ -117,8 +118,11 @@ class PerformanceMetrics:
             "sortino_ratio": round(sortino, 2),
             "win_rate": round(len(wins) / len(option_trades) * 100, 1) if option_trades else 0,
             "total_trades": len(option_trades),
+            "winning_trades": len(wins),
+            "losing_trades": len(losses),
             "avg_profit": round(np.mean(wins), 2) if wins else 0,
             "avg_loss": round(np.mean(losses), 2) if losses else 0,
+            "avg_pnl_per_trade": round(total_pnl / len(option_trades), 2) if option_trades else 0,
             "profit_factor": round(sum(wins) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else 999,
             "monthly_returns": monthly_pct,
         }
