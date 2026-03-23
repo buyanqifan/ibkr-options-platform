@@ -18,14 +18,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import numpy as np
 
-# Import option pricing module
-from option_pricing import BlackScholes, OptionsPricer
-
-# Import ML modules
+# Import ML modules only - use QC's built-in Greeks and pricing
 from ml_integration import (
     BinbinGodMLIntegration, 
     MLOptimizationConfig, 
-    StrategySignal
+    StrategySignal,
+    AdaptiveDeltaStrategy
 )
 
 
@@ -148,7 +146,11 @@ class BinbinGodStrategy(QCAlgorithm):
         
         self.max_positions = int(self.GetParameter("max_positions", 10))
         self.profit_target_pct = float(self.GetParameter("profit_target_pct", 50))
-        self.stop_loss_pct = float(self.GetParameter("stop_loss_pct", 200))
+        self.stop_loss_pct = float(self.GetParameter("stop_loss_pct", 999999))  # Disabled by default - Wheel strategy doesn't use traditional stop loss
+        
+        # Disable flags (set to >= 999999 to disable)
+        self._profit_target_disabled = self.profit_target_pct >= 999999
+        self._stop_loss_disabled = self.stop_loss_pct >= 999999
         
         # CC+SP simultaneous mode parameters
         self.allow_sp_in_cc_phase = bool(self.GetParameter("allow_sp_in_cc_phase", True))
@@ -159,18 +161,19 @@ class BinbinGodStrategy(QCAlgorithm):
         self.ml_enabled = bool(self.GetParameter("ml_enabled", True))
         self.ml_exploration_rate = float(self.GetParameter("ml_exploration_rate", 0.1))
         self.ml_learning_rate = float(self.GetParameter("ml_learning_rate", 0.01))
+        self.ml_adoption_rate = float(self.GetParameter("ml_adoption_rate", 0.5))  # How much to trust ML vs traditional
+        self.ml_min_confidence = float(self.GetParameter("ml_min_confidence", 0.4))  # Min confidence to use ML result
         
         # Stock pool
         stock_pool_str = self.GetParameter("stock_pool", ",".join(MAG7_STOCKS))
         self.stock_pool = stock_pool_str.split(",")
         
-        # Scoring weights
+        # Scoring weights - aligned with original binbin_god.py
         self.weights = {
-            "iv_rank": 0.30,
-            "technical": 0.25,
-            "momentum": 0.20,
-            "pe_score": 0.15,
-            "ml_adjustment": 0.10,
+            "iv_rank": 0.35,       # Higher IV = better premium income
+            "technical": 0.25,     # RSI + MA position (trend quality)
+            "momentum": 0.20,      # Price trend strength
+            "pe_score": 0.20,      # Value factor
         }
         
         # Initialize ML integration
@@ -183,6 +186,16 @@ class BinbinGodStrategy(QCAlgorithm):
             learning_rate=self.ml_learning_rate,
         )
         self.ml_integration = BinbinGodMLIntegration(ml_config)
+        
+        # Initialize Adaptive Delta Strategy for smooth transition between traditional and ML
+        self.adaptive_strategy = AdaptiveDeltaStrategy(
+            ml_integration=self.ml_integration,
+            adoption_rate=self.ml_adoption_rate,
+            min_confidence=self.ml_min_confidence
+        )
+        
+        # Flag to track if ML pretraining has been done
+        self._ml_pretrained = False
         
         # Add equities and options for all stocks in pool
         self.equities = {}
@@ -199,6 +212,11 @@ class BinbinGodStrategy(QCAlgorithm):
             option = self.AddOption(symbol, Resolution.Daily)
             option.SetFilter(-10, 10, timedelta(days=21), timedelta(days=60))
             self.options[symbol] = option
+        
+        # Add VIX for market sentiment indicator
+        self.vix = self.AddEquity("VIXY", Resolution.Daily)  # VIX ETF as proxy
+        self._current_vix = 20.0  # Default VIX value
+        self._vix_history = []
         
         # Strategy state
         self.phase = "SP"
@@ -264,11 +282,86 @@ class BinbinGodStrategy(QCAlgorithm):
                 # Keep limited history
                 if len(self.price_history[symbol]) > 500:
                     self.price_history[symbol] = self.price_history[symbol][-500:]
+        
+        # Update VIX value for market sentiment
+        if "VIXY" in data.Bars:
+            vix_bar = data.Bars["VIXY"]
+            # VIXY is roughly 0.5x of VIX, so multiply by 2 for approximation
+            self._current_vix = float(vix_bar.Close) * 2
+            self._vix_history.append(self._current_vix)
+            if len(self._vix_history) > 252:  # Keep 1 year of history
+                self._vix_history = self._vix_history[-252:]
+    
+    def OnWarmupFinished(self):
+        """Called when warmup is finished - pretrain ML models."""
+        if not self.ml_enabled or self._ml_pretrained:
+            return
+        
+        self.Log("Starting ML model pretraining with warmup data...")
+        
+        # Pretrain ML models using collected price history
+        pretrain_stats = self._pretrain_ml_models()
+        
+        self._ml_pretrained = True
+        self.Log(f"ML pretraining completed: {pretrain_stats}")
+    
+    def _pretrain_ml_models(self) -> Dict:
+        """
+        Pretrain ML models with historical price data collected during warmup.
+        
+        This allows ML models to have initial learning before live trading/backtesting.
+        """
+        stats = {
+            'symbols_trained': 0,
+            'total_simulations': 0,
+            'status': 'skipped'
+        }
+        
+        if not self.ml_enabled:
+            stats['status'] = 'ml_disabled'
+            return stats
+        
+        try:
+            for symbol in self.stock_pool:
+                bars = self.price_history.get(symbol, [])
+                
+                if len(bars) < 60:
+                    self.Log(f"Skipping {symbol}: insufficient data ({len(bars)} bars)")
+                    continue
+                
+                # Estimate IV from historical volatility
+                iv_estimate = self._calculate_historical_vol(symbol) or 0.25
+                
+                # Pretrain ML models for this symbol
+                symbol_stats = self.ml_integration.pretrain_models(
+                    symbol=symbol,
+                    historical_bars=bars,
+                    iv_estimate=iv_estimate
+                )
+                
+                if symbol_stats.get('status') == 'success':
+                    stats['symbols_trained'] += 1
+                    stats['total_simulations'] += symbol_stats.get('put_simulations', 0)
+                    stats['total_simulations'] += symbol_stats.get('call_simulations', 0)
+                    
+                    self.Log(f"Pretrained {symbol}: {symbol_stats.get('put_simulations', 0)} put sims, "
+                            f"{symbol_stats.get('call_simulations', 0)} call sims")
+            
+            stats['status'] = 'success' if stats['symbols_trained'] > 0 else 'no_data'
+            
+        except Exception as e:
+            self.Log(f"ML pretraining error: {e}")
+            stats['status'] = f'error: {e}'
+        
+        return stats
     
     def Rebalance(self):
         """Main rebalancing logic - called daily."""
         if self.IsWarmingUp:
             return
+        
+        # Check for early exit opportunities (profit target, roll forward, etc.)
+        self._check_position_management()
         
         # Check current open positions
         open_count = len(self.open_option_positions)
@@ -284,9 +377,147 @@ class BinbinGodStrategy(QCAlgorithm):
             self.Log("No signals generated")
             return
         
-        # Execute best signal
+        # Select best signal
         best_signal = self._select_best_signal(signals)
-        self._execute_signal(best_signal)
+        
+        # Execute best signal with confidence filtering
+        if best_signal and best_signal.confidence >= self.ml_min_confidence:
+            self._execute_signal(best_signal)
+        elif best_signal:
+            self.Log(f"Signal filtered: {best_signal.symbol} confidence {best_signal.confidence:.2f} < threshold {self.ml_min_confidence}")
+    
+    def _check_position_management(self):
+        """Check open positions for early exit opportunities."""
+        positions_to_manage = list(self.open_option_positions.items())
+        
+        for position_id, pos_info in positions_to_manage:
+            if position_id not in self.open_option_positions:
+                continue
+                
+            option_symbol = pos_info['option_symbol']
+            security = self.Securities.get(option_symbol)
+            
+            if not security:
+                continue
+            
+            current_price = security.Price
+            entry_price = pos_info['entry_price']
+            
+            if current_price <= 0 or entry_price <= 0:
+                continue
+            
+            # Calculate P&L (short position: profit when price drops)
+            pnl = (entry_price - current_price) * abs(pos_info['quantity']) * 100
+            pnl_pct = pnl / (entry_price * abs(pos_info['quantity']) * 100) * 100
+            
+            # Get DTE
+            expiry = pos_info['expiry']
+            if hasattr(expiry, '__sub__'):
+                dte = (expiry - self.Time).days
+            else:
+                dte = 30  # Default
+            
+            # Premium captured (for short options, profit when price drops)
+            premium_captured_pct = ((entry_price - current_price) / entry_price * 100) if entry_price > 0 else 0
+            
+            # Build position and market data for ML Roll optimizer
+            position_data = {**pos_info, 'current_price': current_price, 'pnl_pct': pnl_pct, 'dte': dte}
+            equity = self.equities.get(pos_info['symbol'])
+            underlying_price = self.Securities[equity.Symbol].Price if equity else 0
+            market_data = {'price': underlying_price, 'iv': 0.25, 'vix': getattr(self, '_current_vix', 20)}
+            
+            # Use ML Roll optimizer if enabled
+            if self.ml_enabled and hasattr(self.ml_integration, 'roll_optimizer'):
+                try:
+                    should_roll, roll_rec = self.ml_integration.roll_optimizer.should_roll(
+                        position=position_data,
+                        market_data=market_data,
+                        current_date=self.Time.strftime('%Y-%m-%d'),
+                        min_confidence=self.ml_min_confidence
+                    )
+                    
+                    if should_roll and roll_rec.action in ["ROLL_FORWARD", "CLOSE_EARLY"]:
+                        self.Log(f"ML Roll: {roll_rec.action} (confidence: {roll_rec.confidence:.0%})")
+                        
+                        if roll_rec.action == "ROLL_FORWARD":
+                            signal = StrategySignal(
+                                symbol=pos_info['symbol'],
+                                action="ROLL",
+                                delta=roll_rec.optimal_delta or abs(pos_info['delta_at_entry']),
+                                dte_min=roll_rec.optimal_dte or 30,
+                                dte_max=roll_rec.optimal_dte or 45,
+                                num_contracts=abs(pos_info['quantity']),
+                                confidence=roll_rec.confidence,
+                                reasoning=roll_rec.reasoning
+                            )
+                            self._execute_roll(signal)
+                            continue
+                        elif roll_rec.action == "CLOSE_EARLY":
+                            signal = StrategySignal(
+                                symbol=pos_info['symbol'],
+                                action="CLOSE",
+                                delta=0, dte_min=0, dte_max=0, num_contracts=0,
+                                confidence=roll_rec.confidence,
+                                reasoning=roll_rec.reasoning
+                            )
+                            self._execute_close(signal)
+                            continue
+                except Exception as e:
+                    self.Log(f"ML Roll optimizer error: {e}")
+            
+            # Rule-based roll logic (fallback)
+            # Check roll forward: 80%+ premium captured with 7+ DTE remaining
+            if premium_captured_pct >= 80 and dte > 7:
+                self.Log(f"Roll forward opportunity: {pos_info['symbol']} "
+                        f"premium_captured={premium_captured_pct:.1f}%, DTE={dte}")
+                
+                # Generate roll signal
+                signal = StrategySignal(
+                    symbol=pos_info['symbol'],
+                    action="ROLL",
+                    delta=abs(pos_info['delta_at_entry']),
+                    dte_min=30,
+                    dte_max=45,
+                    num_contracts=abs(pos_info['quantity']),
+                    confidence=0.8,
+                    reasoning=f"Roll forward: {premium_captured_pct:.0f}% premium captured, {dte} DTE remaining"
+                )
+                self._execute_roll(signal)
+                continue
+            
+            # Check profit target (Wheel strategy: optional, may be disabled)
+            if not self._profit_target_disabled and pnl_pct >= self.profit_target_pct:
+                self.Log(f"Profit target reached: {pos_info['symbol']} P&L={pnl_pct:.1f}%")
+                
+                signal = StrategySignal(
+                    symbol=pos_info['symbol'],
+                    action="CLOSE",
+                    delta=0,
+                    dte_min=0,
+                    dte_max=0,
+                    num_contracts=0,
+                    confidence=0.9,
+                    reasoning=f"Profit target: {pnl_pct:.0f}% gain"
+                )
+                self._execute_close(signal)
+                continue
+            
+            # Check stop loss (DISABLED by default for Wheel strategy - time is our friend)
+            # Can be enabled by setting stop_loss_pct < 999999 as extreme safety net
+            if not self._stop_loss_disabled and pnl_pct <= -self.stop_loss_pct:
+                self.Log(f"Stop loss triggered: {pos_info['symbol']} P&L={pnl_pct:.1f}%")
+                
+                signal = StrategySignal(
+                    symbol=pos_info['symbol'],
+                    action="CLOSE",
+                    delta=0,
+                    dte_min=0,
+                    dte_max=0,
+                    num_contracts=0,
+                    confidence=1.0,
+                    reasoning=f"Stop loss: {pnl_pct:.0f}% loss"
+                )
+                self._execute_close(signal)
     
     def _generate_ml_signals(self) -> List[StrategySignal]:
         """Generate ML-optimized signals for all candidate stocks."""
@@ -326,7 +557,11 @@ class BinbinGodStrategy(QCAlgorithm):
         strategy_phase: str,
         portfolio_state: Dict
     ) -> Optional[StrategySignal]:
-        """Generate ML-optimized signal for a single symbol."""
+        """Generate ML-optimized signal for a single symbol.
+        
+        Uses AdaptiveDeltaStrategy to combine traditional and ML delta selection,
+        with automatic fallback when ML confidence is low.
+        """
         
         equity = self.equities.get(symbol)
         if not equity:
@@ -347,6 +582,10 @@ class BinbinGodStrategy(QCAlgorithm):
         # Get current position if any
         current_position = self._get_current_position(symbol)
         
+        # Traditional/fallback delta values
+        traditional_put_delta = 0.30
+        traditional_call_delta = 0.30
+        
         # Use ML integration to generate signal
         signal = self.ml_integration.generate_signal(
             symbol=symbol,
@@ -357,6 +596,34 @@ class BinbinGodStrategy(QCAlgorithm):
             portfolio_state=portfolio_state,
             current_position=current_position
         )
+        
+        # Apply AdaptiveDeltaStrategy to adjust delta based on confidence
+        if signal and self.ml_enabled:
+            right = "P" if strategy_phase in ("SP", "CC+SP") else "C"
+            traditional_delta = traditional_put_delta if right == "P" else traditional_call_delta
+            
+            # Use adaptive strategy to get final delta
+            if right == "P":
+                adaptive_delta, explanation = self.adaptive_strategy.select_put_delta(
+                    traditional_delta=traditional_delta,
+                    ml_delta=signal.delta,
+                    ml_confidence=signal.delta_confidence,
+                    reasoning=signal.reasoning
+                )
+            else:
+                adaptive_delta, explanation = self.adaptive_strategy.select_call_delta(
+                    traditional_delta=traditional_delta,
+                    ml_delta=signal.delta,
+                    ml_confidence=signal.delta_confidence,
+                    reasoning=signal.reasoning
+                )
+            
+            # Log the adaptive decision if delta changed significantly
+            if abs(adaptive_delta - signal.delta) > 0.02:
+                self.Log(f"Adaptive delta adjustment for {symbol}: {explanation}")
+            
+            # Update signal with adaptive delta
+            signal.delta = adaptive_delta
         
         # Add stock scoring adjustment
         score = self._score_single_stock(symbol, bars, underlying_price)
@@ -547,7 +814,7 @@ class BinbinGodStrategy(QCAlgorithm):
         return signals[0]
     
     def _execute_signal(self, signal: StrategySignal):
-        """Execute a trading signal."""
+        """Execute a trading signal using QC's built-in Greeks data."""
         
         if not signal:
             return
@@ -564,68 +831,39 @@ class BinbinGodStrategy(QCAlgorithm):
             self._execute_close(signal)
             return
         
-        # Get equity and option chain
+        # Get equity
         equity = self.equities.get(signal.symbol)
         if not equity:
+            self.Log(f"No equity found for {signal.symbol}")
             return
         
         underlying_price = self.Securities[equity.Symbol].Price
         
-        option_chain = self.OptionChainProvider.GetOptionContractList(
-            equity.Symbol, self.Time
+        # Determine option type and target delta
+        target_right = OptionRight.Put if signal.action == "SELL_PUT" else OptionRight.Call
+        target_delta = -signal.delta if target_right == OptionRight.Put else signal.delta
+        
+        # Find suitable option using QC's Greeks
+        selected = self._find_option_by_greeks(
+            symbol=signal.symbol,
+            equity_symbol=equity.Symbol,
+            target_right=target_right,
+            target_delta=target_delta,
+            dte_min=signal.dte_min,
+            dte_max=signal.dte_max,
+            delta_tolerance=0.05
         )
         
-        if not option_chain:
-            self.Log(f"No option chain for {signal.symbol}")
+        if not selected:
+            self.Log(f"No suitable options found for {signal.symbol} with delta ~{target_delta:.2f}")
             return
         
-        # Find suitable option
-        target_right = OptionRight.Put if signal.action == "SELL_PUT" else OptionRight.Call
-        
-        suitable_options = []
-        for option_symbol in option_chain:
-            # Get option properties from Symbol ID
-            option_right = option_symbol.ID.OptionRight
-            if option_right != target_right:
-                continue
-            
-            strike = option_symbol.ID.StrikePrice
-            expiry = option_symbol.ID.Date
-            
-            dte = (expiry - self.Time).days
-            if not (signal.dte_min <= dte <= signal.dte_max):
-                continue
-            
-            # Calculate delta
-            T = dte / 365.0
-            iv = self._estimate_iv(signal.symbol, underlying_price, strike, T)
-            delta = BlackScholes.delta(
-                underlying_price, strike, T, 0.05, iv, 
-                "P" if target_right == OptionRight.Put else "C"
-            )
-            
-            if signal.action == "SELL_PUT":
-                if -signal.delta * 1.2 <= delta <= -signal.delta * 0.8:
-                    premium = BlackScholes.put_price(
-                        underlying_price, strike, T, 0.05, iv
-                    )
-                    suitable_options.append((option_symbol, strike, expiry, delta, premium, iv))
-            else:
-                if signal.delta * 0.8 <= delta <= signal.delta * 1.2:
-                    premium = BlackScholes.call_price(
-                        underlying_price, strike, T, 0.05, iv
-                    )
-                    suitable_options.append((option_symbol, strike, expiry, delta, premium, iv))
-        
-        if not suitable_options:
-            self.Log(f"No suitable options found for {signal.symbol}")
-            return
-        
-        # Select best option (closest to target delta)
-        target_delta = signal.delta if target_right == OptionRight.Call else -signal.delta
-        suitable_options.sort(key=lambda x: abs(x[3] - target_delta))
-        selected = suitable_options[0]
-        option_symbol, strike, expiry, delta, premium, iv = selected
+        option_symbol = selected['option_symbol']
+        strike = selected['strike']
+        expiry = selected['expiry']
+        delta = selected['delta']
+        iv = selected['iv']
+        premium = selected['premium']
         
         # Position sizing from signal
         quantity = -signal.num_contracts
@@ -637,6 +875,9 @@ class BinbinGodStrategy(QCAlgorithm):
             right_str = 'P' if target_right == OptionRight.Put else 'C'
             position_id = f"{signal.symbol}_{self.Time.strftime('%Y%m%d')}_{strike}_{right_str}"
             
+            # Use actual fill price
+            fill_price = ticket.AverageFillPrice if ticket.AverageFillPrice > 0 else premium
+            
             self.open_option_positions[position_id] = {
                 'symbol': signal.symbol,
                 'option_symbol': option_symbol,
@@ -644,7 +885,7 @@ class BinbinGodStrategy(QCAlgorithm):
                 'strike': strike,
                 'expiry': expiry,
                 'entry_date': self.Time.strftime('%Y-%m-%d'),
-                'entry_price': premium,
+                'entry_price': fill_price,
                 'quantity': quantity,
                 'delta_at_entry': delta,
                 'iv_at_entry': iv,
@@ -659,18 +900,155 @@ class BinbinGodStrategy(QCAlgorithm):
             })
             
             self.Log(f"Executed: {signal.action} {signal.num_contracts} {signal.symbol} "
-                    f"@ ${premium:.2f}, strike={strike:.2f}, delta={delta:.3f}")
+                    f"@ ${fill_price:.2f}, strike={strike:.2f}, delta={delta:.3f}, IV={iv:.1%}")
             self.Log(f"ML Reasoning: {signal.reasoning}")
+        else:
+            self.Log(f"Order not filled for {signal.symbol}: {ticket.Status}")
     
     def _execute_roll(self, signal: StrategySignal):
-        """Execute a roll action."""
+        """Execute a roll action - close existing position and open new one."""
         self.Log(f"Roll action for {signal.symbol}: {signal.reasoning}")
-        # Roll logic would close existing position and open new one
+        
+        # Find existing position for this symbol
+        existing_position_id = None
+        existing_position = None
+        
+        for pos_id, pos_info in self.open_option_positions.items():
+            if pos_info.get('symbol') == signal.symbol:
+                existing_position_id = pos_id
+                existing_position = pos_info
+                break
+        
+        if not existing_position:
+            self.Log(f"No existing position found to roll for {signal.symbol}")
+            return
+        
+        # Close existing position
+        option_symbol = existing_position['option_symbol']
+        quantity_to_close = -existing_position['quantity']  # Opposite side to close
+        
+        close_ticket = self.MarketOrder(option_symbol, quantity_to_close)
+        
+        if close_ticket.Status != OrderStatus.Filled:
+            self.Log(f"Failed to close position for roll: {close_ticket.Status}")
+            return
+        
+        close_price = close_ticket.AverageFillPrice
+        entry_price = existing_position['entry_price']
+        pnl = (entry_price - close_price) * abs(existing_position['quantity']) * 100
+        
+        self.Log(f"Closed position for roll: P&L=${pnl:.2f}")
+        
+        # Update tracking
+        self.total_trades += 1
+        self.total_pnl += pnl
+        if pnl > 0:
+            self.winning_trades += 1
+        
+        self.trade_history.append({
+            "date": self.Time.strftime("%Y-%m-%d"),
+            "symbol": signal.symbol,
+            "type": existing_position['right'],
+            "pnl": pnl,
+            "exit_reason": "ROLL"
+        })
+        
+        # Remove old position
+        del self.open_option_positions[existing_position_id]
+        
+        # Open new position using signal parameters
+        equity = self.equities.get(signal.symbol)
+        if not equity:
+            return
+        
+        target_right = OptionRight.Put if signal.action == "ROLL" and existing_position['right'] == 'P' else OptionRight.Call
+        target_delta = -signal.delta if target_right == OptionRight.Put else signal.delta
+        
+        # Find new option
+        selected = self._find_option_by_greeks(
+            symbol=signal.symbol,
+            equity_symbol=equity.Symbol,
+            target_right=target_right,
+            target_delta=target_delta,
+            dte_min=signal.dte_min,
+            dte_max=signal.dte_max,
+            delta_tolerance=0.05
+        )
+        
+        if not selected:
+            self.Log(f"Failed to find new option for roll: {signal.symbol}")
+            return
+        
+        # Open new position
+        new_quantity = -signal.num_contracts
+        new_ticket = self.MarketOrder(selected['option_symbol'], new_quantity)
+        
+        if new_ticket.Status == OrderStatus.Filled:
+            right_str = 'P' if target_right == OptionRight.Put else 'C'
+            position_id = f"{signal.symbol}_{self.Time.strftime('%Y%m%d')}_{selected['strike']:.0f}_{right_str}"
+            
+            fill_price = new_ticket.AverageFillPrice
+            
+            self.open_option_positions[position_id] = {
+                'symbol': signal.symbol,
+                'option_symbol': selected['option_symbol'],
+                'right': right_str,
+                'strike': selected['strike'],
+                'expiry': selected['expiry'],
+                'entry_date': self.Time.strftime('%Y-%m-%d'),
+                'entry_price': fill_price,
+                'quantity': new_quantity,
+                'delta_at_entry': selected['delta'],
+                'iv_at_entry': selected['iv'],
+                'strategy_phase': self.phase,
+                'ml_signal': signal,
+            }
+            
+            self.Log(f"Rolled to new position: {signal.symbol} @ ${fill_price:.2f}, "
+                    f"strike={selected['strike']:.2f}, delta={selected['delta']:.3f}")
     
     def _execute_close(self, signal: StrategySignal):
-        """Execute a close action."""
+        """Execute a close action - close existing position."""
         self.Log(f"Close action for {signal.symbol}: {signal.reasoning}")
-        # Close logic would close existing position
+        
+        # Find existing position for this symbol
+        positions_to_close = []
+        
+        for pos_id, pos_info in self.open_option_positions.items():
+            if pos_info.get('symbol') == signal.symbol:
+                positions_to_close.append((pos_id, pos_info))
+        
+        if not positions_to_close:
+            self.Log(f"No positions found to close for {signal.symbol}")
+            return
+        
+        for pos_id, pos_info in positions_to_close:
+            option_symbol = pos_info['option_symbol']
+            quantity_to_close = -pos_info['quantity']
+            
+            close_ticket = self.MarketOrder(option_symbol, quantity_to_close)
+            
+            if close_ticket.Status == OrderStatus.Filled:
+                close_price = close_ticket.AverageFillPrice
+                entry_price = pos_info['entry_price']
+                pnl = (entry_price - close_price) * abs(pos_info['quantity']) * 100
+                
+                self.total_trades += 1
+                self.total_pnl += pnl
+                if pnl > 0:
+                    self.winning_trades += 1
+                
+                self.trade_history.append({
+                    "date": self.Time.strftime("%Y-%m-%d"),
+                    "symbol": signal.symbol,
+                    "type": pos_info['right'],
+                    "pnl": pnl,
+                    "exit_reason": signal.reasoning or "SIGNAL_CLOSE"
+                })
+                
+                self.Log(f"Closed position: {signal.symbol} P&L=${pnl:.2f}")
+                
+                del self.open_option_positions[pos_id]
     
     def CheckExpiredOptions(self):
         """Check for expired options and handle assignments."""
@@ -758,13 +1136,259 @@ class BinbinGodStrategy(QCAlgorithm):
             # Would trigger retraining here
     
     def _estimate_iv(self, symbol: str, S: float, K: float, T: float) -> float:
-        """Estimate implied volatility."""
-        # Use ML volatility model
+        """Estimate implied volatility - now uses QC's IV from option chain."""
+        # This method is kept for backward compatibility but should not be used
+        # Prefer _find_option_by_greeks which uses QC's built-in IV
+        return self._get_atm_iv_from_chain(symbol, S) or 0.25
+    
+    def _get_atm_iv_from_chain(self, symbol: str, underlying_price: float) -> Optional[float]:
+        """Get ATM implied volatility from QC option chain.
+        
+        Args:
+            symbol: Stock symbol
+            underlying_price: Current underlying price
+            
+        Returns:
+            ATM IV or None if not available
+        """
+        equity = self.equities.get(symbol)
+        if not equity:
+            return None
+        
+        option_chain = self.OptionChainProvider.GetOptionContractList(
+            equity.Symbol, self.Time
+        )
+        
+        if not option_chain:
+            return None
+        
+        # Find option closest to ATM
+        closest_iv = None
+        min_strike_diff = float('inf')
+        
+        for option_symbol in option_chain:
+            strike = option_symbol.ID.StrikePrice
+            strike_diff = abs(strike - underlying_price)
+            
+            if strike_diff < min_strike_diff:
+                security = self.Securities.get(option_symbol)
+                if security and hasattr(security, 'ImpliedVolatility') and security.ImpliedVolatility:
+                    closest_iv = security.ImpliedVolatility
+                    min_strike_diff = strike_diff
+        
+        return closest_iv
+    
+    def _find_option_by_greeks(
+        self,
+        symbol: str,
+        equity_symbol: Symbol,
+        target_right: OptionRight,
+        target_delta: float,
+        dte_min: int,
+        dte_max: int,
+        delta_tolerance: float = 0.05
+    ) -> Optional[Dict]:
+        """Find suitable option using QC's built-in Greeks data.
+        
+        This method uses QuantConnect's native Greeks calculations instead of
+        custom Black-Scholes implementation for better accuracy and real market data.
+        
+        Args:
+            symbol: Stock symbol string
+            equity_symbol: QC equity Symbol object
+            target_right: OptionRight.Put or OptionRight.Call
+            target_delta: Target delta value (negative for puts, positive for calls)
+            dte_min: Minimum days to expiry
+            dte_max: Maximum days to expiry
+            delta_tolerance: Allowed deviation from target delta
+            
+        Returns:
+            Dict with option details or None if not found
+        """
+        underlying_price = self.Securities[equity_symbol].Price
+        
+        option_chain = self.OptionChainProvider.GetOptionContractList(
+            equity_symbol, self.Time
+        )
+        
+        if not option_chain:
+            self.Log(f"No option chain available for {symbol}")
+            return None
+        
+        suitable_options = []
+        
+        for option_symbol in option_chain:
+            # Filter by option type
+            if option_symbol.ID.OptionRight != target_right:
+                continue
+            
+            # Filter by DTE
+            expiry = option_symbol.ID.Date
+            dte = (expiry - self.Time).days
+            if not (dte_min <= dte <= dte_max):
+                continue
+            
+            strike = option_symbol.ID.StrikePrice
+            
+            # Get QC's built-in Greeks and IV
+            security = self.Securities.get(option_symbol)
+            if not security:
+                continue
+            
+            # QC provides these Greeks based on actual market data
+            delta = getattr(security, 'Delta', None)
+            iv = getattr(security, 'ImpliedVolatility', None)
+            
+            # Skip if Greeks not available (may need warmup or data)
+            if delta is None or iv is None:
+                # Fallback: estimate delta from moneyness if QC data not ready
+                # For OTM put: delta ~ -0.30 means strike is below price
+                # For OTM call: delta ~ 0.30 means strike is above price
+                if target_right == OptionRight.Put:
+                    # Rough estimate: OTM put delta based on moneyness
+                    moneyness = strike / underlying_price
+                    if moneyness < 0.98:  # OTM put
+                        delta = -max(0.15, min(0.40, (1 - moneyness) * 2))
+                    else:
+                        continue  # Skip ITM/ATM
+                else:
+                    # OTM call
+                    moneyness = strike / underlying_price
+                    if moneyness > 1.02:  # OTM call
+                        delta = max(0.15, min(0.40, (moneyness - 1) * 2))
+                    else:
+                        continue  # Skip ITM/ATM
+                
+                # Use historical vol as IV fallback
+                iv = self._calculate_historical_vol(symbol) or 0.25
+            
+            # Check if delta is within tolerance
+            delta_diff = abs(delta - target_delta)
+            if delta_diff <= delta_tolerance:
+                # Get premium from bid/ask or last price
+                bid = getattr(security, 'BidPrice', 0) or 0
+                ask = getattr(security, 'AskPrice', 0) or 0
+                
+                if bid > 0 and ask > 0:
+                    premium = (bid + ask) / 2  # Mid price
+                else:
+                    premium = security.Price or 0
+                
+                if premium <= 0:
+                    continue
+                
+                suitable_options.append({
+                    'option_symbol': option_symbol,
+                    'strike': strike,
+                    'expiry': expiry,
+                    'dte': dte,
+                    'delta': delta,
+                    'iv': iv,
+                    'premium': premium,
+                    'delta_diff': delta_diff,
+                    'bid': bid,
+                    'ask': ask
+                })
+        
+        if not suitable_options:
+            self.Log(f"No options found for {symbol} {target_right} with delta {target_delta:.2f}±{delta_tolerance}")
+            return None
+        
+        # Sort by delta difference (closest to target first)
+        suitable_options.sort(key=lambda x: x['delta_diff'])
+        
+        best = suitable_options[0]
+        
+        self.Log(f"Found option: {symbol} {target_right} strike={best['strike']:.2f} "
+                f"delta={best['delta']:.3f} (target={target_delta:.3f}) "
+                f"IV={best['iv']:.1%} premium=${best['premium']:.2f} DTE={best['dte']}")
+        
+        return best
+    
+    def _calculate_historical_vol(self, symbol: str, window: int = 20) -> Optional[float]:
+        """Calculate historical volatility from price history.
+        
+        Args:
+            symbol: Stock symbol
+            window: Lookback window in days
+            
+        Returns:
+            Annualized historical volatility or None
+        """
         bars = self.price_history.get(symbol, [])
-        if bars:
-            prediction = self.ml_integration.volatility_model.predict(bars)
-            return prediction.iv_estimate
-        return 0.25
+        if len(bars) < window + 1:
+            return None
+        
+        closes = np.array([b['close'] for b in bars[-(window+1):]])
+        returns = np.diff(closes) / closes[:-1]
+        
+        if len(returns) < 2:
+            return None
+        
+        # Annualize the volatility
+        daily_vol = np.std(returns)
+        annual_vol = daily_vol * np.sqrt(252)
+        
+        return annual_vol if annual_vol > 0 else None
+    
+    def _calculate_iv_rank(self, symbol: str) -> float:
+        """Calculate IV rank based on historical volatility percentile.
+        
+        IV Rank shows where current IV stands relative to its history.
+        100 = highest IV in history, 0 = lowest.
+        
+        Args:
+            symbol: Stock symbol
+            
+        Returns:
+            IV rank (0-100)
+        """
+        bars = self.price_history.get(symbol, [])
+        if len(bars) < 60:
+            return 50.0  # Default mid-range
+        
+        # Calculate rolling volatility for the past year
+        window = 20
+        vol_series = []
+        closes = np.array([b['close'] for b in bars])
+        
+        for i in range(window, len(closes)):
+            window_closes = closes[i-window:i+1]
+            returns = np.diff(window_closes) / window_closes[:-1]
+            vol = np.std(returns) * np.sqrt(252)  # Annualized
+            vol_series.append(vol)
+        
+        if len(vol_series) < 10:
+            return 50.0
+        
+        current_vol = vol_series[-1]
+        min_vol = min(vol_series)
+        max_vol = max(vol_series)
+        
+        if max_vol == min_vol:
+            return 50.0
+        
+        iv_rank = (current_vol - min_vol) / (max_vol - min_vol) * 100
+        return max(0, min(100, iv_rank))
+    
+    def _get_vix_percentile(self) -> float:
+        """Calculate VIX percentile relative to its history.
+        
+        Returns:
+            VIX percentile (0-100)
+        """
+        if len(self._vix_history) < 10:
+            return 50.0
+        
+        current_vix = self._current_vix
+        min_vix = min(self._vix_history)
+        max_vix = max(self._vix_history)
+        
+        if max_vix == min_vix:
+            return 50.0
+        
+        percentile = (current_vix - min_vix) / (max_vix - min_vix) * 100
+        return max(0, min(100, percentile))
     
     def OnOrderEvent(self, orderEvent):
         """Handle order events."""

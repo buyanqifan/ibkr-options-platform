@@ -360,23 +360,25 @@ class DeltaOptimizerML:
         iv: float,
         T: float
     ) -> float:
-        """Estimate option premium for given delta."""
+        """Estimate option premium using simplified approximation.
+        
+        Note: In QC, we should use actual option chain prices.
+        This provides a rough estimate for ML optimization only.
+        """
         
         # Approximate strike from delta
         if right == "P":
             strike = price * (1 + delta * iv * np.sqrt(T))
+            moneyness = strike / price
+            # OTM put premium approximation
+            premium = price * delta * iv * np.sqrt(T) * (1 - moneyness * 0.5)
         else:
             strike = price * (1 - delta * iv * np.sqrt(T))
+            moneyness = strike / price
+            # OTM call premium approximation
+            premium = price * delta * iv * np.sqrt(T) * (moneyness * 0.5 - 0.5)
         
-        # Use Black-Scholes approximation
-        from option_pricing import BlackScholes
-        
-        if right == "P":
-            premium = BlackScholes.put_price(price, strike, T, 0.05, iv)
-        else:
-            premium = BlackScholes.call_price(price, strike, T, 0.05, iv)
-        
-        return premium
+        return max(premium, 0.01)  # Minimum premium
     
     def _calculate_risk_score(
         self,

@@ -188,7 +188,7 @@ class MLPositionOptimizer:
         iv: float,
         right: str = 'P'
     ) -> float:
-        """Estimate probability of assignment."""
+        """Estimate probability of assignment using simplified approximation."""
         
         if dte <= 0 or iv <= 0:
             return 0.0
@@ -196,12 +196,22 @@ class MLPositionOptimizer:
         T = dte / 365.0
         
         try:
-            from option_pricing import BlackScholes
+            # Simplified ITM probability approximation
+            moneyness = strike / underlying_price
+            delta_approx = abs(underlying_price - strike) / underlying_price
             
-            itm_prob = abs(BlackScholes.delta(
-                underlying_price, strike, T, 0.05, iv, right
-            ))
-            return float(itm_prob)
+            # Adjust for time and volatility
+            time_factor = np.sqrt(T)
+            vol_factor = iv * time_factor
+            
+            if right == 'P':
+                # Put ITM when price < strike
+                itm_prob = delta_approx * (1 + vol_factor) if moneyness > 1 else delta_approx * 0.5
+            else:
+                # Call ITM when price > strike
+                itm_prob = delta_approx * (1 + vol_factor) if moneyness < 1 else delta_approx * 0.5
+            
+            return float(max(0.05, min(0.95, itm_prob)))
         except Exception:
             delta_approx = abs(underlying_price - strike) / underlying_price
             return max(0, min(1, delta_approx))

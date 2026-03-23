@@ -99,6 +99,9 @@ class StrategySignal:
     delta_confidence: float = 0.0
     dte_confidence: float = 0.0
     position_confidence: float = 0.0
+    
+    # Stock scoring adjustment (from stock selection algorithm)
+    ml_score_adjustment: float = 0.0  # Range: -0.5 to 0.5
 
 
 class BinbinGodMLIntegration:
@@ -355,18 +358,28 @@ class BinbinGodMLIntegration:
         iv: float,
         right: str
     ) -> float:
-        """Estimate option premium."""
+        """Estimate option premium using simplified approximation.
         
+        Note: In QC, we should use actual option chain prices instead of 
+        theoretical pricing. This method provides a rough estimate for 
+        ML pretraining only.
+        """
         T = dte / 365.0
         
-        from option_pricing import BlackScholes
-        
+        # Simplified premium estimation without Black-Scholes
+        # For OTM options, premium ≈ delta * underlying_price * iv * sqrt(T)
         if right == "P":
             strike = price * (1 + delta * iv * np.sqrt(T) * 0.5)
-            return BlackScholes.put_price(price, strike, T, 0.05, iv)
+            # OTM put premium approximation
+            moneyness = strike / price
+            premium = price * delta * iv * np.sqrt(T) * (1 - moneyness * 0.5)
         else:
             strike = price * (1 - delta * iv * np.sqrt(T) * 0.5)
-            return BlackScholes.call_price(price, strike, T, 0.05, iv)
+            # OTM call premium approximation
+            moneyness = strike / price
+            premium = price * delta * iv * np.sqrt(T) * (moneyness * 0.5 - 0.5)
+        
+        return max(premium, 0.01)  # Minimum premium
     
     def update_performance(
         self,
@@ -509,3 +522,129 @@ class BinbinGodMLIntegration:
         ]
         
         return "\n".join(lines)
+
+
+class AdaptiveDeltaStrategy:
+    """
+    Adaptive strategy that combines traditional delta selection with ML optimization.
+    
+    This provides a smooth transition path and allows fallback to traditional
+    delta when ML confidence is low.
+    
+    Key features:
+    - Low confidence threshold: Falls back to traditional delta
+    - Weighted combination: Blends traditional and ML deltas
+    - Performance tracking: Compares methods over time
+    """
+    
+    # Minimum confidence threshold for using ML results
+    MIN_CONFIDENCE_THRESHOLD = 0.4
+    
+    def __init__(self, 
+                 ml_integration: 'BinbinGodMLIntegration',
+                 adoption_rate: float = 0.5,
+                 min_confidence: float = 0.4):
+        """
+        Initialize adaptive strategy.
+        
+        Args:
+            ml_integration: ML integration instance
+            adoption_rate: How much to trust ML vs traditional (0.0 = traditional only, 1.0 = ML only)
+            min_confidence: Minimum ML confidence to use ML result (below this, use traditional)
+        """
+        self.ml_integration = ml_integration
+        self.adoption_rate = adoption_rate
+        self.min_confidence = min_confidence
+        self.performance_comparison = {
+            'traditional': [],
+            'ml_optimized': []
+        }
+    
+    def select_delta(self,
+                    traditional_delta: float,
+                    ml_delta: float,
+                    ml_confidence: float,
+                    right: str = "P",
+                    reasoning: str = "") -> Tuple[float, str]:
+        """
+        Select delta using adaptive combination of traditional and ML methods.
+        
+        Args:
+            traditional_delta: Traditional/static delta value
+            ml_delta: ML-optimized delta value
+            ml_confidence: Confidence of ML prediction
+            right: "P" for put, "C" for call
+            reasoning: ML reasoning string
+            
+        Returns:
+            Tuple of (selected_delta, explanation)
+        """
+        # Low confidence: fall back to traditional
+        if ml_confidence < self.min_confidence:
+            return traditional_delta, f"Low ML confidence ({ml_confidence:.2f}), using traditional delta {traditional_delta:.3f}"
+        
+        # Protective mode for calls (loss position): trust ML more
+        if right == "C" and "protective" in reasoning.lower():
+            enhanced_adoption_rate = min(1.0, self.adoption_rate * 1.5)
+        else:
+            enhanced_adoption_rate = self.adoption_rate
+        
+        # Weighted combination
+        adaptive_delta = (
+            traditional_delta * (1 - enhanced_adoption_rate) +
+            ml_delta * enhanced_adoption_rate
+        )
+        
+        explanation = (f"Adaptive delta: traditional={traditional_delta:.3f}, "
+                      f"ml={ml_delta:.3f}, combined={adaptive_delta:.3f} "
+                      f"(adoption={enhanced_adoption_rate:.0%})")
+        
+        return adaptive_delta, explanation
+    
+    def select_put_delta(self,
+                        traditional_delta: float,
+                        ml_delta: float,
+                        ml_confidence: float,
+                        reasoning: str = "") -> Tuple[float, str]:
+        """Select put delta with adaptive strategy."""
+        return self.select_delta(traditional_delta, ml_delta, ml_confidence, "P", reasoning)
+    
+    def select_call_delta(self,
+                         traditional_delta: float,
+                         ml_delta: float,
+                         ml_confidence: float,
+                         reasoning: str = "") -> Tuple[float, str]:
+        """Select call delta with adaptive strategy."""
+        return self.select_delta(traditional_delta, ml_delta, ml_confidence, "C", reasoning)
+    
+    def record_performance(self, 
+                         method: str,  # "traditional" or "ml_optimized"
+                         delta: float,
+                         pnl: float):
+        """Record performance for method comparison."""
+        self.performance_comparison[method].append({
+            'delta': delta,
+            'pnl': pnl
+        })
+        
+        # Keep only recent performance
+        if len(self.performance_comparison[method]) > 100:
+            self.performance_comparison[method] = self.performance_comparison[method][-100:]
+    
+    def get_method_comparison(self) -> Dict[str, Any]:
+        """Compare performance between traditional and ML methods."""
+        comparison = {}
+        
+        for method in ['traditional', 'ml_optimized']:
+            if self.performance_comparison[method]:
+                recent = self.performance_comparison[method][-50:]
+                avg_pnl = np.mean([p['pnl'] for p in recent])
+                win_rate = sum(1 for p in recent if p['pnl'] > 0) / len(recent)
+                
+                comparison[method] = {
+                    'average_pnl': avg_pnl,
+                    'win_rate': win_rate,
+                    'trades': len(recent)
+                }
+        
+        return comparison

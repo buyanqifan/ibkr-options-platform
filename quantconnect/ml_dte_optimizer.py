@@ -337,19 +337,17 @@ class DTEOptimizerML:
         T = dte / 365.0
         delta = 0.30
         
-        # Estimate premium
-        from option_pricing import BlackScholes
-        
+        # Estimate premium using simplified approximation
         if right == "P":
             strike = context.current_price * (1 - delta)
-            premium = BlackScholes.put_price(
-                context.current_price, strike, T, 0.05, iv
-            )
+            moneyness = strike / context.current_price
+            premium = context.current_price * delta * iv * np.sqrt(T) * (1 - moneyness * 0.5)
         else:
             strike = context.current_price * (1 + delta)
-            premium = BlackScholes.call_price(
-                context.current_price, strike, T, 0.05, iv
-            )
+            moneyness = strike / context.current_price
+            premium = context.current_price * delta * iv * np.sqrt(T) * (moneyness * 0.5 - 0.5)
+        
+        premium = max(premium, 0.01)
         
         # Time decay factor
         time_decay_factor = min(1.0, T * 365 / 45)
@@ -420,23 +418,21 @@ class DTEOptimizerML:
         right: str,
         iv: float
     ) -> float:
-        """Estimate expected premium for selected DTE."""
+        """Estimate expected premium for selected DTE using simplified approximation."""
         
         T = dte / 365.0
         delta = 0.30
         
-        from option_pricing import BlackScholes
-        
         if right == "P":
             strike = context.current_price * (1 - delta)
-            return BlackScholes.put_price(
-                context.current_price, strike, T, 0.05, iv
-            )
+            moneyness = strike / context.current_price
+            premium = context.current_price * delta * iv * np.sqrt(T) * (1 - moneyness * 0.5)
         else:
             strike = context.current_price * (1 + delta)
-            return BlackScholes.call_price(
-                context.current_price, strike, T, 0.05, iv
-            )
+            moneyness = strike / context.current_price
+            premium = context.current_price * delta * iv * np.sqrt(T) * (moneyness * 0.5 - 0.5)
+        
+        return max(premium, 0.01)
     
     def _estimate_assignment_probability(
         self,
@@ -445,7 +441,7 @@ class DTEOptimizerML:
         right: str,
         iv: float
     ) -> float:
-        """Estimate probability of assignment."""
+        """Estimate probability of assignment using simplified delta approximation."""
         
         delta = 0.30
         
@@ -456,12 +452,9 @@ class DTEOptimizerML:
         
         T = dte / 365.0
         
-        from option_pricing import BlackScholes
-        
-        # ITM probability
-        itm_prob = abs(BlackScholes.delta(
-            context.current_price, strike, T, 0.05, iv, right
-        ))
+        # ITM probability approximation (delta ≈ ITM probability for OTM options)
+        moneyness = strike / context.current_price
+        itm_prob = delta * (1 + 0.5 * (1 - moneyness) / (iv * np.sqrt(T))) if right == "P" else delta * (1 + 0.5 * (moneyness - 1) / (iv * np.sqrt(T)))
         
         # Adjust for regime
         regime_adj = {
@@ -650,11 +643,10 @@ class DTEOptimizerML:
         else:
             delta = 0.30
         
-        from option_pricing import BlackScholes
-        
         if right == "P":
             strike = entry_price * (1 - delta)
-            entry_premium = BlackScholes.put_price(entry_price, strike, T, 0.05, iv)
+            moneyness = strike / entry_price
+            entry_premium = entry_price * delta * iv * np.sqrt(T) * (1 - moneyness * 0.5)
             assigned = exit_price < strike
             if assigned:
                 stock_pnl = exit_price - strike
@@ -663,7 +655,8 @@ class DTEOptimizerML:
                 pnl = entry_premium / strike
         else:
             strike = entry_price * (1 + delta)
-            entry_premium = BlackScholes.call_price(entry_price, strike, T, 0.05, iv)
+            moneyness = strike / entry_price
+            entry_premium = entry_price * delta * iv * np.sqrt(T) * (moneyness * 0.5 - 0.5)
             assigned = exit_price > strike
             if assigned:
                 stock_pnl = strike - exit_price
@@ -671,7 +664,7 @@ class DTEOptimizerML:
             else:
                 pnl = entry_premium / strike
         
-        return pnl, assigned
+        return max(pnl, -0.5), assigned  # Cap max loss at 50%
     
     def get_optimization_insights(self) -> Dict[str, Any]:
         """Get insights about optimization performance."""
