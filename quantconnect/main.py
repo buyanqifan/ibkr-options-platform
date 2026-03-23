@@ -148,6 +148,10 @@ class BinbinGodStrategy(QCAlgorithm):
         self.profit_target_pct = float(self.GetParameter("profit_target_pct", 50))
         self.stop_loss_pct = float(self.GetParameter("stop_loss_pct", 999999))  # Disabled by default - Wheel strategy doesn't use traditional stop loss
         
+        # Risk management parameters
+        self.max_risk_per_trade = float(self.GetParameter("max_risk_per_trade", 0.02))  # Max 2% portfolio risk per trade
+        self.max_leverage = float(self.GetParameter("max_leverage", 1.0))  # Max leverage allowed
+        
         # Disable flags (set to >= 999999 to disable)
         self._profit_target_disabled = self.profit_target_pct >= 999999
         self._stop_loss_disabled = self.stop_loss_pct >= 999999
@@ -156,6 +160,18 @@ class BinbinGodStrategy(QCAlgorithm):
         self.allow_sp_in_cc_phase = bool(self.GetParameter("allow_sp_in_cc_phase", True))
         self.sp_in_cc_margin_threshold = float(self.GetParameter("sp_in_cc_margin_threshold", 0.5))
         self.sp_in_cc_max_positions = int(self.GetParameter("sp_in_cc_max_positions", 3))
+        
+        # CC optimization parameters - protect when stock price below cost basis
+        self.cc_optimization_enabled = bool(self.GetParameter("cc_optimization_enabled", True))
+        self.cc_min_delta_cost = float(self.GetParameter("cc_min_delta_cost", 0.15))  # Min delta when price < cost
+        self.cc_cost_basis_threshold = float(self.GetParameter("cc_cost_basis_threshold", 0.05))  # 5% below cost to trigger
+        self.cc_min_strike_premium = float(self.GetParameter("cc_min_strike_premium", 0.02))  # Min premium as % of cost
+        
+        # Stock selection memory mechanism - avoid frequent switching
+        self._last_selected_stock = None
+        self._selection_count = 0
+        self._min_hold_cycles = 3  # Minimum cycles before switching stocks
+        self._last_stock_scores = {}  # Track scores for comparison
         
         # ML configuration
         self.ml_enabled = bool(self.GetParameter("ml_enabled", True))
@@ -210,7 +226,8 @@ class BinbinGodStrategy(QCAlgorithm):
             
             # Add option universe
             option = self.AddOption(symbol, Resolution.Daily)
-            option.SetFilter(-10, 10, timedelta(days=21), timedelta(days=60))
+            # Set filter range slightly wider than default (30-45) to allow ML optimization
+            option.SetFilter(-10, 10, timedelta(days=25), timedelta(days=50))
             self.options[symbol] = option
         
         # Add VIX for market sentiment indicator
@@ -586,6 +603,24 @@ class BinbinGodStrategy(QCAlgorithm):
         traditional_put_delta = 0.30
         traditional_call_delta = 0.30
         
+        # CC Optimization: Adjust delta when stock price is below cost basis
+        cc_min_strike = None  # Will be set if CC optimization is triggered
+        if strategy_phase == "CC" and self.cc_optimization_enabled and cost_basis > 0:
+            price_cost_ratio = underlying_price / cost_basis
+            
+            if price_cost_ratio < (1 - self.cc_cost_basis_threshold):
+                # Stock price is below cost basis - use protective delta
+                self.Log(f"CC Optimization for {symbol}: price ${underlying_price:.2f} below cost "
+                        f"${cost_basis:.2f} (ratio: {price_cost_ratio:.2f})")
+                
+                # Lower delta to select higher strike (closer to cost basis)
+                traditional_call_delta = self.cc_min_delta_cost
+                
+                # Set minimum strike constraint
+                cc_min_strike = cost_basis * (1 + self.cc_min_strike_premium)
+                self.Log(f"CC Optimization: delta adjusted to {traditional_call_delta:.2f}, "
+                        f"min strike target: ${cc_min_strike:.2f}")
+        
         # Use ML integration to generate signal
         signal = self.ml_integration.generate_signal(
             symbol=symbol,
@@ -628,6 +663,10 @@ class BinbinGodStrategy(QCAlgorithm):
         # Add stock scoring adjustment
         score = self._score_single_stock(symbol, bars, underlying_price)
         signal.ml_score_adjustment = (score.total_score - 50) / 100  # Normalize to -0.5 to 0.5
+        
+        # Store CC optimization constraints in signal for execution
+        if cc_min_strike is not None:
+            signal.min_strike = cc_min_strike
         
         return signal
     
@@ -798,7 +837,12 @@ class BinbinGodStrategy(QCAlgorithm):
         return None
     
     def _select_best_signal(self, signals: List[StrategySignal]) -> StrategySignal:
-        """Select the best signal from candidates."""
+        """Select the best signal from candidates with memory mechanism.
+        
+        Implements stock selection memory to avoid frequent switching:
+        - Keep the same stock for at least _min_hold_cycles (default: 3)
+        - Only switch if new stock score is 10%+ better than current
+        """
         
         if not signals:
             return None
@@ -807,11 +851,57 @@ class BinbinGodStrategy(QCAlgorithm):
         for signal in signals:
             # Adjust confidence with stock score
             signal.confidence += signal.ml_score_adjustment * 0.5
+            # Store score for comparison
+            self._last_stock_scores[signal.symbol] = signal.confidence
         
         # Sort by confidence
         signals.sort(key=lambda x: x.confidence, reverse=True)
+        best_signal = signals[0]
+        best_symbol = best_signal.symbol
         
-        return signals[0]
+        # Memory mechanism: avoid frequent switching
+        if self._last_selected_stock is not None:
+            self._selection_count += 1
+            
+            # Check if we should keep the previous stock
+            if self._last_selected_stock != best_symbol:
+                # Check if we've held long enough and if improvement is significant
+                prev_score = self._last_stock_scores.get(self._last_selected_stock, 0)
+                new_score = best_signal.confidence
+                
+                if prev_score > 0:
+                    score_improvement = (new_score - prev_score) / prev_score * 100
+                else:
+                    score_improvement = 100  # No previous score, allow switch
+                
+                # Only switch if held enough cycles AND improvement is significant
+                if self._selection_count < self._min_hold_cycles and score_improvement < 10:
+                    self.Log(f"Stock selection memory: Keeping {self._last_selected_stock} "
+                            f"(held {self._selection_count} cycles, improvement {score_improvement:.1f}%)")
+                    
+                    # Return signal for the previous stock if available
+                    for signal in signals:
+                        if signal.symbol == self._last_selected_stock:
+                            return signal
+                    
+                    # Previous stock not in signals, use best
+                    self._selection_count = 0
+                    self._last_selected_stock = best_symbol
+                    self.Log(f"Stock selection: Switching to {best_symbol} (previous not available)")
+                else:
+                    # Switch to new stock
+                    self.Log(f"Stock selection: Switching from {self._last_selected_stock} "
+                            f"to {best_symbol} (improvement: {score_improvement:.1f}%)")
+                    self._selection_count = 0
+                    self._last_selected_stock = best_symbol
+            # else: same stock selected, no action needed
+        else:
+            # First selection
+            self._last_selected_stock = best_symbol
+            self._selection_count = 0
+            self.Log(f"Stock selection: Initial selection {best_symbol}")
+        
+        return best_signal
     
     def _execute_signal(self, signal: StrategySignal):
         """Execute a trading signal using QC's built-in Greeks data."""
@@ -844,6 +934,9 @@ class BinbinGodStrategy(QCAlgorithm):
         target_delta = -signal.delta if target_right == OptionRight.Put else signal.delta
         
         # Find suitable option using QC's Greeks
+        # Get min_strike constraint from signal (CC optimization)
+        min_strike = getattr(signal, 'min_strike', 0.0)
+        
         selected = self._find_option_by_greeks(
             symbol=signal.symbol,
             equity_symbol=equity.Symbol,
@@ -851,7 +944,8 @@ class BinbinGodStrategy(QCAlgorithm):
             target_delta=target_delta,
             dte_min=signal.dte_min,
             dte_max=signal.dte_max,
-            delta_tolerance=0.05
+            delta_tolerance=0.05,
+            min_strike=min_strike if min_strike > 0 else None
         )
         
         if not selected:
@@ -867,6 +961,30 @@ class BinbinGodStrategy(QCAlgorithm):
         
         # Position sizing from signal
         quantity = -signal.num_contracts
+        
+        # Risk management checks
+        # 1. Max risk per trade check
+        trade_risk = abs(premium * quantity * 100)  # Potential loss
+        portfolio_value = self.Portfolio.TotalPortfolioValue
+        risk_pct = trade_risk / portfolio_value if portfolio_value > 0 else 0
+        
+        if risk_pct > self.max_risk_per_trade:
+            # Reduce position size to meet risk limit
+            max_contracts = int((portfolio_value * self.max_risk_per_trade) / (premium * 100))
+            if max_contracts < 1:
+                self.Log(f"Risk limit too restrictive for {signal.symbol}, skipping trade")
+                return
+            quantity = -max_contracts
+            self.Log(f"Position size reduced to {max_contracts} contracts due to risk limit")
+        
+        # 2. Max leverage check
+        margin_used = self.Portfolio.TotalMarginUsed
+        new_margin_estimate = margin_used + abs(premium * quantity * 100)
+        leverage = new_margin_estimate / portfolio_value if portfolio_value > 0 else 0
+        
+        if leverage > self.max_leverage:
+            self.Log(f"Max leverage exceeded for {signal.symbol}: {leverage:.2f} > {self.max_leverage}")
+            return
         
         # Execute order
         ticket = self.MarketOrder(option_symbol, quantity)
@@ -1186,7 +1304,8 @@ class BinbinGodStrategy(QCAlgorithm):
         target_delta: float,
         dte_min: int,
         dte_max: int,
-        delta_tolerance: float = 0.05
+        delta_tolerance: float = 0.05,
+        min_strike: float = None
     ) -> Optional[Dict]:
         """Find suitable option using QC's built-in Greeks data.
         
@@ -1201,6 +1320,7 @@ class BinbinGodStrategy(QCAlgorithm):
             dte_min: Minimum days to expiry
             dte_max: Maximum days to expiry
             delta_tolerance: Allowed deviation from target delta
+            min_strike: Minimum strike price (for CC optimization when stock below cost)
             
         Returns:
             Dict with option details or None if not found
@@ -1229,6 +1349,26 @@ class BinbinGodStrategy(QCAlgorithm):
                 continue
             
             strike = option_symbol.ID.StrikePrice
+            
+            # CC Optimization: Filter by minimum strike if specified
+            if min_strike is not None and strike < min_strike:
+                continue  # Skip strikes below minimum (for CC optimization)
+            
+            # ITM Protection: Skip ITM options to avoid guaranteed assignment risk
+            if target_right == OptionRight.Call:
+                # For calls, ITM means strike < underlying price
+                if strike < underlying_price:
+                    continue  # Skip ITM calls
+                # Additional safety: require at least 1% OTM for calls
+                if strike < underlying_price * 1.01:
+                    continue  # Skip near-ITM calls
+            else:
+                # For puts, ITM means strike > underlying price
+                if strike > underlying_price:
+                    continue  # Skip ITM puts
+                # Additional safety: require at least 1% OTM for puts
+                if strike > underlying_price * 0.99:
+                    continue  # Skip near-ITM puts
             
             # Get QC's built-in Greeks and IV
             security = self.Securities.get(option_symbol)
@@ -1332,10 +1472,10 @@ class BinbinGodStrategy(QCAlgorithm):
         return annual_vol if annual_vol > 0 else None
     
     def _calculate_iv_rank(self, symbol: str) -> float:
-        """Calculate IV rank based on historical volatility percentile.
+        """Calculate IV rank based on historical volatility.
         
-        IV Rank shows where current IV stands relative to its history.
-        100 = highest IV in history, 0 = lowest.
+        IV Rank shows where current volatility stands, used for stock scoring.
+        Aligned with original binbin_god.py calculation (no annualization).
         
         Args:
             symbol: Stock symbol
@@ -1344,32 +1484,24 @@ class BinbinGodStrategy(QCAlgorithm):
             IV rank (0-100)
         """
         bars = self.price_history.get(symbol, [])
-        if len(bars) < 60:
+        if len(bars) < 30:
             return 50.0  # Default mid-range
         
-        # Calculate rolling volatility for the past year
-        window = 20
-        vol_series = []
-        closes = np.array([b['close'] for b in bars])
+        # Calculate 30-day volatility (aligned with original binbin_god.py)
+        prices_30 = [bar['close'] for bar in bars[-30:]]
+        returns = [(prices_30[i] - prices_30[i-1]) / prices_30[i-1] 
+                  for i in range(1, len(prices_30))]
         
-        for i in range(window, len(closes)):
-            window_closes = closes[i-window:i+1]
-            returns = np.diff(window_closes) / window_closes[:-1]
-            vol = np.std(returns) * np.sqrt(252)  # Annualized
-            vol_series.append(vol)
-        
-        if len(vol_series) < 10:
+        if not returns or len(returns) < 2:
             return 50.0
         
-        current_vol = vol_series[-1]
-        min_vol = min(vol_series)
-        max_vol = max(vol_series)
+        # Calculate standard deviation (daily volatility, NOT annualized)
+        vol = np.std(returns)
         
-        if max_vol == min_vol:
-            return 50.0
+        # Convert to IV rank (same formula as original binbin_god.py)
+        iv_rank = min(100, max(0, vol * 200))
         
-        iv_rank = (current_vol - min_vol) / (max_vol - min_vol) * 100
-        return max(0, min(100, iv_rank))
+        return iv_rank
     
     def _get_vix_percentile(self) -> float:
         """Calculate VIX percentile relative to its history.

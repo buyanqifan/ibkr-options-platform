@@ -46,8 +46,8 @@ class MLOptimizationConfig:
     
     # DTE optimization
     ml_dte_enabled: bool = True
-    dte_min: int = 21
-    dte_max: int = 60
+    dte_min: int = 30  # Aligned with original binbin_god.py default
+    dte_max: int = 45  # Aligned with original binbin_god.py default
     
     # Roll optimization
     ml_roll_enabled: bool = True
@@ -102,6 +102,9 @@ class StrategySignal:
     
     # Stock scoring adjustment (from stock selection algorithm)
     ml_score_adjustment: float = 0.0  # Range: -0.5 to 0.5
+    
+    # CC optimization constraints (set when stock price below cost basis)
+    min_strike: float = 0.0  # Minimum strike price for CC optimization
 
 
 class BinbinGodMLIntegration:
