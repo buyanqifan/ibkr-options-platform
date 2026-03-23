@@ -33,6 +33,7 @@ class DTEOptimizationConfig:
     model_path: str = "data/models/dte_optimizer.pkl"
     retrain_interval_days: int = 30
     min_training_samples: int = 1000
+    persist_model: bool = False  # Disabled - each backtest starts fresh
     
     # Optimization parameters
     exploration_rate: float = 0.1  # 10% exploration
@@ -98,7 +99,17 @@ class DTEOptimizerML:
         self._load_model()
 
     def _load_model(self):
-        """Load existing model or initialize new one."""
+        """Load existing model or initialize new one.
+        
+        Note: Model persistence is disabled by default (persist_model=False).
+        Each backtest starts with a fresh model for consistent results.
+        """
+        # Check if model persistence is enabled
+        if not getattr(self.config, 'persist_model', False):
+            logger.info("Model persistence disabled - initializing fresh model")
+            self._initialize_model()
+            return
+        
         if os.path.exists(self.config.model_path):
             try:
                 with open(self.config.model_path, 'rb') as f:
@@ -889,7 +900,16 @@ class DTEOptimizerML:
         return False
 
     def save_model(self):
-        """Save trained model to disk."""
+        """Save trained model to disk.
+        
+        Note: Model persistence is disabled by default (persist_model=False).
+        Override by setting config.persist_model=True to enable saving.
+        """
+        # Check if model persistence is enabled
+        if not getattr(self.config, 'persist_model', False):
+            logger.debug("Model persistence disabled - skipping save")
+            return
+        
         os.makedirs(os.path.dirname(self.config.model_path), exist_ok=True)
 
         model_data = {

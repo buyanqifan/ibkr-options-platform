@@ -159,7 +159,7 @@ class BinbinGodStrategy(BaseStrategy):
         self.dte_max = config.get("dte_max", 45)
         self.delta_target = config.get("delta_target", 0.30)
         self.profit_target_pct = config.get("profit_target_pct", 50)
-        self.stop_loss_pct = config.get("stop_loss_pct", 200)
+        self.stop_loss_pct = config.get("stop_loss_pct", 999999)  # Disabled by default - Wheel strategy doesn't use traditional stop loss
         self.initial_capital = config.get("initial_capital", 100000)
         self.max_risk_per_trade = config.get("max_risk_per_trade", 0.02)
         self.max_leverage = config.get("max_leverage", 1.0)
@@ -1570,8 +1570,11 @@ class BinbinGodStrategy(BaseStrategy):
         For Wheel strategy, we don't use traditional stop loss. Instead:
         - Roll Forward: Premium captured > 80%, roll to new position
         - Roll Out: Near assignment risk, extend expiry
-        - Let Expire: Hold to expiry for max theta
-        - Close Early: Only for margin management
+        - Let Expire: Hold to expiry for max theta (time is our friend)
+        - Profit Target: Optional, close early at 50%+ profit
+
+        Stop loss is DISABLED by default (stop_loss_pct=999999).
+        Can be enabled as extreme safety net if needed.
 
         Args:
             position: Position dictionary
@@ -1660,13 +1663,14 @@ class BinbinGodStrategy(BaseStrategy):
             if abs(pnl) >= profit_threshold and pnl < 0:
                 return True, "PROFIT_TARGET"
 
-        # Traditional stop loss (only for extreme cases, user should consider disabling)
+        # Traditional stop loss (DISABLED by default for Wheel strategy)
+        # Can be enabled by setting stop_loss_pct < 999999 as extreme safety net
         if not self._stop_loss_disabled:
             loss_threshold = self.stop_loss_pct / 100.0 * abs(entry_price)
             if pnl >= loss_threshold:
                 self.logger.warning(
                     f"Stop loss triggered for {position.get('symbol')}. "
-                    f"Consider if this is appropriate for Wheel strategy."
+                    f"Note: Stop loss is typically disabled for Wheel strategy."
                 )
                 return True, "STOP_LOSS"
 
