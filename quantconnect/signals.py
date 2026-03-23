@@ -174,7 +174,7 @@ def get_cc_optimization_params(
     
     # Stock price is below cost basis - use protective delta
     adjusted_delta = cc_min_delta_cost
-    min_strike = cost_basis * (1 + cc_min_strike_premium)
+    min_strike = cost_basis * (1 - cc_min_strike_premium)  # Want strike near cost basis
     
     log_message = (f"CC_OPT:{underlying_price:.2f}_below_cost_{cost_basis:.2f}_"
                    f"delta_{adjusted_delta:.2f}_minstrike_{min_strike:.2f}")

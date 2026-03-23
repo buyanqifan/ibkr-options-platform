@@ -1,44 +1,27 @@
-"""
-BinbinGod Strategy for QuantConnect
-A dynamic stock selection Wheel strategy for MAG7 stocks with ML optimization.
-"""
-
+"""BinbinGod Strategy for QuantConnect - Wheel strategy with ML optimization."""
 from AlgorithmImports import *
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import numpy as np
 
-# Import helper classes
 from helpers import StockScore, StockHolding
+from scoring import score_single_stock, calculate_historical_vol
+from ml_integration import BinbinGodMLIntegration, MLOptimizationConfig, StrategySignal, AdaptiveDeltaStrategy
+from option_utils import filter_option_by_itm_protection, estimate_delta_from_moneyness, get_premium_from_security, should_roll_position, calculate_dte
+from signals import select_best_signal_with_memory, get_cc_optimization_params, build_position_data, calculate_pnl_metrics
 
-# Import scoring functions
-from scoring import score_single_stock, calculate_historical_vol, calculate_iv_rank
-
-# Import ML modules
-from ml_integration import (
-    BinbinGodMLIntegration, MLOptimizationConfig, StrategySignal, AdaptiveDeltaStrategy
-)
-
-# Import option utilities
-from option_utils import (
-    calculate_historical_vol, estimate_premium_approx, filter_option_by_itm_protection,
-    estimate_delta_from_moneyness, build_option_result, get_premium_from_security,
-    should_roll_position, calculate_dte
-)
-
-# Import signal utilities
-from signals import (
-    select_best_signal_with_memory, calculate_position_risk,
-    get_cc_optimization_params, build_position_data, calculate_pnl_metrics
-)
-
-# MAG7 Universe
 MAG7_STOCKS = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
 
 
 class BinbinGodStrategy(QCAlgorithm):
     """BinbinGod Strategy - Intelligent stock selection + Full Wheel logic + ML optimization."""
-    
+
+    def _make_signal(self, symbol, action, delta=0, dte_min=30, dte_max=45, num_contracts=1, confidence=0.5, reasoning=""):
+        """Helper to create StrategySignal with default values."""
+        return StrategySignal(symbol=symbol, action=action, delta=delta, dte_min=dte_min, dte_max=dte_max,
+            num_contracts=num_contracts, confidence=confidence, reasoning=reasoning,
+            expected_premium=0.0, expected_return=0.0, expected_risk=0.0, assignment_probability=0.0)
+
     def Initialize(self):
         """Initialize the strategy."""
         self._init_dates()
@@ -59,7 +42,7 @@ class BinbinGodStrategy(QCAlgorithm):
         if start_date_param:
             self.SetStartDate(datetime.strptime(start_date_param, "%Y-%m-%d"))
         else:
-            self.SetStartDate(2020, 1, 1)
+            self.SetStartDate(2024, 1, 1)
         
         if end_date_param:
             self.SetEndDate(datetime.strptime(end_date_param, "%Y-%m-%d"))
@@ -70,101 +53,64 @@ class BinbinGodStrategy(QCAlgorithm):
         """Initialize strategy parameters."""
         self.initial_capital = float(self.GetParameter("initial_capital", 100000))
         self.SetCash(self.initial_capital)
-        
         self.max_positions = int(self.GetParameter("max_positions", 10))
         self.profit_target_pct = float(self.GetParameter("profit_target_pct", 50))
         self.stop_loss_pct = float(self.GetParameter("stop_loss_pct", 999999))
-        
-        # Risk management
         self.max_risk_per_trade = float(self.GetParameter("max_risk_per_trade", 0.02))
         self.max_leverage = float(self.GetParameter("max_leverage", 1.0))
-        
-        # Disable flags
         self._profit_target_disabled = self.profit_target_pct >= 999999
         self._stop_loss_disabled = self.stop_loss_pct >= 999999
-        
-        # CC+SP simultaneous mode
         self.allow_sp_in_cc_phase = bool(self.GetParameter("allow_sp_in_cc_phase", True))
         self.sp_in_cc_margin_threshold = float(self.GetParameter("sp_in_cc_margin_threshold", 0.5))
         self.sp_in_cc_max_positions = int(self.GetParameter("sp_in_cc_max_positions", 3))
-        
-        # CC optimization
         self.cc_optimization_enabled = bool(self.GetParameter("cc_optimization_enabled", True))
         self.cc_min_delta_cost = float(self.GetParameter("cc_min_delta_cost", 0.15))
         self.cc_cost_basis_threshold = float(self.GetParameter("cc_cost_basis_threshold", 0.05))
         self.cc_min_strike_premium = float(self.GetParameter("cc_min_strike_premium", 0.02))
-        
-        # Stock selection memory
-        self._last_selected_stock = None
-        self._selection_count = 0
-        self._min_hold_cycles = 3
-        self._last_stock_scores = {}
-        
-        # ML config
+        self._last_selected_stock, self._selection_count, self._min_hold_cycles, self._last_stock_scores = None, 0, 3, {}
         self.ml_enabled = bool(self.GetParameter("ml_enabled", True))
         self.ml_exploration_rate = float(self.GetParameter("ml_exploration_rate", 0.1))
         self.ml_learning_rate = float(self.GetParameter("ml_learning_rate", 0.01))
         self.ml_adoption_rate = float(self.GetParameter("ml_adoption_rate", 0.5))
         self.ml_min_confidence = float(self.GetParameter("ml_min_confidence", 0.4))
-        
-        # Stock pool
-        stock_pool_str = self.GetParameter("stock_pool", ",".join(MAG7_STOCKS))
-        self.stock_pool = stock_pool_str.split(",")
-        
-        # Scoring weights
+        self.stock_pool = self.GetParameter("stock_pool", ",".join(MAG7_STOCKS)).split(",")
         self.weights = {"iv_rank": 0.35, "technical": 0.25, "momentum": 0.20, "pe_score": 0.20}
     
     def _init_ml(self):
         """Initialize ML integration."""
-        ml_config = MLOptimizationConfig(
+        self.ml_integration = BinbinGodMLIntegration(MLOptimizationConfig(
             ml_delta_enabled=self.ml_enabled,
             ml_dte_enabled=self.ml_enabled,
             ml_roll_enabled=self.ml_enabled,
             ml_position_enabled=self.ml_enabled,
+            dte_min=30,
+            dte_max=45,
             exploration_rate=self.ml_exploration_rate,
-            learning_rate=self.ml_learning_rate,
-        )
-        self.ml_integration = BinbinGodMLIntegration(ml_config)
-        self.adaptive_strategy = AdaptiveDeltaStrategy(
-            ml_integration=self.ml_integration,
-            adoption_rate=self.ml_adoption_rate,
-            min_confidence=self.ml_min_confidence
-        )
+            learning_rate=self.ml_learning_rate
+        ))
+        self.adaptive_strategy = AdaptiveDeltaStrategy(self.ml_integration, self.ml_adoption_rate, self.ml_min_confidence)
         self._ml_pretrained = False
-    
+
     def _init_securities(self):
         """Initialize equity and option securities."""
-        self.equities = {}
-        self.options = {}
-        self.price_history = {}
-        
+        self.equities, self.options, self.price_history = {}, {}, {}
         for symbol in self.stock_pool:
-            equity = self.AddEquity(symbol, Resolution.Daily)
-            equity.SetDataNormalizationMode(DataNormalizationMode.Raw)
-            self.equities[symbol] = equity
-            self.price_history[symbol] = []
-            
-            option = self.AddOption(symbol, Resolution.Daily)
-            option.SetFilter(-10, 10, timedelta(days=25), timedelta(days=50))
-            self.options[symbol] = option
-        
-        # VIX proxy
+            e = self.AddEquity(symbol, Resolution.Daily)
+            e.SetDataNormalizationMode(DataNormalizationMode.Raw)
+            self.equities[symbol], self.price_history[symbol] = e, []
+            o = self.AddOption(symbol, Resolution.Daily)
+            o.SetFilter(-10, 10, timedelta(days=25), timedelta(days=50))
+            self.options[symbol] = o
         self.vix = self.AddEquity("VIXY", Resolution.Daily)
-        self._current_vix = 20.0
-        self._vix_history = []
-    
+        self._current_vix, self._vix_history = 20.0, []
+
     def _init_state(self):
         """Initialize strategy state."""
-        self.phase = "SP"
-        self.stock_holding = StockHolding()
-        self.open_option_positions: Dict[str, Dict] = {}
-        self.total_trades = 0
-        self.winning_trades = 0
-        self.total_pnl = 0.0
-        self.trade_history = []
-        self.ml_signals_history = []
+        self.phase, self.stock_holding = "SP", StockHolding()
+        self.open_option_positions, self.trade_history, self.ml_signals_history = {}, [], []
+        self.total_trades, self.winning_trades, self.total_pnl = 0, 0, 0.0
         self.SetWarmUp(60)
-    
+
     def _schedule_events(self):
         """Schedule strategy events."""
         self.Schedule.On(self.DateRules.EveryDay(), self.TimeRules.AfterMarketOpen("SPY", 30), self.Rebalance)
@@ -192,31 +138,14 @@ class BinbinGodStrategy(QCAlgorithm):
                 self._vix_history = self._vix_history[-252:]
     
     def OnWarmupFinished(self):
-        """Pretrain ML models with warmup data."""
         if not self.ml_enabled or self._ml_pretrained:
             return
-        self.Log("Starting ML model pretraining...")
-        stats = self._pretrain_ml_models()
-        self._ml_pretrained = True
-        self.Log(f"ML pretraining completed: {stats}")
-    
-    def _pretrain_ml_models(self) -> Dict:
-        """Pretrain ML models with historical data."""
-        stats = {'symbols_trained': 0, 'total_simulations': 0, 'status': 'skipped'}
-        if not self.ml_enabled:
-            return stats
-        
         for symbol in self.stock_pool:
             bars = self.price_history.get(symbol, [])
-            if len(bars) < 60:
-                continue
-            
-            iv_estimate = calculate_historical_vol(bars)
-            symbol_stats = self.ml_integration.pretrain_models(symbol=symbol, historical_bars=bars, iv_estimate=iv_estimate)
-            
-            if symbol_stats.get('status') == 'success':
-                stats['symbols_trained'] += 1
-                stats['total_simulations'] += symbol_stats.get('put_simulations', 0) + symbol_stats.get('call_simulations', 0)
+            if len(bars) >= 60:
+                self.ml_integration.pretrain_models(symbol=symbol, historical_bars=bars, iv_estimate=calculate_historical_vol(bars))
+        self._ml_pretrained = True
+        self.Log("ML pretraining done")
         
         stats['status'] = 'success' if stats['symbols_trained'] > 0 else 'no_data'
         return stats
@@ -291,49 +220,47 @@ class BinbinGodStrategy(QCAlgorithm):
             )
             
             if action == "ROLL":
-                signal = StrategySignal(symbol=pos_info['symbol'], action="ROLL",
+                signal = self._make_signal(pos_info['symbol'], "ROLL",
                     delta=abs(pos_info['delta_at_entry']), dte_min=30, dte_max=45,
                     num_contracts=abs(pos_info['quantity']), confidence=0.8, reasoning=reasoning)
                 self._execute_roll(signal)
             elif action.startswith("CLOSE"):
-                signal = StrategySignal(symbol=pos_info['symbol'], action="CLOSE",
-                    delta=0, dte_min=0, dte_max=0, num_contracts=0, confidence=0.9, reasoning=reasoning)
+                signal = self._make_signal(pos_info['symbol'], "CLOSE", dte_min=0, dte_max=0, num_contracts=0, confidence=0.9, reasoning=reasoning)
                 self._execute_close(signal)
-    
+
     def _handle_roll_action(self, roll_rec, pos_info, position_id):
         """Handle ML roll recommendation."""
         if roll_rec.action == "ROLL_FORWARD":
-            signal = StrategySignal(symbol=pos_info['symbol'], action="ROLL",
+            signal = self._make_signal(pos_info['symbol'], "ROLL",
                 delta=roll_rec.optimal_delta or abs(pos_info['delta_at_entry']),
                 dte_min=roll_rec.optimal_dte or 30, dte_max=roll_rec.optimal_dte or 45,
-                num_contracts=abs(pos_info['quantity']), confidence=roll_rec.confidence,
-                reasoning=roll_rec.reasoning)
+                num_contracts=abs(pos_info['quantity']), confidence=roll_rec.confidence, reasoning=roll_rec.reasoning)
             self._execute_roll(signal)
         elif roll_rec.action == "CLOSE_EARLY":
-            signal = StrategySignal(symbol=pos_info['symbol'], action="CLOSE",
-                delta=0, dte_min=0, dte_max=0, num_contracts=0,
-                confidence=roll_rec.confidence, reasoning=roll_rec.reasoning)
+            signal = self._make_signal(pos_info['symbol'], "CLOSE", dte_min=0, dte_max=0, num_contracts=0, confidence=roll_rec.confidence, reasoning=roll_rec.reasoning)
             self._execute_close(signal)
     
     def _generate_ml_signals(self) -> List[StrategySignal]:
         """Generate ML-optimized signals."""
         signals = []
         portfolio_state = self._get_portfolio_state()
-        
+
         if self.phase == "SP":
+            # Skip symbols that already have Put positions
+            symbols_with_put = {p.get('symbol') for p in self.open_option_positions.values() if p.get('right') == 'P'}
             for symbol in self.stock_pool:
-                signal = self._generate_signal_for_symbol(symbol, "SP", portfolio_state)
-                if signal:
-                    signals.append(signal)
+                if symbol not in symbols_with_put:
+                    sig = self._generate_signal_for_symbol(symbol, "SP", portfolio_state)
+                    if sig:
+                        signals.append(sig)
         elif self.phase == "CC":
             for symbol in self.stock_holding.get_symbols():
-                signal = self._generate_signal_for_symbol(symbol, "CC", portfolio_state)
-                if signal:
-                    signals.append(signal)
-            
+                sig = self._generate_signal_for_symbol(symbol, "CC", portfolio_state)
+                if sig:
+                    signals.append(sig)
             if self.allow_sp_in_cc_phase:
                 signals.extend(self._generate_cc_sp_signals(portfolio_state))
-        
+
         return signals
     
     def _generate_signal_for_symbol(self, symbol: str, strategy_phase: str, portfolio_state: Dict) -> Optional[StrategySignal]:
@@ -396,23 +323,45 @@ class BinbinGodStrategy(QCAlgorithm):
     def _generate_cc_sp_signals(self, portfolio_state: Dict) -> List[StrategySignal]:
         """Generate SP signals during CC phase."""
         signals = []
-        
+
+        # Check margin utilization
         margin_util = self.Portfolio.TotalMarginUsed / self.Portfolio.TotalPortfolioValue
         if margin_util > self.sp_in_cc_margin_threshold:
             return signals
-        
+
+        # Check current SP positions count
         sp_positions = sum(1 for p in self.open_option_positions.values() if p.get('right') == 'P')
         if sp_positions >= self.sp_in_cc_max_positions:
             return signals
-        
+
+        # Check total positions
+        if len(self.open_option_positions) >= self.max_positions:
+            return signals
+
+        # Get symbols that already have Put positions
+        symbols_with_put = set()
+        for pos_info in self.open_option_positions.values():
+            if pos_info.get('right') == 'P':
+                symbols_with_put.add(pos_info.get('symbol'))
+
+        # Select stocks not currently held as shares (prefer diversification)
         held = self.stock_holding.get_symbols()
         available = [s for s in self.stock_pool if s not in held] or self.stock_pool
-        
-        for symbol in available[:3]:
+
+        # Also exclude stocks that already have Put positions
+        available = [s for s in available if s not in symbols_with_put]
+
+        # Select only ONE best stock for CC+SP (same as original)
+        best_signal = None
+        for symbol in available:
             signal = self._generate_signal_for_symbol(symbol, "CC+SP", portfolio_state)
             if signal and signal.confidence > 0.6:
-                signals.append(signal)
-        
+                if best_signal is None or signal.confidence > best_signal.confidence:
+                    best_signal = signal
+
+        if best_signal:
+            signals.append(best_signal)
+
         return signals
     
     def _get_portfolio_state(self) -> Dict:
@@ -452,38 +401,59 @@ class BinbinGodStrategy(QCAlgorithm):
         if signal.action == "CLOSE":
             self._execute_close(signal)
             return
-        
+
         equity = self.equities.get(signal.symbol)
         if not equity:
             return
-        
+
         underlying_price = self.Securities[equity.Symbol].Price
         target_right = OptionRight.Put if signal.action == "SELL_PUT" else OptionRight.Call
         target_delta = -signal.delta if target_right == OptionRight.Put else signal.delta
         min_strike = getattr(signal, 'min_strike', 0.0)
-        
+
         selected = self._find_option_by_greeks(
             symbol=signal.symbol, equity_symbol=equity.Symbol,
             target_right=target_right, target_delta=target_delta,
             dte_min=signal.dte_min, dte_max=signal.dte_max,
             delta_tolerance=0.05, min_strike=min_strike if min_strike > 0 else None
         )
-        
+
         if not selected:
             self.Log(f"No suitable options for {signal.symbol} delta ~{target_delta:.2f}")
             return
-        
-        quantity, risk_msg = calculate_position_risk(
-            selected['premium'], signal.num_contracts, self.Portfolio.TotalPortfolioValue,
-            self.max_risk_per_trade, self.max_leverage, self.Portfolio.TotalMarginUsed
-        )
-        
-        if risk_msg.startswith("LEVERAGE"):
-            self.Log(f"Max leverage exceeded: {risk_msg}")
+
+        # Calculate position size differently for PUT vs CALL
+        current_positions = len(self.open_option_positions)
+
+        if target_right == OptionRight.Put:
+            # PUT: Based on INITIAL capital (1 contract per $10k) - same as original
+            max_by_capital = max(1, int(self.initial_capital / 10000))
+            max_by_limit = self.max_positions - current_positions
+            quantity = min(max_by_capital, max_by_limit, 10)
+        else:
+            # CALL: Based on shares held (1 contract per 100 shares)
+            shares_held = self.stock_holding.get_shares(signal.symbol)
+
+            # Check existing call coverage
+            existing_call_contracts = 0
+            for pos_info in self.open_option_positions.values():
+                if pos_info.get('symbol') == signal.symbol and pos_info.get('right') == 'C':
+                    existing_call_contracts += abs(pos_info.get('quantity', 0))
+
+            shares_covered = existing_call_contracts * 100
+            shares_available = shares_held - shares_covered
+            quantity = min(max(0, shares_available // 100), self.max_positions)
+
+            if quantity <= 0:
+                self.Log(f"No available shares for {signal.symbol} call: held={shares_held}, covered={shares_covered}")
+                return
+
+        if quantity <= 0:
             return
-        if risk_msg.startswith("RISK"):
-            self.Log(risk_msg)
-        
+
+        quantity = -quantity  # NEGATIVE for selling
+
+        self.Log(f"Selling {abs(quantity)} {signal.symbol} {target_right} @ ${selected['premium']:.2f}")
         ticket = self.MarketOrder(selected['option_symbol'], quantity)
         
         if ticket.Status == OrderStatus.Filled:
@@ -536,7 +506,8 @@ class BinbinGodStrategy(QCAlgorithm):
         )
         
         if new_selected:
-            new_qty = -signal.num_contracts
+            # Keep same position size as original
+            new_qty = pos_info['quantity']  # Already negative
             new_ticket = self.MarketOrder(new_selected['option_symbol'], new_qty)
             
             if new_ticket.Status == OrderStatus.Filled:
@@ -683,23 +654,11 @@ class BinbinGodStrategy(QCAlgorithm):
         return suitable[0]
     
     def OnOrderEvent(self, orderEvent):
-        """Handle order events."""
         if orderEvent.Status == OrderStatus.Filled:
-            self.Log(f"Order filled: {orderEvent.Symbol} @ ${orderEvent.FillPrice:.2f}")
-    
+            self.Log(f"Filled: {orderEvent.Symbol} @ ${orderEvent.FillPrice:.2f}")
+
     def OnEndOfAlgorithm(self):
-        """Final results."""
-        win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
-        
-        self.Log("=" * 60)
-        self.Log("BINBINGOD STRATEGY RESULTS (ML Enhanced)")
-        self.Log("=" * 60)
-        self.Log(f"Total Trades: {self.total_trades}")
-        self.Log(f"Winning Trades: {self.winning_trades}")
-        self.Log(f"Win Rate: {win_rate:.2f}%")
-        self.Log(f"Total P&L: ${self.total_pnl:.2f}")
-        self.Log(f"Final Portfolio Value: ${self.Portfolio.TotalPortfolioValue:.2f}")
-        self.Log(f"Final Phase: {self.phase}")
-        self.Log(f"Shares Held: {self.stock_holding.shares}")
+        wr = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
+        self.Log(f"Trades: {self.total_trades}, WinRate: {wr:.1f}%, PnL: ${self.total_pnl:.2f}")
+        self.Log(f"Portfolio: ${self.Portfolio.TotalPortfolioValue:.2f}, Phase: {self.phase}")
         self.Log(self.ml_integration.get_status_report())
-        self.Log("=" * 60)
