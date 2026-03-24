@@ -415,37 +415,101 @@ def record_trade(algo, symbol: str, right: str, pnl: float, reason: str):
 
 
 def check_expired_options(algo):
+    """Check for expired/assigned options and sync strategy state with QC Portfolio.
+    
+    QC automatically handles:
+    - Option expiration/assignment
+    - Stock delivery (buy/sell shares)
+    - P&L calculation (Portfolio.TotalProfit)
+    
+    This function syncs internal tracking (stock_holding, phase) with QC's actual state.
+    """
     for pos_id, pos_info in list(algo.open_option_positions.items()):
         security = algo.Securities.get(pos_info['option_symbol'])
-        if not security or not (security.IsDelisted or security.Price == 0): continue
+        if not security or not (security.IsDelisted or security.Price == 0):
+            continue
+        
         symbol = pos_info['symbol']
-        pnl = security.Holdings.UnrealizedProfit if hasattr(security, 'Holdings') else 0
-        algo.ml_integration.update_performance({
-            'symbol': symbol, 'delta': abs(pos_info['delta_at_entry']),
-            'dte': calculate_dte(pos_info['expiry'], datetime.strptime(pos_info['entry_date'], '%Y-%m-%d')),
-            'num_contracts': abs(pos_info['quantity']), 'pnl': pnl / 100, 'assigned': False,
-            'bars': algo.price_history.get(symbol, []),
-            'cost_basis': algo.stock_holding.holdings.get(symbol, {}).get('cost_basis', 0),
-            'strategy_phase': pos_info['strategy_phase']})
-        record_trade(algo, symbol, pos_info['right'], pnl, "EXPIRY")
-        del algo.open_option_positions[pos_id]
+        strike = pos_info['strike']
+        right = pos_info['right']
+        quantity = abs(pos_info['quantity'])
+        
+        # Get QC's actual stock holdings for this symbol
         equity = algo.equities.get(symbol)
-        if equity:
-            last_price = algo.Securities[equity.Symbol].Price
-            strike = pos_info['strike']
-            if pos_info['right'] == "P" and last_price < strike:
-                shares = abs(pos_info['quantity']) * 100
-                algo.stock_holding.add_shares(symbol, shares, strike)
+        qc_shares = 0
+        if equity and algo.Portfolio.ContainsKey(equity.Symbol):
+            qc_shares = algo.Portfolio[equity.Symbol].Quantity
+        
+        # Get our internal tracking
+        tracked_shares = algo.stock_holding.get_shares(symbol)
+        
+        # Detect assignment by comparing QC holdings vs internal tracking
+        # QC automatically handles stock delivery, we just sync our state
+        was_assigned = False
+        exit_reason = "EXPIRY"
+        
+        if right == "P":
+            # Put assignment: QC bought shares for us
+            if qc_shares > tracked_shares:
+                shares_acquired = qc_shares - tracked_shares
+                # Defensive: ensure reasonable share count
+                expected_shares = quantity * 100
+                if shares_acquired > expected_shares * 1.1:  # Allow 10% tolerance
+                    algo.Log(f"WARNING: Put assignment shares {shares_acquired} > expected {expected_shares}")
+                    shares_acquired = min(shares_acquired, expected_shares)
+                
+                algo.stock_holding.add_shares(symbol, shares_acquired, strike)
                 algo.stock_holding.add_premium(symbol, pos_info['entry_price'] * 100)
                 algo.phase = "CC"
-                algo.Log(f"Put assigned: {shares} {symbol} @ ${strike:.2f}")
-            elif pos_info['right'] == "C" and last_price > strike:
-                shares = abs(pos_info['quantity']) * 100
-                cost = algo.stock_holding.holdings.get(symbol, {}).get('cost_basis', strike)
-                algo.total_pnl += (strike - cost) * shares
-                algo.stock_holding.remove_shares(symbol, shares)
-                algo.Log(f"Call assigned: {shares} {symbol} @ ${strike:.2f}")
-                if algo.stock_holding.shares == 0: algo.phase = "SP"
+                was_assigned = True
+                exit_reason = "ASSIGNMENT"
+                algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f} (QC has {qc_shares} shares)")
+        
+        elif right == "C":
+            # Call assignment: QC sold shares for us
+            if qc_shares < tracked_shares:
+                shares_sold = tracked_shares - qc_shares
+                # Defensive: ensure reasonable share count
+                expected_shares = quantity * 100
+                if shares_sold > expected_shares * 1.1:
+                    algo.Log(f"WARNING: Call assignment shares {shares_sold} > expected {expected_shares}")
+                    shares_sold = min(shares_sold, expected_shares)
+                
+                algo.stock_holding.remove_shares(symbol, shares_sold)
+                was_assigned = True
+                exit_reason = "ASSIGNMENT"
+                
+                # Log P&L breakdown (QC already calculated, this is for visibility)
+                cost_basis = algo.stock_holding.holdings.get(symbol, {}).get('cost_basis', strike)
+                stock_pnl = (strike - cost_basis) * shares_sold if cost_basis > 0 else 0
+                algo.Log(f"Call assigned: -{shares_sold} {symbol} @ ${strike:.2f}, Stock P&L: ${stock_pnl:+.2f}")
+                
+                # Update phase if all shares sold
+                if qc_shares == 0 or algo.stock_holding.shares == 0:
+                    algo.phase = "SP"
+                    algo.Log(f"All shares sold, returning to SP phase")
+        
+        # Get P&L from QC (already calculated by platform)
+        pnl = security.Holdings.UnrealizedProfit if hasattr(security, 'Holdings') else 0
+        
+        # Update ML with correct assignment flag
+        algo.ml_integration.update_performance({
+            'symbol': symbol,
+            'delta': abs(pos_info['delta_at_entry']),
+            'dte': calculate_dte(pos_info['expiry'], datetime.strptime(pos_info['entry_date'], '%Y-%m-%d')),
+            'num_contracts': quantity,
+            'pnl': pnl / 100,
+            'assigned': was_assigned,  # Correct assignment detection
+            'bars': algo.price_history.get(symbol, []),
+            'cost_basis': algo.stock_holding.holdings.get(symbol, {}).get('cost_basis', 0),
+            'strategy_phase': pos_info['strategy_phase'],
+        })
+        
+        # Record trade (P&L from QC, no manual calculation)
+        record_trade(algo, symbol, right, pnl, exit_reason)
+        
+        # Clean up position tracking
+        del algo.open_option_positions[pos_id]
 
 
 def update_ml_models(algo):
@@ -506,7 +570,29 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
 
 
 def on_end_of_algorithm(algo):
+    """Called at end of algorithm - log final results using QC Portfolio data."""
     wr = (algo.winning_trades / algo.total_trades * 100) if algo.total_trades > 0 else 0
-    algo.Log(f"Trades: {algo.total_trades}, WinRate: {wr:.1f}%, PnL: ${algo.total_pnl:.2f}")
-    algo.Log(f"Portfolio: ${algo.Portfolio.TotalPortfolioValue:.2f}, Phase: {algo.phase}")
+    
+    # Use QC's actual portfolio values (accurate P&L from platform)
+    total_profit = algo.Portfolio.TotalProfit
+    total_value = algo.Portfolio.TotalPortfolioValue
+    initial_capital = algo.initial_capital
+    total_return = (total_value - initial_capital) / initial_capital * 100 if initial_capital > 0 else 0
+    
+    algo.Log("=" * 60)
+    algo.Log("BINBINGOD STRATEGY RESULTS")
+    algo.Log("=" * 60)
+    algo.Log(f"Total Trades: {algo.total_trades}")
+    algo.Log(f"Winning Trades: {algo.winning_trades}")
+    algo.Log(f"Win Rate: {wr:.1f}%")
+    algo.Log(f"Initial Capital: ${initial_capital:,.2f}")
+    algo.Log(f"Final Portfolio: ${total_value:,.2f}")
+    algo.Log(f"Total Profit: ${total_profit:,.2f}")
+    algo.Log(f"Total Return: {total_return:.1f}%")
+    algo.Log(f"Final Phase: {algo.phase}")
+    algo.Log(f"Shares Held: {algo.stock_holding.shares}")
+    if algo.stock_holding.holdings:
+        algo.Log(f"Holdings: {algo.stock_holding.holdings}")
+    algo.Log("")
     algo.Log(algo.ml_integration.get_status_report())
+    algo.Log("=" * 60)
