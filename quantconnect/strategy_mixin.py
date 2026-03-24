@@ -301,9 +301,14 @@ def execute_signal(algo, signal: StrategySignal):
         return
     current_positions = len(algo.open_option_positions)
     if target_right == OptionRight.Put:
-        max_by_capital = max(1, int(algo.initial_capital / 10000))
+        # Calculate quantity based on actual margin available
+        # QC margin requirement for short put is roughly strike * 100 * margin_rate (typically 15-20%)
+        estimated_margin_per_contract = selected['strike'] * 100 * 0.20
+        available_margin = algo.Portfolio.MarginRemaining
+        max_by_margin = max(1, int(available_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
         max_by_limit = algo.max_positions - current_positions
-        quantity = min(max_by_capital, max_by_limit)
+        quantity = min(max_by_margin, max_by_limit)
+        algo.Log(f"Position sizing: available_margin=${available_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_by_margin}, quantity={quantity}")
     else:
         shares_held = algo.stock_holding.get_shares(signal.symbol)
         existing_call_contracts = sum(abs(p.get('quantity', 0)) for p in algo.open_option_positions.values()
