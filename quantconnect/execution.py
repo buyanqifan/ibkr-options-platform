@@ -5,6 +5,10 @@ from ml_integration import StrategySignal
 from option_utils import calculate_dte
 from signals import calculate_pnl_metrics
 from option_pricing import BlackScholes
+from qc_portfolio import (
+    get_option_position_count, get_shares_held, get_call_position_contracts,
+    get_position_for_symbol, save_position_metadata, remove_position_metadata
+)
 
 RISK_FREE_RATE = 0.05
 
@@ -39,7 +43,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
     if not selected:
         algo.Log(f"No suitable options for {signal.symbol} delta ~{target_delta:.2f}")
         return
-    current_positions = len(algo.open_option_positions)
+    current_positions = get_option_position_count(algo)
     if target_right == OptionRight.Put:
         estimated_margin_per_contract = selected['strike'] * 100 * algo.margin_rate_per_contract
         available_margin = algo.Portfolio.MarginRemaining
@@ -49,10 +53,9 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         quantity = min(max_by_margin, max_by_limit)
         algo.Log(f"Position sizing: available_margin=${available_margin:.0f}, usable=${usable_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_by_margin}, quantity={quantity}")
     else:
-        shares_held = algo.stock_holding.get_shares(signal.symbol)
-        existing_call_contracts = sum(abs(p.get('quantity', 0)) for p in algo.open_option_positions.values()
-            if p.get('symbol') == signal.symbol and p.get('right') == 'C')
-        shares_covered = existing_call_contracts * 100
+        shares_held = get_shares_held(algo, signal.symbol)
+        existing_call_contracts = get_call_position_contracts(algo, signal.symbol)
+        shares_covered = existing_call_contracts
         shares_available = shares_held - shares_covered
         quantity = min(max(0, shares_available // 100), algo.max_positions)
         if quantity <= 0:
@@ -70,25 +73,27 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         fill_price = ticket.AverageFillPrice or selected['premium']
         right_str = 'P' if target_right == OptionRight.Put else 'C'
         position_id = f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{selected['strike']:.0f}_{right_str}"
-        algo.open_option_positions[position_id] = {
-            'symbol': signal.symbol, 'option_symbol': selected['option_symbol'], 'right': right_str,
-            'strike': selected['strike'], 'expiry': selected['expiry'], 'entry_date': algo.Time.strftime('%Y-%m-%d'),
-            'entry_price': fill_price, 'quantity': quantity, 'delta_at_entry': selected['delta'],
-            'iv_at_entry': selected['iv'], 'strategy_phase': algo.phase, 'ml_signal': signal}
+        # Save position metadata (entry Greeks, etc.) - QC doesn't track this
+        save_position_metadata(algo, position_id, {
+            'delta_at_entry': selected['delta'],
+            'iv_at_entry': selected['iv'],
+            'strategy_phase': algo.phase,
+            'entry_date': algo.Time.strftime('%Y-%m-%d'),
+            'ml_signal': signal,
+        })
         algo.Log(f"Executed: {signal.action} {signal.num_contracts} {signal.symbol} @ ${fill_price:.2f}")
 
 
 def execute_roll(algo, signal: StrategySignal, find_option_func):
-    existing = None
-    for pos_id, pos_info in algo.open_option_positions.items():
-        if pos_info.get('symbol') == signal.symbol: existing = (pos_id, pos_info); break
+    existing = get_position_for_symbol(algo, signal.symbol)
     if not existing: return
-    pos_id, pos_info = existing
+    pos_info = existing
+    pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
     close_ticket = algo.MarketOrder(pos_info['option_symbol'], -pos_info['quantity'])
     if close_ticket.Status != OrderStatus.Filled: return
     pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
     record_trade(algo, signal.symbol, pos_info['right'], pnl, "ROLL")
-    del algo.open_option_positions[pos_id]
+    remove_position_metadata(algo, pos_id)
     equity = algo.equities.get(signal.symbol)
     if not equity: return
     target_right = OptionRight.Put if pos_info['right'] == 'P' else OptionRight.Call
@@ -104,22 +109,26 @@ def execute_roll(algo, signal: StrategySignal, find_option_func):
         new_ticket = algo.MarketOrder(new_option_symbol, new_qty)
         if new_ticket.Status == OrderStatus.Filled:
             right_str = 'P' if target_right == OptionRight.Put else 'C'
-            algo.open_option_positions[f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{new_selected['strike']:.0f}_{right_str}"] = {
-                'symbol': signal.symbol, 'option_symbol': new_selected['option_symbol'], 'right': right_str,
-                'strike': new_selected['strike'], 'expiry': new_selected['expiry'],
-                'entry_date': algo.Time.strftime('%Y-%m-%d'), 'entry_price': new_ticket.AverageFillPrice,
-                'quantity': new_qty, 'delta_at_entry': new_selected['delta'],
-                'iv_at_entry': new_selected['iv'], 'strategy_phase': algo.phase, 'ml_signal': signal}
+            new_pos_id = f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{new_selected['strike']:.0f}_{right_str}"
+            # Save position metadata for new position
+            save_position_metadata(algo, new_pos_id, {
+                'delta_at_entry': new_selected['delta'],
+                'iv_at_entry': new_selected['iv'],
+                'strategy_phase': algo.phase,
+                'entry_date': algo.Time.strftime('%Y-%m-%d'),
+                'ml_signal': signal,
+            })
 
 
 def execute_close(algo, signal: StrategySignal):
-    for pos_id, pos_info in list(algo.open_option_positions.items()):
-        if pos_info.get('symbol') != signal.symbol: continue
-        close_ticket = algo.MarketOrder(pos_info['option_symbol'], -pos_info['quantity'])
-        if close_ticket.Status == OrderStatus.Filled:
-            pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
-            record_trade(algo, signal.symbol, pos_info['right'], pnl, signal.reasoning or "SIGNAL_CLOSE")
-            del algo.open_option_positions[pos_id]
+    pos_info = get_position_for_symbol(algo, signal.symbol)
+    if not pos_info: return
+    pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
+    close_ticket = algo.MarketOrder(pos_info['option_symbol'], -pos_info['quantity'])
+    if close_ticket.Status == OrderStatus.Filled:
+        pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
+        record_trade(algo, signal.symbol, pos_info['right'], pnl, signal.reasoning or "SIGNAL_CLOSE")
+        remove_position_metadata(algo, pos_id)
 
 
 def record_trade(algo, symbol: str, right: str, pnl: float, reason: str):

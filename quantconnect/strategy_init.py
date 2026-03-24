@@ -1,7 +1,8 @@
 """Initialization functions for BinbinGod Strategy."""
 from datetime import datetime, timedelta
 from AlgorithmImports import Resolution, DataNormalizationMode
-from helpers import StockScore, StockHolding
+from helpers import StockScore
+from qc_portfolio import init_position_tracking
 from ml_integration import MLOptimizationConfig
 
 MAG7_STOCKS = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
@@ -74,8 +75,11 @@ def init_securities(algo):
 
 
 def init_state(algo):
-    algo.phase, algo.stock_holding = "SP", StockHolding()
-    algo.open_option_positions, algo.trade_history, algo.ml_signals_history = {}, [], []
+    algo.phase = "SP"
+    # Use QC Portfolio for position tracking (no manual dict needed)
+    # position_metadata tracks entry Greeks (QC doesn't have this)
+    init_position_tracking(algo)
+    algo.trade_history, algo.ml_signals_history = [], []
     algo.total_trades, algo.winning_trades, algo.total_pnl = 0, 0, 0.0
     algo.SetWarmUp(60)
 

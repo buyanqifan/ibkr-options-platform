@@ -6,13 +6,14 @@ from execution import execute_signal
 from position_management import check_position_management
 from expiry import check_expired_options, update_ml_models
 from option_selector import find_option_by_greeks
+from qc_portfolio import get_option_position_count, get_symbols_with_holdings
 
 
 def rebalance(algo):
     if algo.IsWarmingUp:
         return
     check_position_management(algo, execute_signal, find_option_by_greeks)
-    open_count = len(algo.open_option_positions)
+    open_count = get_option_position_count(algo)
     algo.Log(f"Rebalance: open_positions={open_count}, max_positions={algo.max_positions}")
     if open_count >= algo.max_positions:
         algo.Log("Rebalance: max positions reached, skipping")
@@ -41,6 +42,11 @@ def on_end_of_algorithm(algo):
     total_value = algo.Portfolio.TotalPortfolioValue
     initial_capital = algo.initial_capital
     total_return = (total_value - initial_capital) / initial_capital * 100 if initial_capital > 0 else 0
+    
+    # Get holdings info from QC Portfolio
+    held_symbols = get_symbols_with_holdings(algo, algo.stock_pool)
+    total_shares = sum(algo.Portfolio[algo.equities[s].Symbol].Quantity for s in held_symbols if algo.equities.get(s) and algo.Portfolio.ContainsKey(algo.equities[s].Symbol))
+    
     algo.Log("=" * 60)
     algo.Log("BINBINGOD STRATEGY RESULTS")
     algo.Log("=" * 60)
@@ -52,9 +58,10 @@ def on_end_of_algorithm(algo):
     algo.Log(f"Total Profit: ${total_profit:,.2f}")
     algo.Log(f"Total Return: {total_return:.1f}%")
     algo.Log(f"Final Phase: {algo.phase}")
-    algo.Log(f"Shares Held: {algo.stock_holding.shares}")
-    if algo.stock_holding.holdings:
-        algo.Log(f"Holdings: {algo.stock_holding.holdings}")
+    algo.Log(f"Shares Held: {total_shares}")
+    if held_symbols:
+        holdings_info = {s: algo.Portfolio[algo.equities[s].Symbol].Quantity for s in held_symbols if algo.equities.get(s) and algo.Portfolio.ContainsKey(algo.equities[s].Symbol)}
+        algo.Log(f"Holdings: {holdings_info}")
     algo.Log("")
     algo.Log(algo.ml_integration.get_status_report())
     algo.Log("=" * 60)

@@ -2,68 +2,88 @@
 from datetime import datetime
 from option_utils import calculate_dte
 from execution import record_trade
+from qc_portfolio import (
+    get_option_positions, get_shares_held, get_cost_basis,
+    get_position_metadata, remove_position_metadata, get_symbols_with_holdings
+)
 
 
 def check_expired_options(algo):
-    """Check for expired/assigned options and sync strategy state with QC Portfolio."""
-    for pos_id, pos_info in list(algo.open_option_positions.items()):
+    """Check for expired/assigned options and sync strategy state with QC Portfolio.
+    
+    QC automatically handles option expiration/assignment and stock delivery.
+    We only need to update phase and record ML performance data.
+    """
+    # Get all option positions from QC Portfolio
+    positions = get_option_positions(algo)
+    for pos_id, pos_info in positions.items():
         security = algo.Securities.get(pos_info['option_symbol'])
         if not security or not (security.IsDelisted or security.Price == 0):
             continue
+        
         symbol = pos_info['symbol']
         strike = pos_info['strike']
         right = pos_info['right']
         quantity = abs(pos_info['quantity'])
+        
+        # Get current shares from QC Portfolio
         equity = algo.equities.get(symbol)
         qc_shares = 0
         if equity and algo.Portfolio.ContainsKey(equity.Symbol):
             qc_shares = algo.Portfolio[equity.Symbol].Quantity
-        tracked_shares = algo.stock_holding.get_shares(symbol)
+        
+        # Detect assignment by checking QC Portfolio state
         was_assigned = False
         exit_reason = "EXPIRY"
+        
         if right == "P":
-            if qc_shares > tracked_shares:
-                shares_acquired = qc_shares - tracked_shares
+            # Put assignment: QC bought shares for us at strike price
+            if qc_shares > 0:
+                shares_acquired = qc_shares
                 expected_shares = quantity * 100
                 if shares_acquired > expected_shares * 1.1:
                     algo.Log(f"WARNING: Put assignment shares {shares_acquired} > expected {expected_shares}")
-                    shares_acquired = min(shares_acquired, expected_shares)
-                algo.stock_holding.add_shares(symbol, shares_acquired, strike)
-                algo.stock_holding.add_premium(symbol, pos_info['entry_price'] * 100)
                 algo.phase = "CC"
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
-                algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f} (QC has {qc_shares} shares)")
+                algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f}")
+        
         elif right == "C":
-            if qc_shares < tracked_shares:
-                shares_sold = tracked_shares - qc_shares
-                expected_shares = quantity * 100
-                if shares_sold > expected_shares * 1.1:
-                    algo.Log(f"WARNING: Call assignment shares {shares_sold} > expected {expected_shares}")
-                    shares_sold = min(shares_sold, expected_shares)
-                algo.stock_holding.remove_shares(symbol, shares_sold)
+            # Call assignment: QC sold shares for us at strike price
+            if qc_shares == 0:
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
-                cost_basis = algo.stock_holding.holdings.get(symbol, {}).get('cost_basis', strike)
+                cost_basis = get_cost_basis(algo, symbol)
+                shares_sold = quantity * 100
                 stock_pnl = (strike - cost_basis) * shares_sold if cost_basis > 0 else 0
                 algo.Log(f"Call assigned: -{shares_sold} {symbol} @ ${strike:.2f}, Stock P&L: ${stock_pnl:+.2f}")
-                if qc_shares == 0 or algo.stock_holding.shares == 0:
-                    algo.phase = "SP"
-                    algo.Log(f"All shares sold, returning to SP phase")
+                algo.phase = "SP"
+                algo.Log(f"All shares sold, returning to SP phase")
+        
+        # Get P&L from QC (already calculated by platform)
         pnl = security.Holdings.UnrealizedProfit if hasattr(security, 'Holdings') else 0
+        
+        # Get metadata for ML learning
+        metadata = get_position_metadata(algo, pos_id)
+        
+        # Update ML with correct assignment flag
         algo.ml_integration.update_performance({
             'symbol': symbol,
-            'delta': abs(pos_info['delta_at_entry']),
-            'dte': calculate_dte(pos_info['expiry'], datetime.strptime(pos_info['entry_date'], '%Y-%m-%d')),
+            'delta': abs(metadata.get('delta_at_entry', 0)),
+            'dte': calculate_dte(pos_info['expiry'], datetime.strptime(metadata.get('entry_date', algo.Time.strftime('%Y-%m-%d')), '%Y-%m-%d')),
             'num_contracts': quantity,
             'pnl': pnl / 100,
             'assigned': was_assigned,
             'bars': algo.price_history.get(symbol, []),
-            'cost_basis': algo.stock_holding.holdings.get(symbol, {}).get('cost_basis', 0),
-            'strategy_phase': pos_info['strategy_phase'],
+            'cost_basis': get_cost_basis(algo, symbol),
+            'strategy_phase': metadata.get('strategy_phase', 'SP'),
         })
+        
+        # Record trade (P&L from QC, no manual calculation)
         record_trade(algo, symbol, right, pnl, exit_reason)
-        del algo.open_option_positions[pos_id]
+        
+        # Clean up metadata
+        remove_position_metadata(algo, pos_id)
 
 
 def update_ml_models(algo):

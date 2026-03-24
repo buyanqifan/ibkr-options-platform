@@ -3,6 +3,11 @@ from typing import Dict, List, Optional
 from ml_integration import StrategySignal
 from signals import get_cc_optimization_params
 from scoring import score_single_stock
+from qc_portfolio import (
+    get_symbols_with_holdings, get_cost_basis, get_put_position_symbols,
+    get_position_for_symbol, get_option_position_count, get_call_position_contracts,
+    get_shares_held
+)
 
 
 def get_portfolio_state(algo) -> Dict:
@@ -20,16 +25,14 @@ def calculate_drawdown(algo) -> float:
 
 
 def get_current_position(algo, symbol: str) -> Optional[Dict]:
-    for pos_info in algo.open_option_positions.values():
-        if pos_info.get('symbol') == symbol: return pos_info
-    return None
+    return get_position_for_symbol(algo, symbol)
 
 
 def generate_ml_signals(algo) -> List[StrategySignal]:
     signals, portfolio_state = [], get_portfolio_state(algo)
     algo.Log(f"generate_ml_signals: phase={algo.phase}, stock_pool={algo.stock_pool}")
     if algo.phase == "SP":
-        symbols_with_put = {p.get('symbol') for p in algo.open_option_positions.values() if p.get('right') == 'P'}
+        symbols_with_put = get_put_position_symbols(algo)
         algo.Log(f"generate_ml_signals: symbols_with_put={symbols_with_put}")
         for symbol in algo.stock_pool:
             if symbol not in symbols_with_put:
@@ -37,7 +40,7 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
                 algo.Log(f"generate_ml_signals: symbol={symbol}, sig={'None' if sig is None else 'generated'}")
                 if sig: signals.append(sig)
     elif algo.phase == "CC":
-        for symbol in algo.stock_holding.get_symbols():
+        for symbol in get_symbols_with_holdings(algo, algo.stock_pool):
             sig = generate_signal_for_symbol(algo, symbol, "CC", portfolio_state)
             if sig: signals.append(sig)
         if algo.allow_sp_in_cc_phase:
@@ -58,7 +61,7 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     if len(bars) < 20:
         algo.Log(f"generate_signal_for_symbol: {symbol} - bars={len(bars)} < 20")
         return None
-    cost_basis = algo.stock_holding.holdings.get(symbol, {}).get("cost_basis", 0)
+    cost_basis = get_cost_basis(algo, symbol)
     current_position = get_current_position(algo, symbol)
     traditional_delta, cc_min_strike = 0.30, None
     if strategy_phase == "CC" and algo.cc_optimization_enabled and cost_basis > 0:
@@ -85,13 +88,17 @@ def generate_cc_sp_signals(algo, portfolio_state: Dict) -> List[StrategySignal]:
     signals = []
     margin_util = algo.Portfolio.TotalMarginUsed / algo.Portfolio.TotalPortfolioValue
     if margin_util > algo.sp_in_cc_margin_threshold: return signals
-    sp_positions = sum(1 for p in algo.open_option_positions.values() if p.get('right') == 'P')
-    if sp_positions >= algo.sp_in_cc_max_positions: return signals
-    if len(algo.open_option_positions) >= algo.max_positions: return signals
-    symbols_with_put = {p.get('symbol') for p in algo.open_option_positions.values() if p.get('right') == 'P'}
-    held = algo.stock_holding.get_symbols()
+    
+    # Count put positions using QC Portfolio
+    put_symbols = get_put_position_symbols(algo)
+    if len(put_symbols) >= algo.sp_in_cc_max_positions: return signals
+    
+    open_count = get_option_position_count(algo)
+    if open_count >= algo.max_positions: return signals
+    
+    held = get_symbols_with_holdings(algo, algo.stock_pool)
     available = [s for s in algo.stock_pool if s not in held] or algo.stock_pool
-    available = [s for s in available if s not in symbols_with_put]
+    available = [s for s in available if s not in put_symbols]
     best_signal = None
     for symbol in available:
         signal = generate_signal_for_symbol(algo, symbol, "CC+SP", portfolio_state)

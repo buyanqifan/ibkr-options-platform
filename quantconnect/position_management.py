@@ -5,12 +5,13 @@ from ml_integration import StrategySignal
 from option_utils import should_roll_position, calculate_dte
 from signals import build_position_data, calculate_pnl_metrics
 from execution import make_signal, execute_roll, execute_close
+from qc_portfolio import get_option_positions
 
 
 def check_position_management(algo, execute_signal_func, find_option_func):
-    for position_id, pos_info in list(algo.open_option_positions.items()):
-        if position_id not in algo.open_option_positions:
-            continue
+    # Get all option positions from QC Portfolio
+    positions = get_option_positions(algo)
+    for pos_id, pos_info in positions.items():
         option_symbol = pos_info['option_symbol']
         security = algo.Securities.get(option_symbol)
         if not security:
