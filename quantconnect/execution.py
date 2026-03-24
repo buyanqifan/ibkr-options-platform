@@ -21,6 +21,41 @@ def bs_call_price(S, K, T, sigma):
     return BlackScholes.call_price(S, K, T, RISK_FREE_RATE, sigma)
 
 
+def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
+    """Safely execute option order with data readiness check.
+    
+    QC dynamically subscribed options may not have price data immediately.
+    This function checks if data is ready and uses LimitOrder as fallback.
+    
+    Args:
+        algo: QCAlgorithm instance
+        option_symbol: Option Symbol object
+        quantity: Number of contracts (negative for sell)
+        theoretical_price: BS theoretical price for limit order fallback
+    
+    Returns:
+        OrderTicket or None
+    """
+    # Subscribe if not already in Securities
+    if not algo.Securities.ContainsKey(option_symbol):
+        algo.Log(f"Subscribing to option contract: {option_symbol}")
+        algo.AddOptionContract(option_symbol, Resolution.Daily)
+    
+    security = algo.Securities[option_symbol]
+    
+    # Check if price data is available
+    if security.HasData and security.Price > 0:
+        # Data ready - use MarketOrder
+        algo.Log(f"Option data ready, MarketOrder: {option_symbol} @ market")
+        return algo.MarketOrder(option_symbol, quantity)
+    else:
+        # Data not ready - use LimitOrder with theoretical price
+        # For sell orders (negative quantity), set limit slightly below theoretical
+        limit_price = theoretical_price * 0.98 if quantity < 0 else theoretical_price * 1.02
+        algo.Log(f"Option data not ready, LimitOrder: {option_symbol} @ ${limit_price:.2f} (theoretical: ${theoretical_price:.2f})")
+        return algo.LimitOrder(option_symbol, quantity, limit_price)
+
+
 def make_signal(symbol, action, delta=0, dte_min=30, dte_max=45, num_contracts=1, confidence=0.5, reasoning=""):
     return StrategySignal(symbol=symbol, action=action, delta=delta, dte_min=dte_min, dte_max=dte_max,
         num_contracts=num_contracts, confidence=confidence, reasoning=reasoning,
@@ -65,10 +100,8 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
     quantity = -quantity
     algo.Log(f"Selling {abs(quantity)} {signal.symbol} {target_right} @ ${selected['premium']:.2f}")
     option_symbol = selected['option_symbol']
-    if not algo.Securities.ContainsKey(option_symbol):
-        algo.Log(f"Subscribing to option contract: {option_symbol}")
-        algo.AddOptionContract(option_symbol, Resolution.Daily)
-    ticket = algo.MarketOrder(option_symbol, quantity)
+    # Use safe execution to handle data readiness
+    ticket = safe_execute_option_order(algo, option_symbol, quantity, selected['premium'])
     if ticket.Status == OrderStatus.Filled:
         fill_price = ticket.AverageFillPrice or selected['premium']
         right_str = 'P' if target_right == OptionRight.Put else 'C'
@@ -89,7 +122,9 @@ def execute_roll(algo, signal: StrategySignal, find_option_func):
     if not existing: return
     pos_info = existing
     pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
-    close_ticket = algo.MarketOrder(pos_info['option_symbol'], -pos_info['quantity'])
+    # Use safe execution for closing the existing position
+    close_ticket = safe_execute_option_order(
+        algo, pos_info['option_symbol'], -pos_info['quantity'], pos_info['entry_price'])
     if close_ticket.Status != OrderStatus.Filled: return
     pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
     record_trade(algo, signal.symbol, pos_info['right'], pnl, "ROLL")
@@ -103,10 +138,8 @@ def execute_roll(algo, signal: StrategySignal, find_option_func):
     if new_selected:
         new_qty = pos_info['quantity']
         new_option_symbol = new_selected['option_symbol']
-        if not algo.Securities.ContainsKey(new_option_symbol):
-            algo.Log(f"Subscribing to option contract: {new_option_symbol}")
-            algo.AddOptionContract(new_option_symbol, Resolution.Daily)
-        new_ticket = algo.MarketOrder(new_option_symbol, new_qty)
+        # Use safe execution to handle data readiness
+        new_ticket = safe_execute_option_order(algo, new_option_symbol, new_qty, new_selected['premium'])
         if new_ticket.Status == OrderStatus.Filled:
             right_str = 'P' if target_right == OptionRight.Put else 'C'
             new_pos_id = f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{new_selected['strike']:.0f}_{right_str}"
@@ -124,7 +157,10 @@ def execute_close(algo, signal: StrategySignal):
     pos_info = get_position_for_symbol(algo, signal.symbol)
     if not pos_info: return
     pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
-    close_ticket = algo.MarketOrder(pos_info['option_symbol'], -pos_info['quantity'])
+    # For closing, use entry price as reference for limit order fallback
+    # (positions should have data, but use safe execution for consistency)
+    close_ticket = safe_execute_option_order(
+        algo, pos_info['option_symbol'], -pos_info['quantity'], pos_info['entry_price'])
     if close_ticket.Status == OrderStatus.Filled:
         pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
         record_trade(algo, signal.symbol, pos_info['right'], pnl, signal.reasoning or "SIGNAL_CLOSE")
