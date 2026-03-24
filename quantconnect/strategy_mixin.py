@@ -87,7 +87,9 @@ def init_securities(algo):
         e.SetDataNormalizationMode(DataNormalizationMode.Raw)
         algo.equities[symbol], algo.price_history[symbol] = e, []
         o = algo.AddOption(symbol, Resolution.Daily)
-        o.SetFilter(-10, 10, timedelta(days=25), timedelta(days=50))
+        # Wide filter range to ensure contracts are subscribed before trading
+        # -30/+30 strikes covers most delta targets (0.15-0.45)
+        o.SetFilter(-30, 30, timedelta(days=20), timedelta(days=60))
         algo.options[symbol] = o
     algo.vix = algo.AddEquity("VIXY", Resolution.Daily)
     algo._current_vix, algo._vix_history = 20.0, []
@@ -313,14 +315,18 @@ def execute_signal(algo, signal: StrategySignal):
         return
     current_positions = len(algo.open_option_positions)
     if target_right == OptionRight.Put:
-        # Calculate quantity based on actual margin available
-        # QC margin requirement for short put is roughly strike * 100 * margin_rate (typically 15-20%)
-        estimated_margin_per_contract = selected['strike'] * 100 * 0.20
+        # Conservative position sizing:
+        # 1. Estimate margin per contract (strike * 100 * margin_rate)
+        # 2. Use only 50% of available margin for safety buffer
+        # 3. Consider potential margin increase if price moves against us
+        estimated_margin_per_contract = selected['strike'] * 100 * 0.25  # 25% for safety
         available_margin = algo.Portfolio.MarginRemaining
-        max_by_margin = max(1, int(available_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
+        # Use only 50% of available margin as buffer for price movements
+        usable_margin = available_margin * 0.50
+        max_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
         max_by_limit = algo.max_positions - current_positions
         quantity = min(max_by_margin, max_by_limit)
-        algo.Log(f"Position sizing: available_margin=${available_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_by_margin}, quantity={quantity}")
+        algo.Log(f"Position sizing: available_margin=${available_margin:.0f}, usable=${usable_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_by_margin}, quantity={quantity}")
     else:
         shares_held = algo.stock_holding.get_shares(signal.symbol)
         existing_call_contracts = sum(abs(p.get('quantity', 0)) for p in algo.open_option_positions.values()
