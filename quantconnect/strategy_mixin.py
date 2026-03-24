@@ -303,7 +303,7 @@ def execute_signal(algo, signal: StrategySignal):
     if target_right == OptionRight.Put:
         max_by_capital = max(1, int(algo.initial_capital / 10000))
         max_by_limit = algo.max_positions - current_positions
-        quantity = min(max_by_capital, max_by_limit, 10)
+        quantity = min(max_by_capital, max_by_limit)
     else:
         shares_held = algo.stock_holding.get_shares(signal.symbol)
         existing_call_contracts = sum(abs(p.get('quantity', 0)) for p in algo.open_option_positions.values()
