@@ -13,9 +13,15 @@ from qc_portfolio import (
 def get_portfolio_state(algo) -> Dict:
     positions = [{'symbol': str(h.Symbol), 'quantity': h.Quantity, 'market_value': h.HoldingsValue}
                  for h in algo.Portfolio.Values if h.Invested]
+    # Get cost basis for each held symbol from QC Portfolio
+    cost_basis_dict = {}
+    for symbol in algo.stock_pool:
+        cb = get_cost_basis(algo, symbol)
+        if cb > 0:
+            cost_basis_dict[symbol] = cb
     return {'total_capital': algo.Portfolio.TotalPortfolioValue, 'available_margin': algo.Portfolio.Cash,
             'margin_used': algo.Portfolio.TotalMarginUsed, 'drawdown': calculate_drawdown(algo),
-            'positions': positions, 'cost_basis': algo.stock_holding.cost_basis}
+            'positions': positions, 'cost_basis': cost_basis_dict}
 
 
 def calculate_drawdown(algo) -> float:

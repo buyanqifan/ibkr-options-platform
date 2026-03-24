@@ -175,7 +175,10 @@ class MLPositionOptimizer:
             breakeven = strike - premium
             features['break_even_distance_pct'] = (underlying_price - breakeven) / underlying_price * 100
         else:
-            cost_basis = portfolio_state.get('cost_basis', underlying_price)
+            # cost_basis is now a dict {symbol: cost_basis} from QC Portfolio
+            cost_basis_dict = portfolio_state.get('cost_basis', {})
+            symbol = option_info.get('symbol', '')
+            cost_basis = cost_basis_dict.get(symbol, underlying_price) if isinstance(cost_basis_dict, dict) else underlying_price
             features['break_even_distance_pct'] = (underlying_price - cost_basis) / underlying_price * 100
         
         return features
