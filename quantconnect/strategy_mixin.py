@@ -87,9 +87,7 @@ def init_securities(algo):
         e.SetDataNormalizationMode(DataNormalizationMode.Raw)
         algo.equities[symbol], algo.price_history[symbol] = e, []
         o = algo.AddOption(symbol, Resolution.Daily)
-        # Wide filter to ensure all potential contracts are subscribed
-        # -30 to +30 strikes, 20 to 60 days to expiry
-        o.SetFilter(-30, 30, timedelta(days=20), timedelta(days=60))
+        o.SetFilter(-10, 10, timedelta(days=25), timedelta(days=50))
         algo.options[symbol] = o
     algo.vix = algo.AddEquity("VIXY", Resolution.Daily)
     algo._current_vix, algo._vix_history = 20.0, []
@@ -449,58 +447,30 @@ def update_ml_models(algo):
 def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target_delta: float,
                             dte_min: int, dte_max: int, delta_tolerance: float = 0.10, min_strike: float = None) -> Optional[Dict]:
     underlying_price = algo.Securities[equity_symbol].Price
-    
-    # Prefer cached option chain from OnData (has real price data)
-    option_contracts = None
-    if hasattr(algo, '_cached_option_chains') and symbol in algo._cached_option_chains:
-        cached_chain = algo._cached_option_chains[symbol]
-        option_contracts = list(cached_chain.Values()) if cached_chain else None
-        if option_contracts:
-            algo.Log(f"find_option: using cached chain for {symbol}, size={len(option_contracts)}")
-    
-    # Fallback to OptionChainProvider
-    if not option_contracts:
-        option_symbols = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
-        if not option_symbols:
-            algo.Log(f"find_option: no option_chain for {symbol}")
-            return None
-        algo.Log(f"find_option: using provider for {symbol}, size={len(option_symbols)}")
-        # Convert symbols to a common format for processing
-        option_contracts = [type('obj', (object,), {
-            'Symbol': s, 'Right': s.ID.OptionRight, 'Strike': s.ID.StrikePrice,
-            'Expiry': s.ID.Date, 'BidPrice': 0, 'AskPrice': 0, 'LastPrice': 0
-        })() for s in option_symbols]
-    
-    algo.Log(f"find_option: {symbol} chain_size={len(option_contracts)} target_delta={target_delta:.2f} dte=[{dte_min},{dte_max}] underlying={underlying_price:.2f}")
+    # Use OptionChainProvider to get all option contracts
+    option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
+    if not option_chain:
+        algo.Log(f"find_option: no option_chain for {symbol}")
+        return None
+    algo.Log(f"find_option: {symbol} chain_size={len(option_chain)} target_delta={target_delta:.2f} dte=[{dte_min},{dte_max}] underlying={underlying_price:.2f}")
     suitable = []
     stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'tolerance': 0}
-    for contract in option_contracts:
-        # Handle both cached OptionChain contracts and provider symbols
-        if hasattr(contract, 'Symbol'):
-            option_symbol = contract.Symbol
-            right = contract.Right
-            strike = contract.Strike
-            expiry = contract.Expiry
-        else:
-            option_symbol = contract
-            right = contract.ID.OptionRight
-            strike = contract.ID.StrikePrice
-            expiry = contract.ID.Date
-        
-        if right != target_right: 
+    for option_symbol in option_chain:
+        if option_symbol.ID.OptionRight != target_right: 
             continue
         stats['right'] += 1
-        dte = (expiry - algo.Time).days
+        dte = (option_symbol.ID.Date - algo.Time).days
         if not (dte_min <= dte <= dte_max): 
             continue
         stats['dte'] += 1
+        strike = option_symbol.ID.StrikePrice
         if min_strike and strike < min_strike: 
             stats['min_strike'] += 1
             continue
         if not filter_option_by_itm_protection(strike, underlying_price, target_right): 
             stats['itm'] += 1
             continue
-        # Estimate delta using moneyness
+        # Estimate delta using moneyness (since Securities may not have Greeks)
         delta = estimate_delta_from_moneyness(strike, underlying_price, target_right)
         iv = calculate_historical_vol(algo.price_history.get(symbol, []))
         if delta is None: 
@@ -514,9 +484,9 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
             premium = bs_put_price(underlying_price, strike, T, iv)
         else:
             premium = bs_call_price(underlying_price, strike, T, iv)
-        if premium <= 0.10:
+        if premium <= 0.10:  # Minimum premium threshold
             continue
-        suitable.append(build_option_result(option_symbol, strike, expiry, dte,
+        suitable.append(build_option_result(option_symbol, strike, option_symbol.ID.Date, dte,
             delta, iv, premium, abs(delta - target_delta), premium * 0.99, premium * 1.01))
     algo.Log(f"find_option stats: right={stats['right']} dte={stats['dte']} itm={stats['itm']} tolerance={stats['tolerance']} suitable={len(suitable)}")
     if not suitable:
