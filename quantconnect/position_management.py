@@ -40,7 +40,7 @@ def check_position_management(algo, execute_signal_func, find_option_func):
                 algo.Log(f"ML Roll: action={roll_rec.action} confidence={roll_rec.confidence:.2f} improvement={roll_rec.expected_pnl_improvement:.2f}")
                 if should_roll and roll_rec.action in ["ROLL_FORWARD", "ROLL_OUT", "CLOSE_EARLY"]:
                     algo.Log(f"ML triggered action: {roll_rec.action} - {roll_rec.reasoning}")
-                    handle_roll_action(algo, roll_rec, pos_info, position_id, find_option_func)
+                    handle_roll_action(algo, roll_rec, pos_info, pos_id, find_option_func)
                     continue
             except Exception as e:
                 algo.Log(f"ML Roll error: {e}")
