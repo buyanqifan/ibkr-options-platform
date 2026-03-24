@@ -36,6 +36,12 @@ class BinbinGodStrategy(QCAlgorithm):
             self._vix_history.append(self._current_vix)
             if len(self._vix_history) > 252:
                 self._vix_history = self._vix_history[-252:]
+        # Cache option chain data for use in scheduled events
+        if not hasattr(self, '_cached_option_chains'):
+            self._cached_option_chains = {}
+        for symbol in self.stock_pool:
+            if symbol in data.OptionChains:
+                self._cached_option_chains[symbol] = data.OptionChains[symbol]
 
     def OnWarmupFinished(self):
         """Called when warmup finished."""
