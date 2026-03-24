@@ -52,6 +52,9 @@ def init_parameters(algo):
     algo.max_leverage = float(algo.GetParameter("max_leverage", 1.0))
     algo._profit_target_disabled = algo.profit_target_pct >= 999999
     algo._stop_loss_disabled = algo.stop_loss_pct >= 999999
+    # Margin management parameters
+    algo.margin_buffer_pct = float(algo.GetParameter("margin_buffer_pct", 0.50))  # % of margin to reserve as buffer
+    algo.margin_rate_per_contract = float(algo.GetParameter("margin_rate_per_contract", 0.25))  # margin rate per contract
     algo.allow_sp_in_cc_phase = bool(algo.GetParameter("allow_sp_in_cc_phase", True))
     algo.sp_in_cc_margin_threshold = float(algo.GetParameter("sp_in_cc_margin_threshold", 0.5))
     algo.sp_in_cc_max_positions = int(algo.GetParameter("sp_in_cc_max_positions", 3))
@@ -315,14 +318,13 @@ def execute_signal(algo, signal: StrategySignal):
         return
     current_positions = len(algo.open_option_positions)
     if target_right == OptionRight.Put:
-        # Conservative position sizing:
-        # 1. Estimate margin per contract (strike * 100 * margin_rate)
-        # 2. Use only 50% of available margin for safety buffer
-        # 3. Consider potential margin increase if price moves against us
-        estimated_margin_per_contract = selected['strike'] * 100 * 0.25  # 25% for safety
+        # Conservative position sizing using configurable parameters:
+        # 1. Estimate margin per contract (strike * 100 * margin_rate_per_contract)
+        # 2. Reserve buffer percentage for price movements
+        estimated_margin_per_contract = selected['strike'] * 100 * algo.margin_rate_per_contract
         available_margin = algo.Portfolio.MarginRemaining
-        # Use only 50% of available margin as buffer for price movements
-        usable_margin = available_margin * 0.50
+        # Reserve buffer for price movements
+        usable_margin = available_margin * (1 - algo.margin_buffer_pct)
         max_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
         max_by_limit = algo.max_positions - current_positions
         quantity = min(max_by_margin, max_by_limit)
