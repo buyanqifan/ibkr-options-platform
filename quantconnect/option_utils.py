@@ -110,11 +110,16 @@ def estimate_delta_from_moneyness(
     moneyness = strike / underlying_price
     
     if 'PUT' in right_str:
-        if moneyness < 0.98:  # OTM put
-            return -max(0.15, min(0.40, (1 - moneyness) * 2))
+        # For Put: OTM when strike < underlying (moneyness < 1.0)
+        # Return delta for all OTM puts (moneyness < 0.99 to match ITM protection)
+        if moneyness < 0.99:
+            # Delta roughly equals OTM probability
+            # moneyness 0.90 -> delta ~0.20, moneyness 0.95 -> delta ~0.30
+            return -max(0.10, min(0.45, (1 - moneyness) * 3))
     else:
-        if moneyness > 1.02:  # OTM call
-            return max(0.15, min(0.40, (moneyness - 1) * 2))
+        # For Call: OTM when strike > underlying (moneyness > 1.0)
+        if moneyness > 1.01:
+            return max(0.10, min(0.45, (moneyness - 1) * 3))
     
     return None
 
