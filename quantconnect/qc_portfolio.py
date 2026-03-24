@@ -15,7 +15,7 @@ We still need to track:
 - Strategy metadata (strategy_phase, ml_signal) for signal generation
 """
 from typing import Dict, List, Optional, Any
-from AlgorithmImports import OptionRight
+from AlgorithmImports import OptionRight, SecurityType
 
 
 def get_option_positions(algo) -> Dict[str, Dict]:
@@ -28,8 +28,8 @@ def get_option_positions(algo) -> Dict[str, Dict]:
         if not holding.Invested:
             continue
         symbol = holding.Symbol
-        # Check if it's an option (has OptionRight property)
-        if hasattr(symbol, 'ID') and hasattr(symbol.ID, 'OptionRight'):
+        # Check if it's an option by SecurityType first (avoids OptionRight access error)
+        if hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option:
             # It's an option position
             right_str = 'P' if symbol.ID.OptionRight == OptionRight.Put else 'C'
             pos_id = f"{symbol.ID.Underlying}_{symbol.ID.Date.strftime('%Y%m%d')}_{symbol.ID.StrikePrice:.0f}_{right_str}"
@@ -68,8 +68,9 @@ def get_equity_positions(algo, stock_pool: List[str] = None) -> Dict[str, Dict]:
         if not holding.Invested:
             continue
         symbol = holding.Symbol
-        # Check if it's equity (not an option)
-        if not (hasattr(symbol, 'ID') and hasattr(symbol.ID, 'OptionRight')):
+        # Check if it's equity (not an option) by SecurityType
+        is_option = hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option
+        if not is_option:
             sym_str = str(symbol)
             if stock_pool and sym_str not in stock_pool:
                 continue
@@ -100,8 +101,9 @@ def get_symbols_with_holdings(algo, stock_pool: List[str] = None) -> List[str]:
         if not holding.Invested or holding.Quantity <= 0:
             continue
         symbol = holding.Symbol
-        # Check if it's equity (not an option)
-        if not (hasattr(symbol, 'ID') and hasattr(symbol.ID, 'OptionRight')):
+        # Check if it's equity (not an option) by SecurityType
+        is_option = hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option
+        if not is_option:
             sym_str = str(symbol)
             if stock_pool is None or sym_str in stock_pool:
                 symbols.append(sym_str)
@@ -129,7 +131,7 @@ def get_option_position_count(algo) -> int:
         if not holding.Invested:
             continue
         symbol = holding.Symbol
-        if hasattr(symbol, 'ID') and hasattr(symbol.ID, 'OptionRight'):
+        if hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option:
             count += 1
     return count
 
@@ -141,7 +143,7 @@ def get_put_position_symbols(algo) -> set:
         if not holding.Invested:
             continue
         symbol = holding.Symbol
-        if hasattr(symbol, 'ID') and hasattr(symbol.ID, 'OptionRight'):
+        if hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option:
             if symbol.ID.OptionRight == OptionRight.Put:
                 symbols.add(str(symbol.ID.Underlying))
     return symbols
@@ -154,7 +156,7 @@ def get_call_position_contracts(algo, symbol: str) -> int:
         if not holding.Invested:
             continue
         pos_symbol = holding.Symbol
-        if hasattr(pos_symbol, 'ID') and hasattr(pos_symbol.ID, 'OptionRight'):
+        if hasattr(pos_symbol, 'SecurityType') and pos_symbol.SecurityType == SecurityType.Option:
             if (pos_symbol.ID.OptionRight == OptionRight.Call and 
                 str(pos_symbol.ID.Underlying) == symbol):
                 contracts += abs(holding.Quantity)
@@ -167,7 +169,7 @@ def get_position_for_symbol(algo, symbol: str) -> Optional[Dict]:
         if not holding.Invested:
             continue
         pos_symbol = holding.Symbol
-        if hasattr(pos_symbol, 'ID') and hasattr(pos_symbol.ID, 'OptionRight'):
+        if hasattr(pos_symbol, 'SecurityType') and pos_symbol.SecurityType == SecurityType.Option:
             if str(pos_symbol.ID.Underlying) == symbol:
                 right_str = 'P' if pos_symbol.ID.OptionRight == OptionRight.Put else 'C'
                 pos_id = f"{symbol}_{pos_symbol.ID.Date.strftime('%Y%m%d')}_{pos_symbol.ID.StrikePrice:.0f}_{right_str}"
