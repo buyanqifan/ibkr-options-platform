@@ -334,7 +334,14 @@ def execute_signal(algo, signal: StrategySignal):
     if quantity <= 0: return
     quantity = -quantity
     algo.Log(f"Selling {abs(quantity)} {signal.symbol} {target_right} @ ${selected['premium']:.2f}")
-    ticket = algo.MarketOrder(selected['option_symbol'], quantity)
+    
+    # Subscribe to the option contract if not already subscribed
+    option_symbol = selected['option_symbol']
+    if not algo.Securities.ContainsKey(option_symbol):
+        algo.Log(f"Subscribing to option contract: {option_symbol}")
+        algo.AddOptionContract(option_symbol, Resolution.Daily)
+    
+    ticket = algo.MarketOrder(option_symbol, quantity)
     if ticket.Status == OrderStatus.Filled:
         fill_price = ticket.AverageFillPrice or selected['premium']
         right_str = 'P' if target_right == OptionRight.Put else 'C'
@@ -366,7 +373,12 @@ def execute_roll(algo, signal: StrategySignal):
         target_right=target_right, target_delta=target_delta, dte_min=signal.dte_min, dte_max=signal.dte_max)
     if new_selected:
         new_qty = pos_info['quantity']
-        new_ticket = algo.MarketOrder(new_selected['option_symbol'], new_qty)
+        # Subscribe to the new option contract if not already subscribed
+        new_option_symbol = new_selected['option_symbol']
+        if not algo.Securities.ContainsKey(new_option_symbol):
+            algo.Log(f"Subscribing to option contract: {new_option_symbol}")
+            algo.AddOptionContract(new_option_symbol, Resolution.Daily)
+        new_ticket = algo.MarketOrder(new_option_symbol, new_qty)
         if new_ticket.Status == OrderStatus.Filled:
             right_str = 'P' if target_right == OptionRight.Put else 'C'
             algo.open_option_positions[f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{new_selected['strike']:.0f}_{right_str}"] = {
