@@ -75,13 +75,34 @@ class MLRollOptimizer:
         except (ValueError, TypeError):
             days_held = 0
         
+        # DTE calculation - handle multiple formats
+        # 1. Use pre-calculated dte from build_position_data (preferred)
+        # 2. If expiry is datetime object, calculate directly
+        # 3. If expiry is string, parse it
+        dte = position.get('dte')  # Use pre-calculated DTE if available
+        if dte is None:
+            expiry = position.get('expiry')
+            if hasattr(expiry, '__sub__') and hasattr(expiry, 'year'):
+                # expiry is datetime/date object
+                try:
+                    dte = (expiry - curr_date).days
+                except:
+                    dte = 0
+            elif isinstance(expiry, str):
+                # expiry is string, try parsing
+                try:
+                    expiry_date = datetime.strptime(expiry, '%Y%m%d')
+                    dte = (expiry_date - curr_date).days
+                except (ValueError, TypeError):
+                    dte = 0
+            else:
+                dte = 0
+        
+        # Calculate dte_percent for theta capture rate
         try:
-            expiry_date = datetime.strptime(position.get('expiry', ''), '%Y%m%d')
-            dte = (expiry_date - curr_date).days
-            original_dte = (expiry_date - entry_date).days
+            original_dte = dte + days_held if dte and days_held else 45
             dte_percent = dte / original_dte if original_dte > 0 else 0
-        except (ValueError, TypeError):
-            dte = 0
+        except:
             dte_percent = 0
         
         # Premium calculations
@@ -257,6 +278,7 @@ class MLRollOptimizer:
             )
         
         # Rule 4: Near expiry with poor capture - Consider early close
+        # This allows ML to recommend closing when position is not working out
         if dte <= 5 and premium_capture < 30:
             action = "CLOSE_EARLY"
             confidence = 0.60

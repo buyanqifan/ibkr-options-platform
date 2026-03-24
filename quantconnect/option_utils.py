@@ -193,11 +193,16 @@ def should_roll_position(
 ) -> Tuple[str, str]:
     """Determine if position should be rolled or closed.
     
+    This matches the original binbin_god.py logic:
+    1. Roll Forward when premium_captured >= 80% and DTE > 7
+    2. Profit target when pnl_pct >= profit_target_pct (if enabled)
+    3. Stop loss when pnl_pct <= -stop_loss_pct (if enabled)
+    
     Args:
-        premium_captured_pct: Premium captured percentage
+        premium_captured_pct: Premium captured percentage (same as pnl_pct for short options)
         dte: Days to expiry
-        pnl_pct: P&L percentage
-        profit_target_pct: Profit target percentage
+        pnl_pct: P&L percentage (for short options, equals premium_captured_pct)
+        profit_target_pct: Profit target percentage (e.g., 50 means capture 50% of premium)
         profit_target_disabled: Whether profit target is disabled
         stop_loss_pct: Stop loss percentage
         stop_loss_disabled: Whether stop loss is disabled
@@ -208,15 +213,21 @@ def should_roll_position(
         Tuple of (action, reasoning)
         action: "ROLL", "CLOSE_PROFIT", "CLOSE_LOSS", or "HOLD"
     """
-    # Check roll forward: 80%+ premium captured with 7+ DTE
+    # PRIORITY 1: Roll Forward - capture 80%+ premium with time remaining
     if premium_captured_pct >= roll_threshold_pct and dte > min_dte_for_roll:
         return "ROLL", f"Roll: {premium_captured_pct:.0f}% premium captured, {dte} DTE"
     
-    # Check profit target
-    if not profit_target_disabled and pnl_pct >= profit_target_pct:
-        return "CLOSE_PROFIT", f"Profit target: {pnl_pct:.0f}% gain"
+    # PRIORITY 2: Expiry check - let it expire when DTE <= 0
+    if dte <= 0:
+        return "EXPIRY", f"Option expired, DTE={dte}"
     
-    # Check stop loss (disabled by default for Wheel)
+    # PRIORITY 3: Traditional profit target
+    # For Wheel strategy, this triggers when premium captured >= profit_target_pct
+    if not profit_target_disabled:
+        if pnl_pct >= profit_target_pct:
+            return "CLOSE_PROFIT", f"Profit target: {pnl_pct:.0f}% captured (target: {profit_target_pct:.0f}%)"
+    
+    # PRIORITY 4: Stop loss (disabled by default for Wheel)
     if not stop_loss_disabled and pnl_pct <= -stop_loss_pct:
         return "CLOSE_LOSS", f"Stop loss: {pnl_pct:.0f}% loss"
     
