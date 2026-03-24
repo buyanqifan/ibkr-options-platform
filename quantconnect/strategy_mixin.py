@@ -7,8 +7,20 @@ from scoring import score_single_stock, calculate_historical_vol
 from ml_integration import MLOptimizationConfig, StrategySignal
 from option_utils import filter_option_by_itm_protection, estimate_delta_from_moneyness, get_premium_from_security, should_roll_position, calculate_dte, build_option_result
 from signals import select_best_signal_with_memory, get_cc_optimization_params, build_position_data, calculate_pnl_metrics
+from option_pricing import BlackScholes
 
 MAG7_STOCKS = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
+
+# Risk-free rate for option pricing
+RISK_FREE_RATE = 0.05
+
+def bs_put_price(S, K, T, sigma):
+    """Wrapper for BlackScholes put price."""
+    return BlackScholes.put_price(S, K, T, RISK_FREE_RATE, sigma)
+
+def bs_call_price(S, K, T, sigma):
+    """Wrapper for BlackScholes call price."""
+    return BlackScholes.call_price(S, K, T, RISK_FREE_RATE, sigma)
 
 
 def make_signal(symbol, action, delta=0, dte_min=30, dte_max=45, num_contracts=1, confidence=0.5, reasoning=""):
@@ -423,55 +435,48 @@ def update_ml_models(algo):
 def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target_delta: float,
                             dte_min: int, dte_max: int, delta_tolerance: float = 0.10, min_strike: float = None) -> Optional[Dict]:
     underlying_price = algo.Securities[equity_symbol].Price
-    # Use OptionChain property - only returns subscribed contracts with data available
-    option_symbol_obj = algo.options.get(equity_symbol)
-    if not option_symbol_obj:
-        algo.Log(f"find_option: no option subscription for {symbol}")
-        return None
-    
-    # Get the actual OptionChain with data
-    option_chain = algo.OptionChain(option_symbol_obj.Symbol)
+    # Use OptionChainProvider to get all option contracts
+    option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
     if not option_chain:
-        algo.Log(f"find_option: no option_chain data for {symbol}")
+        algo.Log(f"find_option: no option_chain for {symbol}")
         return None
-    
     algo.Log(f"find_option: {symbol} chain_size={len(option_chain)} target_delta={target_delta:.2f} dte=[{dte_min},{dte_max}] underlying={underlying_price:.2f}")
     suitable = []
-    stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'delta': 0, 'tolerance': 0, 'premium': 0}
-    for option_contract in option_chain:
-        if option_contract.Right != target_right: 
+    stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'tolerance': 0}
+    for option_symbol in option_chain:
+        if option_symbol.ID.OptionRight != target_right: 
             continue
         stats['right'] += 1
-        dte = (option_contract.Expiry - algo.Time).days
+        dte = (option_symbol.ID.Date - algo.Time).days
         if not (dte_min <= dte <= dte_max): 
             continue
         stats['dte'] += 1
-        strike = option_contract.Strike
+        strike = option_symbol.ID.StrikePrice
         if min_strike and strike < min_strike: 
             stats['min_strike'] += 1
             continue
         if not filter_option_by_itm_protection(strike, underlying_price, target_right): 
             stats['itm'] += 1
             continue
-        # OptionChain contracts have Greeks available
-        delta = option_contract.Greeks.Delta if option_contract.Greeks else None
-        iv = option_contract.ImpliedVolatility
-        if delta is None or iv is None or iv == 0:
-            delta = estimate_delta_from_moneyness(strike, underlying_price, target_right)
-            iv = calculate_historical_vol(algo.price_history.get(symbol, []))
-            if delta is None: 
-                stats['delta'] += 1
-                continue
+        # Estimate delta using moneyness (since Securities may not have Greeks)
+        delta = estimate_delta_from_moneyness(strike, underlying_price, target_right)
+        iv = calculate_historical_vol(algo.price_history.get(symbol, []))
+        if delta is None: 
+            continue
         if abs(delta - target_delta) > delta_tolerance: 
             stats['tolerance'] += 1
             continue
-        premium = option_contract.AskPrice if option_contract.AskPrice > 0 else option_contract.LastPrice
-        if premium <= 0: 
-            stats['premium'] += 1
+        # Estimate premium using theoretical pricing
+        T = dte / 365.0
+        if target_right == OptionRight.Put:
+            premium = bs_put_price(underlying_price, strike, T, iv)
+        else:
+            premium = bs_call_price(underlying_price, strike, T, iv)
+        if premium <= 0.10:  # Minimum premium threshold
             continue
-        suitable.append(build_option_result(option_contract.Symbol, strike, option_contract.Expiry, dte,
-            delta, iv, premium, abs(delta - target_delta), option_contract.BidPrice, option_contract.AskPrice))
-    algo.Log(f"find_option stats: right={stats['right']} dte={stats['dte']} itm={stats['itm']} delta_none={stats['delta']} tolerance={stats['tolerance']} premium={stats['premium']} suitable={len(suitable)}")
+        suitable.append(build_option_result(option_symbol, strike, option_symbol.ID.Date, dte,
+            delta, iv, premium, abs(delta - target_delta), premium * 0.99, premium * 1.01))
+    algo.Log(f"find_option stats: right={stats['right']} dte={stats['dte']} itm={stats['itm']} tolerance={stats['tolerance']} suitable={len(suitable)}")
     if not suitable:
         algo.Log(f"find_option: no suitable options found for {symbol}")
         return None
