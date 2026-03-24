@@ -184,6 +184,10 @@ class BinbinGodStrategy(BaseStrategy):
         self.sp_in_cc_margin_threshold = config.get("sp_in_cc_margin_threshold", 0.5)  # CC阶段开SP的margin使用上限阈值
         self.sp_in_cc_max_positions = config.get("sp_in_cc_max_positions", 3)  # CC阶段最多开几个SP仓位
         
+        # Margin management parameters
+        self.margin_buffer_pct = config.get("margin_buffer_pct", 0.50)  # % of margin to reserve as buffer
+        self.margin_rate_per_contract = config.get("margin_rate_per_contract", 0.25)  # margin rate per contract
+        
         # ML delta optimization parameters - use BaseStrategy's implementation
         self.ml_delta_optimization = config.get("ml_delta_optimization", False)
         self.ml_dte_optimization = config.get("ml_dte_optimization", False)  # Add DTE optimization flag
@@ -1421,14 +1425,16 @@ class BinbinGodStrategy(BaseStrategy):
         selected_contract = suitable_contracts[0][0]
         
         # Calculate position size based on actual margin available
-        # Margin requirement for short put is roughly strike * 100 * margin_rate (typically 15-20%)
+        # Margin requirement for short put is roughly strike * 100 * margin_rate_per_contract
         strike = selected_contract.get("strike", 100)
-        estimated_margin_per_contract = strike * 100 * 0.20
+        estimated_margin_per_contract = strike * 100 * self.margin_rate_per_contract
         available_margin = portfolio.get("cash", 100000)
-        max_contracts_by_margin = max(1, int(available_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
+        # Reserve buffer for price movements
+        usable_margin = available_margin * (1 - self.margin_buffer_pct)
+        max_contracts_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
         max_contracts_by_limit = self.max_positions - current_positions
         quantity = min(max_contracts_by_margin, max_contracts_by_limit)
-        logger.debug(f"Position sizing: available_margin=${available_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_contracts_by_margin}, quantity={quantity}")
+        logger.debug(f"Position sizing: available_margin=${available_margin:.0f}, usable=${usable_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_contracts_by_margin}, quantity={quantity}")
         
         if quantity <= 0:
             return None
