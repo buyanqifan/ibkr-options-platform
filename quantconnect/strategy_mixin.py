@@ -98,15 +98,26 @@ def rebalance(algo):
     if algo.IsWarmingUp:
         return
     check_position_management(algo)
-    if len(algo.open_option_positions) >= algo.max_positions:
+    open_count = len(algo.open_option_positions)
+    algo.Log(f"Rebalance: open_positions={open_count}, max_positions={algo.max_positions}")
+    if open_count >= algo.max_positions:
+        algo.Log("Rebalance: max positions reached, skipping")
         return
     signals = generate_ml_signals(algo)
+    algo.Log(f"Rebalance: generated {len(signals)} signals")
     if not signals:
+        algo.Log("Rebalance: no signals generated")
         return
     best_signal, algo._last_selected_stock, algo._selection_count, algo._last_stock_scores = \
         select_best_signal_with_memory(signals, algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores)
-    if best_signal and best_signal.confidence >= algo.ml_min_confidence:
-        execute_signal(algo, best_signal)
+    if best_signal:
+        algo.Log(f"Rebalance: best_signal={best_signal.symbol} confidence={best_signal.confidence:.2f}")
+        if best_signal.confidence >= algo.ml_min_confidence:
+            execute_signal(algo, best_signal)
+        else:
+            algo.Log(f"Rebalance: confidence too low (min={algo.ml_min_confidence})")
+    else:
+        algo.Log("Rebalance: no best_signal selected")
 
 
 def check_position_management(algo):
@@ -178,11 +189,14 @@ def handle_roll_action(algo, roll_rec, pos_info, position_id):
 
 def generate_ml_signals(algo) -> List[StrategySignal]:
     signals, portfolio_state = [], get_portfolio_state(algo)
+    algo.Log(f"generate_ml_signals: phase={algo.phase}, stock_pool={algo.stock_pool}")
     if algo.phase == "SP":
         symbols_with_put = {p.get('symbol') for p in algo.open_option_positions.values() if p.get('right') == 'P'}
+        algo.Log(f"generate_ml_signals: symbols_with_put={symbols_with_put}")
         for symbol in algo.stock_pool:
             if symbol not in symbols_with_put:
                 sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
+                algo.Log(f"generate_ml_signals: symbol={symbol}, sig={'None' if sig is None else 'generated'}")
                 if sig: signals.append(sig)
     elif algo.phase == "CC":
         for symbol in algo.stock_holding.get_symbols():
@@ -195,11 +209,17 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
 
 def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio_state: Dict) -> Optional[StrategySignal]:
     equity = algo.equities.get(symbol)
-    if not equity: return None
+    if not equity:
+        algo.Log(f"generate_signal_for_symbol: {symbol} - no equity")
+        return None
     underlying_price = algo.Securities[equity.Symbol].Price
-    if underlying_price <= 0: return None
+    if underlying_price <= 0:
+        algo.Log(f"generate_signal_for_symbol: {symbol} - price <= 0")
+        return None
     bars = algo.price_history.get(symbol, [])
-    if len(bars) < 20: return None
+    if len(bars) < 20:
+        algo.Log(f"generate_signal_for_symbol: {symbol} - bars={len(bars)} < 20")
+        return None
     cost_basis = algo.stock_holding.holdings.get(symbol, {}).get("cost_basis", 0)
     current_position = get_current_position(algo, symbol)
     traditional_delta, cc_min_strike = 0.30, None
@@ -399,7 +419,10 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
                             dte_min: int, dte_max: int, delta_tolerance: float = 0.05, min_strike: float = None) -> Optional[Dict]:
     underlying_price = algo.Securities[equity_symbol].Price
     option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
-    if not option_chain: return None
+    if not option_chain:
+        algo.Log(f"find_option: no option_chain for {symbol}")
+        return None
+    algo.Log(f"find_option: {symbol} chain_size={len(option_chain)} target_delta={target_delta:.2f} dte=[{dte_min},{dte_max}]")
     suitable = []
     for option_symbol in option_chain:
         if option_symbol.ID.OptionRight != target_right: continue
@@ -421,7 +444,10 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
         if premium <= 0: continue
         suitable.append(build_option_result(option_symbol, strike, option_symbol.ID.Date, dte,
             delta, iv, premium, abs(delta - target_delta), getattr(security, 'BidPrice', 0) or 0, getattr(security, 'AskPrice', 0) or 0))
-    if not suitable: return None
+    if not suitable:
+        algo.Log(f"find_option: no suitable options found for {symbol}")
+        return None
+    algo.Log(f"find_option: found {len(suitable)} suitable options for {symbol}")
     suitable.sort(key=lambda x: x['delta_diff'])
     return suitable[0]
 
