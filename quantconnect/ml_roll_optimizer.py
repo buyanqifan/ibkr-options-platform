@@ -277,9 +277,12 @@ class MLRollOptimizer:
                 reasoning=f"DTE {dte}, capture {premium_capture:.0f}% - let expire for max theta"
             )
         
-        # Rule 4: Near expiry with poor capture - Consider early close
-        # This allows ML to recommend closing when position is not working out
-        if dte <= 5 and premium_capture < 30:
+        # Rule 4: Near expiry with poor capture - DISABLED for Wheel strategy
+        # Wheel strategy should hold to expiry for assignment, not close early
+        # Only consider early close in CC phase when stock price >> cost basis
+        strategy_phase = position.get('strategy_phase', 'SP')
+        if dte <= 5 and premium_capture < 30 and strategy_phase == 'CC':
+            # In CC phase, close early only if we can redeploy capital better
             action = "CLOSE_EARLY"
             confidence = 0.60
             expected_improvement = self._estimate_close_improvement(features)
@@ -290,7 +293,7 @@ class MLRollOptimizer:
                 expected_pnl_improvement=expected_improvement,
                 optimal_dte=None,
                 optimal_delta=None,
-                reasoning=f"DTE {dte}, low capture {premium_capture:.0f}% - close to free margin"
+                reasoning=f"CC phase, DTE {dte}, low capture {premium_capture:.0f}% - close to redeploy capital"
             )
         
         # Rule 5: High IV environment - Continue holding
