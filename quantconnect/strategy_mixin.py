@@ -418,35 +418,40 @@ def update_ml_models(algo):
 def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target_delta: float,
                             dte_min: int, dte_max: int, delta_tolerance: float = 0.10, min_strike: float = None) -> Optional[Dict]:
     underlying_price = algo.Securities[equity_symbol].Price
-    option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
-    if not option_chain:
-        algo.Log(f"find_option: no option_chain for {symbol}")
+    # Use OptionChain property - only returns subscribed contracts with data available
+    option_symbol_obj = algo.options.get(equity_symbol)
+    if not option_symbol_obj:
+        algo.Log(f"find_option: no option subscription for {symbol}")
         return None
+    
+    # Get the actual OptionChain with data
+    option_chain = algo.OptionChain(option_symbol_obj.Symbol)
+    if not option_chain:
+        algo.Log(f"find_option: no option_chain data for {symbol}")
+        return None
+    
     algo.Log(f"find_option: {symbol} chain_size={len(option_chain)} target_delta={target_delta:.2f} dte=[{dte_min},{dte_max}] underlying={underlying_price:.2f}")
     suitable = []
-    stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'security': 0, 'delta': 0, 'tolerance': 0, 'premium': 0}
-    for option_symbol in option_chain:
-        if option_symbol.ID.OptionRight != target_right: 
+    stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'delta': 0, 'tolerance': 0, 'premium': 0}
+    for option_contract in option_chain:
+        if option_contract.Right != target_right: 
             continue
         stats['right'] += 1
-        dte = (option_symbol.ID.Date - algo.Time).days
+        dte = (option_contract.Expiry - algo.Time).days
         if not (dte_min <= dte <= dte_max): 
             continue
         stats['dte'] += 1
-        strike = option_symbol.ID.StrikePrice
+        strike = option_contract.Strike
         if min_strike and strike < min_strike: 
             stats['min_strike'] += 1
             continue
         if not filter_option_by_itm_protection(strike, underlying_price, target_right): 
             stats['itm'] += 1
             continue
-        security = algo.Securities.get(option_symbol)
-        if not security: 
-            stats['security'] += 1
-            continue
-        delta = getattr(security, 'Delta', None)
-        iv = getattr(security, 'ImpliedVolatility', None)
-        if delta is None or iv is None:
+        # OptionChain contracts have Greeks available
+        delta = option_contract.Greeks.Delta if option_contract.Greeks else None
+        iv = option_contract.ImpliedVolatility
+        if delta is None or iv is None or iv == 0:
             delta = estimate_delta_from_moneyness(strike, underlying_price, target_right)
             iv = calculate_historical_vol(algo.price_history.get(symbol, []))
             if delta is None: 
@@ -455,12 +460,12 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
         if abs(delta - target_delta) > delta_tolerance: 
             stats['tolerance'] += 1
             continue
-        premium = get_premium_from_security(security)
+        premium = option_contract.AskPrice if option_contract.AskPrice > 0 else option_contract.LastPrice
         if premium <= 0: 
             stats['premium'] += 1
             continue
-        suitable.append(build_option_result(option_symbol, strike, option_symbol.ID.Date, dte,
-            delta, iv, premium, abs(delta - target_delta), getattr(security, 'BidPrice', 0) or 0, getattr(security, 'AskPrice', 0) or 0))
+        suitable.append(build_option_result(option_contract.Symbol, strike, option_contract.Expiry, dte,
+            delta, iv, premium, abs(delta - target_delta), option_contract.BidPrice, option_contract.AskPrice))
     algo.Log(f"find_option stats: right={stats['right']} dte={stats['dte']} itm={stats['itm']} delta_none={stats['delta']} tolerance={stats['tolerance']} premium={stats['premium']} suitable={len(suitable)}")
     if not suitable:
         algo.Log(f"find_option: no suitable options found for {symbol}")
