@@ -1420,11 +1420,15 @@ class BinbinGodStrategy(BaseStrategy):
         suitable_contracts.sort(key=lambda x: x[1])
         selected_contract = suitable_contracts[0][0]
         
-        # Calculate position size (1 contract per $10k capital as rough guide)
-        capital = portfolio.get("cash", 100000)
-        max_contracts_by_capital = int(capital / 10000)
+        # Calculate position size based on actual margin available
+        # Margin requirement for short put is roughly strike * 100 * margin_rate (typically 15-20%)
+        strike = selected_contract.get("strike", 100)
+        estimated_margin_per_contract = strike * 100 * 0.20
+        available_margin = portfolio.get("cash", 100000)
+        max_contracts_by_margin = max(1, int(available_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
         max_contracts_by_limit = self.max_positions - current_positions
-        quantity = min(max_contracts_by_capital, max_contracts_by_limit, 10)
+        quantity = min(max_contracts_by_margin, max_contracts_by_limit)
+        logger.debug(f"Position sizing: available_margin=${available_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_contracts_by_margin}, quantity={quantity}")
         
         if quantity <= 0:
             return None
@@ -1542,7 +1546,7 @@ class BinbinGodStrategy(BaseStrategy):
         selected_contract = suitable_contracts[0][0]
         
         # Sell calls against shares (limited by shares owned)
-        quantity = min(max_contracts, 10)
+        quantity = max_contracts
         
         if quantity <= 0:
             return None
