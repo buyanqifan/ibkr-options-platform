@@ -40,6 +40,10 @@ def init_parameters(algo):
     algo.cc_min_delta_cost = float(algo.GetParameter("cc_min_delta_cost", 0.15))
     algo.cc_cost_basis_threshold = float(algo.GetParameter("cc_cost_basis_threshold", 0.05))
     algo.cc_min_strike_premium = float(algo.GetParameter("cc_min_strike_premium", 0.02))
+    # CC profit protection: when stock price rises significantly above cost
+    algo.cc_profit_protection_enabled = bool(algo.GetParameter("cc_profit_protection_enabled", True))
+    algo.cc_profit_threshold = float(algo.GetParameter("cc_profit_threshold", 0.20))  # 20% above cost
+    algo.cc_profit_delta = float(algo.GetParameter("cc_profit_delta", 0.20))  # Lower delta when in profit
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
     algo.ml_enabled = bool(algo.GetParameter("ml_enabled", True))
     algo.ml_exploration_rate = float(algo.GetParameter("ml_exploration_rate", 0.1))

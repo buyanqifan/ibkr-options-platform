@@ -148,9 +148,16 @@ def get_cc_optimization_params(
     cc_optimization_enabled: bool,
     cc_min_delta_cost: float,
     cc_cost_basis_threshold: float,
-    cc_min_strike_premium: float
+    cc_min_strike_premium: float,
+    cc_profit_protection_enabled: bool = True,
+    cc_profit_threshold: float = 0.20,
+    cc_profit_delta: float = 0.20
 ) -> Tuple[float, Optional[float], str]:
-    """Calculate CC optimization parameters when stock is below cost.
+    """Calculate CC optimization parameters based on price vs cost.
+    
+    Two scenarios handled:
+    1. Stock price BELOW cost: Use lower delta to avoid locking in losses
+    2. Stock price ABOVE cost (profit): Use lower delta to avoid assignment
     
     Args:
         cost_basis: Current cost basis for the stock
@@ -159,6 +166,9 @@ def get_cc_optimization_params(
         cc_min_delta_cost: Minimum delta when price below cost
         cc_cost_basis_threshold: Threshold % below cost to trigger
         cc_min_strike_premium: Min premium % for strike selection
+        cc_profit_protection_enabled: Whether profit protection is enabled
+        cc_profit_threshold: Threshold % above cost to trigger profit protection
+        cc_profit_delta: Delta to use when in profit
         
     Returns:
         Tuple of (adjusted_delta, min_strike, log_message)
@@ -168,18 +178,31 @@ def get_cc_optimization_params(
     
     price_cost_ratio = underlying_price / cost_basis
     
-    if price_cost_ratio >= (1 - cc_cost_basis_threshold):
-        # Price is not significantly below cost
-        return 0.30, None, ""
+    # Scenario 1: Stock price is BELOW cost basis - use protective delta
+    if price_cost_ratio < (1 - cc_cost_basis_threshold):
+        adjusted_delta = cc_min_delta_cost
+        min_strike = cost_basis * (1 - cc_min_strike_premium)
+        
+        log_message = (f"CC_PROTECT:{underlying_price:.2f}_below_cost_{cost_basis:.2f}_"
+                       f"delta_{adjusted_delta:.2f}_minstrike_{min_strike:.2f}")
+        
+        return adjusted_delta, min_strike, log_message
     
-    # Stock price is below cost basis - use protective delta
-    adjusted_delta = cc_min_delta_cost
-    min_strike = cost_basis * (1 - cc_min_strike_premium)  # Want strike near cost basis
+    # Scenario 2: Stock price is ABOVE cost (profit scenario) - avoid assignment
+    if cc_profit_protection_enabled and price_cost_ratio > (1 + cc_profit_threshold):
+        # Stock has risen significantly, use lower delta to avoid being assigned
+        # and having to sell shares below market price
+        adjusted_delta = cc_profit_delta
+        # No min_strike constraint here - we want OTM calls
+        profit_pct = (price_cost_ratio - 1) * 100
+        
+        log_message = (f"CC_PROFIT:{underlying_price:.2f}_above_cost_{cost_basis:.2f}_"
+                       f"profit_{profit_pct:.0f}%_delta_{adjusted_delta:.2f}")
+        
+        return adjusted_delta, None, log_message
     
-    log_message = (f"CC_OPT:{underlying_price:.2f}_below_cost_{cost_basis:.2f}_"
-                   f"delta_{adjusted_delta:.2f}_minstrike_{min_strike:.2f}")
-    
-    return adjusted_delta, min_strike, log_message
+    # Normal scenario: price near cost
+    return 0.30, None, ""
 
 
 def build_position_data(

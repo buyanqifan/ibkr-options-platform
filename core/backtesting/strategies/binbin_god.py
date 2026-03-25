@@ -178,6 +178,10 @@ class BinbinGodStrategy(BaseStrategy):
         self.cc_min_delta_cost = config.get("cc_min_delta_cost", 0.15)  # Min delta when cost > price
         self.cc_cost_basis_threshold = config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
         self.cc_min_strike_premium = config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
+        # CC profit protection: when stock price rises significantly above cost
+        self.cc_profit_protection_enabled = config.get("cc_profit_protection_enabled", True)
+        self.cc_profit_threshold = config.get("cc_profit_threshold", 0.20)  # 20% above cost
+        self.cc_profit_delta = config.get("cc_profit_delta", 0.20)  # Lower delta when in profit
 
         # SP in CC phase parameters (binbingod策略优化：CC阶段可同时开SP)
         self.allow_sp_in_cc_phase = config.get("allow_sp_in_cc_phase", True)  # 允许CC阶段开SP
@@ -1180,6 +1184,19 @@ class BinbinGodStrategy(BaseStrategy):
                 min_strike_desired = cost_basis * (1 - self.cc_min_strike_premium)
                 additional_constraints["min_strike"] = min_strike_desired
                 logger.info(f"CC optimization: Setting minimum strike target to ${min_strike_desired:.2f}")
+        
+        # CC Profit Protection: stock price significantly above cost
+        if self.cc_profit_protection_enabled and cost_basis > 0:
+            price_cost_ratio = underlying_price / cost_basis
+            
+            if price_cost_ratio > (1 + self.cc_profit_threshold):
+                # Stock has risen significantly, use lower delta to avoid assignment
+                profit_pct = (price_cost_ratio - 1) * 100
+                call_delta_target = self.cc_profit_delta
+                logger.info(
+                    f"CC profit protection: Stock price ${underlying_price:.2f} is {profit_pct:.0f}% "
+                    f"above cost ${cost_basis:.2f}. Lowering delta to {call_delta_target:.2f} to avoid assignment."
+                )
         
         # Apply ML adaptive strategy if available
         if self.ml_delta_optimization and self.ml_integration and ml_result:
