@@ -125,19 +125,22 @@ class MLRollOptimizer:
         current_delta = market_data.get('delta', entry_delta)
         delta_change_ratio = abs(current_delta / entry_delta) if entry_delta != 0 else 1
         
-        # Strike distance
+        # Strike distance - protect against underlying_price=0
         strike = position.get('strike', underlying_price)
-        if position.get('right') == 'P':
-            strike_distance_pct = (underlying_price - strike) / underlying_price * 100
+        if underlying_price > 0:
+            if position.get('right') == 'P':
+                strike_distance_pct = (underlying_price - strike) / underlying_price * 100
+            else:
+                strike_distance_pct = (strike - underlying_price) / underlying_price * 100
         else:
-            strike_distance_pct = (strike - underlying_price) / underlying_price * 100
+            strike_distance_pct = 0
         
         # P&L
         quantity = position.get('quantity', -1)
         if quantity < 0:  # Short position
             current_pnl_pct = premium_capture_pct
         else:
-            current_pnl_pct = (current_premium - entry_premium) / entry_premium * 100
+            current_pnl_pct = (current_premium - entry_premium) / entry_premium * 100 if entry_premium > 0 else 0
         
         # Market regime
         if iv_rank < 20:
@@ -227,6 +230,7 @@ class MLRollOptimizer:
         premium_capture = features['premium_capture_pct']
         delta_ratio = features['delta_change_ratio']
         iv_rank = features['iv_rank']
+        strategy_phase = position.get('strategy_phase', 'SP')
         
         # Rule 1: High premium capture - Roll forward
         if premium_capture >= 80 and dte > 7:
@@ -246,7 +250,9 @@ class MLRollOptimizer:
             )
         
         # Rule 2: Delta spike near expiry - Roll out
-        if delta_ratio >= 2.0 and dte <= 14:
+        # DISABLED for SP phase: Wheel strategy accepts assignment in SP phase
+        # Only roll out in CC phase when we want to protect gains on held shares
+        if delta_ratio >= 2.0 and dte <= 14 and strategy_phase == 'CC':
             action = "ROLL_OUT"
             confidence = 0.80
             expected_improvement = self._estimate_roll_pnl_improvement(
@@ -277,10 +283,9 @@ class MLRollOptimizer:
                 reasoning=f"DTE {dte}, capture {premium_capture:.0f}% - let expire for max theta"
             )
         
-        # Rule 4: Near expiry with poor capture - DISABLED for Wheel strategy
-        # Wheel strategy should hold to expiry for assignment, not close early
+        # Rule 4: Near expiry with poor capture - DISABLED for SP phase
+        # Wheel strategy should hold to expiry for assignment in SP phase
         # Only consider early close in CC phase when stock price >> cost basis
-        strategy_phase = position.get('strategy_phase', 'SP')
         if dte <= 5 and premium_capture < 30 and strategy_phase == 'CC':
             # In CC phase, close early only if we can redeploy capital better
             action = "CLOSE_EARLY"

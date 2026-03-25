@@ -25,8 +25,9 @@ def check_position_management(algo, execute_signal_func, find_option_func):
         algo.Log(f"Position check: {pos_info['symbol']} {pos_info['right']} captured={premium_captured_pct:.1f}% DTE={dte} PnL={pnl_pct:.1f}%")
         if algo.ml_enabled and hasattr(algo.ml_integration, 'roll_optimizer'):
             position_data = build_position_data(pos_info, current_price, pnl_pct, dte)
+            # pos_info['symbol'] is the underlying stock symbol (e.g., 'NVDA'), not option symbol
             equity = algo.equities.get(pos_info['symbol'])
-            underlying_price = algo.Securities[equity.Symbol].Price if equity else 0
+            underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
             market_data = {
                 'price': underlying_price,
                 'iv': 0.25,

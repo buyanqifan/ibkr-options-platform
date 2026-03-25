@@ -18,6 +18,19 @@ from typing import Dict, List, Optional, Any
 from AlgorithmImports import OptionRight, SecurityType
 
 
+def _get_underlying_ticker(option_symbol) -> str:
+    """Extract underlying ticker from QC option symbol.
+    
+    QC's symbol.ID.Underlying returns a Symbol object, not a string.
+    Use symbol.Underlying.Value for the ticker string.
+    """
+    if hasattr(option_symbol, 'Underlying') and option_symbol.Underlying:
+        return option_symbol.Underlying.Value
+    # Fallback: parse from string representation
+    underlying_str = str(option_symbol.ID.Underlying)
+    return underlying_str.split()[0] if ' ' in underlying_str else underlying_str
+
+
 def get_option_positions(algo) -> Dict[str, Dict]:
     """Get all open option positions from QC Portfolio.
     
@@ -32,13 +45,14 @@ def get_option_positions(algo) -> Dict[str, Dict]:
         if hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option:
             # It's an option position
             right_str = 'P' if symbol.ID.OptionRight == OptionRight.Put else 'C'
-            pos_id = f"{symbol.ID.Underlying}_{symbol.ID.Date.strftime('%Y%m%d')}_{symbol.ID.StrikePrice:.0f}_{right_str}"
+            underlying_ticker = _get_underlying_ticker(symbol)
+            pos_id = f"{underlying_ticker}_{symbol.ID.Date.strftime('%Y%m%d')}_{symbol.ID.StrikePrice:.0f}_{right_str}"
             
             # Get metadata from our tracking (if exists)
             metadata = getattr(algo, 'position_metadata', {}).get(pos_id, {})
             
             positions[pos_id] = {
-                'symbol': str(symbol.ID.Underlying),
+                'symbol': underlying_ticker,
                 'option_symbol': symbol,
                 'right': right_str,
                 'strike': float(symbol.ID.StrikePrice),
@@ -145,7 +159,7 @@ def get_put_position_symbols(algo) -> set:
         symbol = holding.Symbol
         if hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option:
             if symbol.ID.OptionRight == OptionRight.Put:
-                symbols.add(str(symbol.ID.Underlying))
+                symbols.add(_get_underlying_ticker(symbol))
     return symbols
 
 
@@ -158,7 +172,7 @@ def get_call_position_contracts(algo, symbol: str) -> int:
         pos_symbol = holding.Symbol
         if hasattr(pos_symbol, 'SecurityType') and pos_symbol.SecurityType == SecurityType.Option:
             if (pos_symbol.ID.OptionRight == OptionRight.Call and 
-                str(pos_symbol.ID.Underlying) == symbol):
+                _get_underlying_ticker(pos_symbol) == symbol):
                 contracts += abs(holding.Quantity)
     return contracts
 
@@ -170,7 +184,7 @@ def get_position_for_symbol(algo, symbol: str) -> Optional[Dict]:
             continue
         pos_symbol = holding.Symbol
         if hasattr(pos_symbol, 'SecurityType') and pos_symbol.SecurityType == SecurityType.Option:
-            if str(pos_symbol.ID.Underlying) == symbol:
+            if _get_underlying_ticker(pos_symbol) == symbol:
                 right_str = 'P' if pos_symbol.ID.OptionRight == OptionRight.Put else 'C'
                 pos_id = f"{symbol}_{pos_symbol.ID.Date.strftime('%Y%m%d')}_{pos_symbol.ID.StrikePrice:.0f}_{right_str}"
                 metadata = getattr(algo, 'position_metadata', {}).get(pos_id, {})

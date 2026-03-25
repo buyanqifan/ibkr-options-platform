@@ -226,11 +226,12 @@ def should_roll_position(
     if dte <= 0:
         return "EXPIRY", f"Option expired, DTE={dte}"
     
-    # PRIORITY 3: Traditional profit target
-    # For Wheel strategy, this triggers when premium captured >= profit_target_pct
-    if not profit_target_disabled:
-        if pnl_pct >= profit_target_pct:
-            return "CLOSE_PROFIT", f"Profit target: {pnl_pct:.0f}% captured (target: {profit_target_pct:.0f}%)"
+    # PRIORITY 3: Profit target - DISABLED for Wheel strategy
+    # Wheel strategy should ROLL to capture more premium (handled by PRIORITY 1)
+    # Closing at profit_target would break the Wheel cycle
+    # if not profit_target_disabled:
+    #     if pnl_pct >= profit_target_pct:
+    #         return "CLOSE_PROFIT", f"Profit target: {pnl_pct:.0f}% captured (target: {profit_target_pct:.0f}%)"
     
     # PRIORITY 4: Stop loss (disabled by default for Wheel)
     if not stop_loss_disabled and pnl_pct <= -stop_loss_pct:
