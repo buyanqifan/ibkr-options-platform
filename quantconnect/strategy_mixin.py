@@ -14,7 +14,6 @@ def rebalance(algo):
         return
     check_position_management(algo, execute_signal, find_option_by_greeks)
     open_count = get_option_position_count(algo)
-    algo.Log(f"POSITIONS: {open_count}/{algo.max_positions}")
     if open_count >= algo.max_positions:
         return
     signals = generate_ml_signals(algo)

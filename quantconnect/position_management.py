@@ -21,7 +21,9 @@ def check_position_management(algo, execute_signal_func, find_option_func):
         pnl, pnl_pct = calculate_pnl_metrics(entry_price, current_price, pos_info['quantity'])
         premium_captured_pct = ((entry_price - current_price) / entry_price * 100) if entry_price > 0 else 0
         dte = calculate_dte(pos_info['expiry'], algo.Time)
-        algo.Log(f"POS: {pos_info['symbol']} {pos_info['right']} cap={premium_captured_pct:.0f}% DTE={dte}")
+        # Only log positions with issues (losing or near expiry)
+        if premium_captured_pct < 0 or dte <= 7:
+            algo.Log(f"POS: {pos_info['symbol']} {pos_info['right']} cap={premium_captured_pct:.0f}% DTE={dte}")
         
         if algo.ml_enabled and hasattr(algo.ml_integration, 'roll_optimizer'):
             position_data = build_position_data(pos_info, current_price, pnl_pct, dte)

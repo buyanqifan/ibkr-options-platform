@@ -98,7 +98,6 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
             return
     if quantity <= 0: return
     quantity = -quantity
-    algo.Log(f"SELL: {signal.symbol} {target_right}")
     option_symbol = selected['option_symbol']
     # Use safe execution to handle data readiness
     ticket = safe_execute_option_order(algo, option_symbol, quantity, selected['premium'])
@@ -114,7 +113,6 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
             'entry_date': algo.Time.strftime('%Y-%m-%d'),
             'ml_signal': signal,
         })
-        algo.Log(f"EXEC: {signal.action} {signal.symbol}")
 
 
 def execute_roll(algo, signal: StrategySignal, find_option_func):

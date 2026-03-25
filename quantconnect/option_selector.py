@@ -21,9 +21,7 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
     underlying_price = algo.Securities[equity_symbol].Price
     option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
     if not option_chain:
-        
         return None
-    algo.Log(f"FIND_OPTION: {symbol}")
     suitable = []
     stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'tolerance': 0}
     for option_symbol in option_chain:
@@ -59,7 +57,6 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
             delta, iv, premium, abs(delta - target_delta), premium * 0.99, premium * 1.01))
     
     if not suitable:
-        algo.Log(f"NO_OPTION: {symbol}")
         return None
     
     suitable.sort(key=lambda x: x['delta_diff'])

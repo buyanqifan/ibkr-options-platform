@@ -35,7 +35,6 @@ def get_current_position(algo, symbol: str) -> Optional[Dict]:
 
 def generate_ml_signals(algo) -> List[StrategySignal]:
     signals, portfolio_state = [], get_portfolio_state(algo)
-    algo.Log(f"PHASE: {algo.phase}")
     if algo.phase == "SP":
         symbols_with_put = get_put_position_symbols(algo)
         for symbol in algo.stock_pool:
