@@ -163,6 +163,19 @@ def get_put_position_symbols(algo) -> set:
     return symbols
 
 
+def get_call_position_symbols(algo) -> set:
+    """Get set of symbols with open call positions from QC Portfolio."""
+    symbols = set()
+    for holding in algo.Portfolio.Values:
+        if not holding.Invested:
+            continue
+        symbol = holding.Symbol
+        if hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option:
+            if symbol.ID.OptionRight == OptionRight.Call:
+                symbols.add(_get_underlying_ticker(symbol))
+    return symbols
+
+
 def get_call_position_contracts(algo, symbol: str) -> int:
     """Get number of call contracts for a symbol from QC Portfolio."""
     contracts = 0
