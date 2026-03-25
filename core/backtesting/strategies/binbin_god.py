@@ -719,8 +719,8 @@ class BinbinGodStrategy(BaseStrategy):
                     logger.info(f"Generated {len(signals)} Call signal(s) for {stock_symbol}")
         
         # ========== Part 2: Generate Put signals for stocks we don't hold ==========
-        # Find symbols without stock and without Put
-        available_for_put = [s for s in stock_pool if s not in held_symbols and s not in put_symbols]
+        # Put signals allowed for ALL symbols in pool (no restrictions)
+        available_for_put = stock_pool
         
         if available_for_put and len(wheel_positions) + len(all_signals) < self.max_positions:
             logger.info(f"Generating Put signals for available symbols: {available_for_put}")

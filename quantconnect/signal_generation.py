@@ -10,7 +10,7 @@ from ml_integration import StrategySignal
 from signals import get_cc_optimization_params
 from scoring import score_single_stock
 from qc_portfolio import (
-    get_symbols_with_holdings, get_cost_basis, get_put_position_symbols,
+    get_symbols_with_holdings, get_cost_basis,
     get_position_for_symbol, get_option_position_count, get_call_position_contracts,
     get_shares_held
 )
