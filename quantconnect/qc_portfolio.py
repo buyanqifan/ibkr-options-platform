@@ -85,7 +85,8 @@ def get_equity_positions(algo, stock_pool: List[str] = None) -> Dict[str, Dict]:
         # Check if it's equity (not an option) by SecurityType
         is_option = hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option
         if not is_option:
-            sym_str = str(symbol)
+            # Use symbol.Value for ticker string (e.g., 'AMZN')
+            sym_str = symbol.Value if hasattr(symbol, 'Value') else str(symbol).split()[0]
             if stock_pool and sym_str not in stock_pool:
                 continue
             positions[sym_str] = {
@@ -118,7 +119,8 @@ def get_symbols_with_holdings(algo, stock_pool: List[str] = None) -> List[str]:
         # Check if it's equity (not an option) by SecurityType
         is_option = hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option
         if not is_option:
-            sym_str = str(symbol)
+            # Use symbol.Value for ticker string (e.g., 'AMZN')
+            sym_str = symbol.Value if hasattr(symbol, 'Value') else str(symbol).split()[0]
             if stock_pool is None or sym_str in stock_pool:
                 symbols.append(sym_str)
     return symbols
