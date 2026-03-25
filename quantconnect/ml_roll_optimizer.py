@@ -209,7 +209,7 @@ class MLRollOptimizer:
         # If ML model available, use it
         if self.model is not None:
             try:
-                return self._ml_prediction(features, position, base_dte_range, base_delta)
+                return self._ml_prediction(features, base_dte_range, base_delta)
             except Exception:
                 pass
         
@@ -357,7 +357,6 @@ class MLRollOptimizer:
     def _ml_prediction(
         self,
         features: Dict[str, float],
-        position: Dict[str, Any],
         base_dte_range: Tuple[int, int],
         base_delta: float
     ) -> RollRecommendation:
@@ -373,13 +372,6 @@ class MLRollOptimizer:
         
         actions = ["LET_EXPIRE", "ROLL_FORWARD", "ROLL_OUT", "CLOSE_EARLY"]
         action = actions[action_idx]
-        
-        # CRITICAL: Block CLOSE_EARLY in SP phase for Wheel strategy
-        # Wheel strategy accepts assignment in SP phase, never close early
-        strategy_phase = position.get('strategy_phase', 'SP')
-        if action == "CLOSE_EARLY" and strategy_phase == 'SP':
-            action = "LET_EXPIRE"
-            confidence = 0.90
         
         expected_improvement = self._estimate_roll_pnl_improvement(
             features, action, base_dte_range, base_delta
