@@ -43,25 +43,24 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
     """Generate signals based on holdings, not phase.
     
     - Symbols with stock -> SELL_CALL signals
-    - Symbols without stock and without Put -> SELL_PUT signals
+    - All symbols in pool -> SELL_PUT signals (allowed anytime)
     - Both can be generated simultaneously
     """
     signals, portfolio_state = [], get_portfolio_state(algo)
     
     # Get current state
     held_symbols = get_symbols_with_holdings(algo, algo.stock_pool)  # Symbols with stock
-    put_symbols = get_put_position_symbols(algo)  # Symbols with open Put
     
     # Generate SELL_CALL for symbols we hold stock
     for symbol in held_symbols:
         sig = generate_signal_for_symbol(algo, symbol, "CC", portfolio_state)
         if sig: signals.append(sig)
     
-    # Generate SELL_PUT for symbols we don't hold stock and don't have Put
+    # Generate SELL_PUT for ALL symbols in pool (allowed anytime)
+    # This allows: SP while holding stock, SP while having other Puts
     for symbol in algo.stock_pool:
-        if symbol not in held_symbols and symbol not in put_symbols:
-            sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
-            if sig: signals.append(sig)
+        sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
+        if sig: signals.append(sig)
     
     return signals
 
