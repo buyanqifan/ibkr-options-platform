@@ -75,7 +75,7 @@ def init_securities(algo):
 
 
 def init_state(algo):
-    algo.phase = "SP"
+    # No phase concept - strategy is holdings-driven
     # Use QC Portfolio for position tracking (no manual dict needed)
     # position_metadata tracks entry Greeks (QC doesn't have this)
     init_position_tracking(algo)

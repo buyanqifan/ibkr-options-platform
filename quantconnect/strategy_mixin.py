@@ -6,38 +6,12 @@ from execution import execute_signal
 from position_management import check_position_management
 from expiry import check_expired_options, update_ml_models
 from option_selector import find_option_by_greeks
-from qc_portfolio import get_option_position_count, get_symbols_with_holdings, get_call_position_symbols
-
-
-def sync_phase(algo):
-    """Sync strategy phase based on actual holdings.
-    
-    QC handles option assignment automatically. We need to detect phase changes:
-    - If holding stock but no Call position -> Put was assigned, enter CC phase
-    - If no stock held and in CC phase -> Call was assigned, return to SP phase
-    """
-    held_symbols = get_symbols_with_holdings(algo, algo.stock_pool)
-    call_symbols = get_call_position_symbols(algo)
-    
-    if held_symbols and algo.phase == "SP":
-        # Holding stock but in SP phase -> Put was assigned, switch to CC
-        for symbol in held_symbols:
-            if symbol not in call_symbols:
-                shares = algo.Portfolio[algo.equities[symbol].Symbol].Quantity if algo.equities.get(symbol) and algo.Portfolio.ContainsKey(algo.equities[symbol].Symbol) else 0
-                if shares > 0:
-                    algo.phase = "CC"
-                    algo.Log(f"Put assigned: +{shares} {symbol} -> CC phase")
-                    break
-    elif not held_symbols and algo.phase == "CC":
-        # No stock but in CC phase -> Call was assigned, return to SP
-        algo.phase = "SP"
-        algo.Log("All shares sold -> SP phase")
+from qc_portfolio import get_option_position_count, get_symbols_with_holdings
 
 
 def rebalance(algo):
     if algo.IsWarmingUp:
         return
-    sync_phase(algo)  # Sync phase before any trading
     check_position_management(algo, execute_signal, find_option_by_greeks)
     open_count = get_option_position_count(algo)
     if open_count >= algo.max_positions:
@@ -74,7 +48,6 @@ def on_end_of_algorithm(algo):
     algo.Log(f"Final Portfolio: ${total_value:,.2f}")
     algo.Log(f"Total Profit: ${total_profit:,.2f}")
     algo.Log(f"Total Return: {total_return:.1f}%")
-    algo.Log(f"Final Phase: {algo.phase}")
     algo.Log(f"Shares Held: {total_shares}")
     if held_symbols:
         holdings_info = {s: algo.Portfolio[algo.equities[s].Symbol].Quantity for s in held_symbols if algo.equities.get(s) and algo.Portfolio.ContainsKey(algo.equities[s].Symbol)}

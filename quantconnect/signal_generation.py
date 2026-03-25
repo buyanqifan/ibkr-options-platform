@@ -1,4 +1,10 @@
-"""Signal generation functions for BinbinGod Strategy."""
+"""Signal generation functions for BinbinGod Strategy.
+
+No phase concept - signals are generated based on actual holdings:
+- Has stock -> can sell Call
+- No stock -> can sell Put
+- Both can happen simultaneously
+"""
 from typing import Dict, List, Optional
 from ml_integration import StrategySignal
 from signals import get_cc_optimization_params
@@ -34,19 +40,29 @@ def get_current_position(algo, symbol: str) -> Optional[Dict]:
 
 
 def generate_ml_signals(algo) -> List[StrategySignal]:
+    """Generate signals based on holdings, not phase.
+    
+    - Symbols with stock -> SELL_CALL signals
+    - Symbols without stock and without Put -> SELL_PUT signals
+    - Both can be generated simultaneously
+    """
     signals, portfolio_state = [], get_portfolio_state(algo)
-    if algo.phase == "SP":
-        symbols_with_put = get_put_position_symbols(algo)
-        for symbol in algo.stock_pool:
-            if symbol not in symbols_with_put:
-                sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
-                if sig: signals.append(sig)
-    elif algo.phase == "CC":
-        for symbol in get_symbols_with_holdings(algo, algo.stock_pool):
-            sig = generate_signal_for_symbol(algo, symbol, "CC", portfolio_state)
+    
+    # Get current state
+    held_symbols = get_symbols_with_holdings(algo, algo.stock_pool)  # Symbols with stock
+    put_symbols = get_put_position_symbols(algo)  # Symbols with open Put
+    
+    # Generate SELL_CALL for symbols we hold stock
+    for symbol in held_symbols:
+        sig = generate_signal_for_symbol(algo, symbol, "CC", portfolio_state)
+        if sig: signals.append(sig)
+    
+    # Generate SELL_PUT for symbols we don't hold stock and don't have Put
+    for symbol in algo.stock_pool:
+        if symbol not in held_symbols and symbol not in put_symbols:
+            sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
             if sig: signals.append(sig)
-        if algo.allow_sp_in_cc_phase:
-            signals.extend(generate_cc_sp_signals(algo, portfolio_state))
+    
     return signals
 
 
@@ -67,7 +83,7 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     signal = algo.ml_integration.generate_signal(symbol=symbol, current_price=underlying_price, cost_basis=cost_basis,
         bars=bars, strategy_phase=strategy_phase, portfolio_state=portfolio_state, current_position=current_position)
     if signal and algo.ml_enabled:
-        right = "P" if strategy_phase in ("SP", "CC+SP") else "C"
+        right = "P" if strategy_phase == "SP" else "C"
         if right == "P":
             adaptive_delta, _ = algo.adaptive_strategy.select_put_delta(traditional_delta, signal.delta, signal.delta_confidence, signal.reasoning)
         else:
@@ -78,26 +94,3 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
         signal.ml_score_adjustment = (score.total_score - 50) / 100
         if cc_min_strike is not None: signal.min_strike = cc_min_strike
     return signal
-
-
-def generate_cc_sp_signals(algo, portfolio_state: Dict) -> List[StrategySignal]:
-    signals = []
-    margin_util = algo.Portfolio.TotalMarginUsed / algo.Portfolio.TotalPortfolioValue
-    if margin_util > algo.sp_in_cc_margin_threshold: return signals
-    
-    put_symbols = get_put_position_symbols(algo)
-    if len(put_symbols) >= algo.sp_in_cc_max_positions: return signals
-    
-    open_count = get_option_position_count(algo)
-    if open_count >= algo.max_positions: return signals
-    
-    held = get_symbols_with_holdings(algo, algo.stock_pool)
-    available = [s for s in algo.stock_pool if s not in held] or algo.stock_pool
-    available = [s for s in available if s not in put_symbols]
-    best_signal = None
-    for symbol in available:
-        signal = generate_signal_for_symbol(algo, symbol, "CC+SP", portfolio_state)
-        if signal and signal.confidence > 0.6:
-            if best_signal is None or signal.confidence > best_signal.confidence: best_signal = signal
-    if best_signal: signals.append(best_signal)
-    return signals

@@ -1,4 +1,7 @@
-"""Option expiry and assignment handling for BinbinGod Strategy."""
+"""Option expiry and assignment handling for BinbinGod Strategy.
+
+No phase concept - QC handles assignment automatically, we just log and record.
+"""
 from datetime import datetime
 from option_utils import calculate_dte
 from execution import record_trade
@@ -9,12 +12,11 @@ from qc_portfolio import (
 
 
 def check_expired_options(algo):
-    """Check for expired/assigned options and sync strategy state with QC Portfolio.
+    """Check for expired/assigned options and record ML performance data.
     
     QC automatically handles option expiration/assignment and stock delivery.
-    We only need to update phase and record ML performance data.
+    No phase management needed - strategy is holdings-driven.
     """
-    # Get all option positions from QC Portfolio
     positions = get_option_positions(algo)
     for pos_id, pos_info in positions.items():
         security = algo.Securities.get(pos_info['option_symbol'])
@@ -43,7 +45,6 @@ def check_expired_options(algo):
                 expected_shares = quantity * 100
                 if shares_acquired > expected_shares * 1.1:
                     algo.Log(f"WARNING: Put assignment shares {shares_acquired} > expected {expected_shares}")
-                algo.phase = "CC"
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
                 algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f}")
@@ -57,8 +58,6 @@ def check_expired_options(algo):
                 shares_sold = quantity * 100
                 stock_pnl = (strike - cost_basis) * shares_sold if cost_basis > 0 else 0
                 algo.Log(f"Call assigned: -{shares_sold} {symbol} @ ${strike:.2f}, Stock P&L: ${stock_pnl:+.2f}")
-                algo.phase = "SP"
-                algo.Log(f"All shares sold, returning to SP phase")
         
         # Get P&L from QC (already calculated by platform)
         pnl = security.Holdings.UnrealizedProfit if hasattr(security, 'Holdings') else 0
