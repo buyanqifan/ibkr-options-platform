@@ -277,7 +277,31 @@ class MLRollOptimizer:
             )
 
         # Rule 2: Delta spike near expiry - Roll out to avoid assignment
+        # IMPORTANT: Only ROLL_OUT if we're still profitable (buyback cost < premium received)
         if delta_ratio >= 2.0 and dte <= 14:
+            premium_received = feat['premium_received']
+            premium_remaining = feat['premium_remaining']  # Current buyback cost
+            
+            # Check if rolling out is profitable
+            # If buyback cost > premium received, we'd lock in a loss
+            # Better to let it expire/assign and keep full premium
+            if premium_remaining > premium_received:
+                # Call is ITM, buyback would cost more than premium received
+                # Let it assign - we sell shares at strike price and keep premium
+                action = "LET_EXPIRE"
+                confidence = 0.90
+                expected_improvement = 0
+
+                return RollRecommendation(
+                    action=action,
+                    confidence=confidence,
+                    expected_pnl_improvement=expected_improvement,
+                    optimal_dte=None,
+                    optimal_delta=None,
+                    reasoning=f"Delta {delta_ratio:.1f}x, buyback ${premium_remaining:.0f} > premium ${premium_received:.0f} - let assign, keep premium"
+                )
+            
+            # Still profitable to roll out
             action = "ROLL_OUT"
             confidence = 0.80
             expected_improvement = self._estimate_roll_pnl_improvement(
