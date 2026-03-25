@@ -283,8 +283,10 @@ class BinbinGodStrategy(BaseStrategy):
         # Selection history: track stock switches for visualization
         self.selection_history = []  # List of {"date": date, "from": symbol, "to": symbol}
         
-        # Phase tracking
-        self.phase = "SP"  # Start with Sell Put phase
+        # No phase concept - strategy is holdings-driven
+        # Has stock -> can sell Call
+        # No stock -> can sell Put
+        # Both can happen simultaneously
         self.stock_holding = StockHolding()
         
         # Stock pool for selection (default: MAG7)
@@ -626,15 +628,15 @@ class BinbinGodStrategy(BaseStrategy):
         
         This method adapts the real-time generate_signal() to the backtesting interface.
         
-        Key logic:
-        - Always re-select the best stock when entering SP phase
-        - If holding shares, continue using that stock for CC phase
-        - Can switch stocks between different SP cycles
+        Key logic (holdings-driven, no phase concept):
+        - Has stock -> can sell Call
+        - No stock and no Put -> can sell Put
+        - Both can happen simultaneously
         """
         from datetime import datetime
         
-        # CRITICAL DEBUG: Always log phase and holdings state
-        logger.info(f"generate_signals START: date={current_date}, phase={self.phase}, "
+        # Log current holdings state
+        logger.info(f"generate_signals START: date={current_date}, "
                    f"total_shares={self.stock_holding.shares}, "
                    f"held_symbols={self.stock_holding.get_symbols()}, "
                    f"holdings={self.stock_holding.holdings}")
@@ -645,112 +647,27 @@ class BinbinGodStrategy(BaseStrategy):
             if p.trade_type in ("BINBIN_PUT", "BINBIN_CALL")
         ]
         
-        # Debug log for CC phase
-        if self.phase == "CC":
-            logger.info(f"generate_signals CC: date={current_date}, wheel_positions={len(wheel_positions)}, "
-                       f"max_positions={self.max_positions}, phase={self.phase}, "
-                       f"held_symbols={self.stock_holding.get_symbols()}")
-        
         if len(wheel_positions) >= self.max_positions:
             logger.info(f"Max positions reached: {len(wheel_positions)} >= {self.max_positions}")
             return []
         
-        # Select best stock dynamically based on phase
-        if self.phase == "SP":
-            # In SP phase: always re-select the best stock for new puts
-            if "AUTO" in self.symbol:
-                # Get all stock pool data for scoring
-                pool_data = getattr(self, 'mag7_data', {})
-                stock_pool = getattr(self, 'stock_pool', MAG7_STOCKS)
-                
-                # Build market_data with FULL bars data for each stock
-                # _score_stocks expects: market_data[symbol] = list of bars (backtest mode)
-                market_data = {}
-                for sym in stock_pool:
-                    bars = pool_data.get(sym, [])
-                    if bars and len(bars) > 0:
-                        # Filter bars up to current_date (ensure date is string for comparison)
-                        filtered_bars = []
-                        for bar in bars:
-                            bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
-                            if bar_date_str <= current_date:
-                                filtered_bars.append(bar)
-                        if filtered_bars:
-                            # Pass full bars list for scoring (backtest mode)
-                            market_data[sym] = filtered_bars
-                
-                # Select best stock based on current metrics
-                if market_data:
-                    actual_symbol = self._select_best_stock(market_data, current_date)
-                    logger.info(f"SP phase: Selected {actual_symbol} for new put position")
-                    
-                    # CRITICAL FIX: Get the actual underlying price AND IV for the selected stock
-                    # This ensures correct option pricing and strike selection
-                    actual_underlying_price = underlying_price  # Default to passed price
-                    actual_iv = iv  # Default to passed IV
-                    
-                    # Get stock_hv dictionary (set by engine.py)
-                    stock_hv = getattr(self, 'stock_hv', {})
-                    
-                    if actual_symbol in pool_data:
-                        bars = pool_data[actual_symbol]
-                        bar_index = -1
-                        for idx, bar in enumerate(bars):
-                            bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
-                            if bar_date_str <= current_date:
-                                actual_underlying_price = bar["close"]
-                                bar_index = idx
-                        
-                        # Get the correct IV for this stock at current date
-                        if actual_symbol in stock_hv and bar_index >= 0:
-                            sym_hv = stock_hv[actual_symbol]
-                            if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
-                                actual_iv = sym_hv[bar_index]
-                                logger.info(f"Using {actual_symbol} price: ${actual_underlying_price:.2f}, IV: {actual_iv:.3f}")
-                            else:
-                                logger.warning(f"Invalid IV for {actual_symbol} at index {bar_index}, using fallback")
-                        else:
-                            # This can happen early in backtest when bar_index is -1
-                            logger.debug(f"No IV data for {actual_symbol}, using fallback IV: {actual_iv:.3f} (early backtest period)")
-                    else:
-                        logger.warning(f"No price data for {actual_symbol}, using fallback price")
-                else:
-                    # Fallback: use first stock in pool
-                    actual_symbol = stock_pool[0] if stock_pool else "MSFT"
-                    actual_underlying_price = underlying_price
-                    actual_iv = iv
-                    logger.warning(f"No market data available, using fallback: {actual_symbol}")
-            else:
-                actual_symbol = self.symbol
-                actual_underlying_price = underlying_price
-                actual_iv = iv
-            
-            return self._generate_backtest_put_signal(
-                actual_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
-            )
-        else:  # CC phase
-            # In CC phase: generate Call signals for EACH stock we hold shares of
-            # Support multi-stock holdings
-            
-            held_symbols = self.stock_holding.get_symbols()
-            logger.info(f"CC phase check: held_symbols={held_symbols}, holdings={self.stock_holding.holdings}")
-            
-            if not held_symbols:
-                logger.warning("CC phase but no stocks held, returning to SP phase")
-                self.phase = "SP"
-                return []
-            
-            logger.info(f"CC phase: Holding shares for {held_symbols}")
-            
-            # Get stock_hv dictionary (set by engine.py)
-            stock_hv = getattr(self, 'stock_hv', {})
-            pool_data = getattr(self, 'mag7_data', {})
-            
-            # DEBUG: Log pool_data availability
-            logger.info(f"CC phase: pool_data keys={list(pool_data.keys()) if pool_data else 'None'}")
-            logger.info(f"CC phase: stock_hv keys={list(stock_hv.keys()) if stock_hv else 'None'}")
-            
-            all_signals = []
+        # Get current state (holdings-driven, no phase)
+        held_symbols = self.stock_holding.get_symbols()  # Symbols with stock
+        put_symbols = set()  # Symbols with open Put positions
+        for p in wheel_positions:
+            if p.trade_type == "BINBIN_PUT":
+                put_symbols.add(p.symbol)
+        
+        # Get stock pool data
+        pool_data = getattr(self, 'mag7_data', {})
+        stock_pool = getattr(self, 'stock_pool', MAG7_STOCKS)
+        stock_hv = getattr(self, 'stock_hv', {})
+        
+        all_signals = []
+        
+        # ========== Part 1: Generate Call signals for stocks we hold ==========
+        if held_symbols:
+            logger.info(f"Generating Call signals for held symbols: {held_symbols}")
             
             # Calculate existing Call coverage per stock
             existing_call_coverage = {}  # {symbol: contracts}
@@ -759,14 +676,9 @@ class BinbinGodStrategy(BaseStrategy):
                     sym = p.symbol
                     existing_call_coverage[sym] = existing_call_coverage.get(sym, 0) + abs(p.quantity)
             
-            # DEBUG: Log existing call coverage
-            logger.info(f"CC phase: existing_call_coverage={existing_call_coverage}")
-            
-            # Generate Call signals for each held stock
             for stock_symbol in held_symbols:
                 shares_held = self.stock_holding.get_shares(stock_symbol)
                 stock_cost_basis = self.stock_holding.holdings.get(stock_symbol, {}).get("cost_basis", 0)
-                logger.info(f"CC phase: {stock_symbol} shares_held={shares_held}, cost_basis={stock_cost_basis}")
                 if shares_held <= 0:
                     continue
                 
@@ -783,61 +695,81 @@ class BinbinGodStrategy(BaseStrategy):
                 actual_underlying_price = underlying_price
                 actual_iv = iv
                 
-                # CRITICAL DEBUG: Log price retrieval process
-                logger.info(f"CC phase: {stock_symbol} - pool_data has data: {stock_symbol in pool_data}")
-                
                 if stock_symbol in pool_data:
                     bars = pool_data[stock_symbol]
                     bar_index = -1
-                    logger.info(f"CC phase: {stock_symbol} - total bars: {len(bars)}")
-                    
                     for idx, bar in enumerate(bars):
                         bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
                         if bar_date_str <= current_date:
                             actual_underlying_price = bar["close"]
                             bar_index = idx
                     
-                    logger.info(f"CC phase: {stock_symbol} - bar_index: {bar_index}, price: ${actual_underlying_price:.2f}")
-                    
-                    # Get the correct IV for this stock at current date
                     if stock_symbol in stock_hv and bar_index >= 0:
                         sym_hv = stock_hv[stock_symbol]
                         if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
                             actual_iv = sym_hv[bar_index]
-                            logger.info(f"CC phase: {stock_symbol} - IV: {actual_iv:.3f} (from stock_hv)")
-                        else:
-                            logger.warning(f"CC phase: {stock_symbol} - IV not available (bar_index={bar_index}, hv_len={len(sym_hv) if sym_hv else 0})")
-                    else:
-                        # This can happen early in backtest when bar_index is -1 (no matching date found)
-                        # It's a normal condition, use debug level to reduce noise
-                        logger.debug(f"CC phase: {stock_symbol} - stock_hv not available or bar_index < 0 (early backtest period)")
-                else:
-                    logger.warning(f"CC phase: {stock_symbol} NOT in pool_data! Using fallback price ${actual_underlying_price:.2f}")
                 
-                # Generate Call signal for this stock with its specific cost basis
+                # Generate Call signal
                 signals = self._generate_backtest_call_signal(
                     stock_symbol, current_date, actual_underlying_price, actual_iv,
                     position_mgr, shares_available, stock_cost_basis
                 )
                 if signals:
                     all_signals.extend(signals)
-                    logger.info(f"CC phase: Generated {len(signals)} Call signal(s) for {stock_symbol}")
-
-            # ========== binbingod策略优化: CC阶段条件允许时开SP ==========
-            # SP和CC不是对立的，可以同时操作
-            # 条件: 1) allow_sp_in_cc_phase开启
-            #       2) margin使用率低于阈值
-            #       3) 当前SP positions数量未达到上限
-            if self.allow_sp_in_cc_phase:
-                sp_signals = self._generate_sp_in_cc_phase(
-                    current_date, underlying_price, iv, wheel_positions, position_mgr,
-                    held_symbols, pool_data, stock_hv
-                )
-                if sp_signals:
-                    all_signals.extend(sp_signals)
-                    logger.info(f"CC phase: Generated {len(sp_signals)} SP signal(s) (simultaneous CC+SP mode)")
-
-            return all_signals
+                    logger.info(f"Generated {len(signals)} Call signal(s) for {stock_symbol}")
+        
+        # ========== Part 2: Generate Put signals for stocks we don't hold ==========
+        # Find symbols without stock and without Put
+        available_for_put = [s for s in stock_pool if s not in held_symbols and s not in put_symbols]
+        
+        if available_for_put and len(wheel_positions) + len(all_signals) < self.max_positions:
+            logger.info(f"Generating Put signals for available symbols: {available_for_put}")
+            
+            # Select best stock for Put
+            if "AUTO" in self.symbol:
+                # Build market_data for scoring
+                market_data = {}
+                for sym in available_for_put:
+                    bars = pool_data.get(sym, [])
+                    if bars:
+                        filtered_bars = [bar for bar in bars if str(bar.get("date", ""))[:10] <= current_date]
+                        if filtered_bars:
+                            market_data[sym] = filtered_bars
+                
+                if market_data:
+                    actual_symbol = self._select_best_stock(market_data, current_date)
+                else:
+                    actual_symbol = available_for_put[0]
+            else:
+                actual_symbol = self.symbol if self.symbol in available_for_put else available_for_put[0]
+            
+            # Get price and IV for selected symbol
+            actual_underlying_price = underlying_price
+            actual_iv = iv
+            
+            if actual_symbol in pool_data:
+                bars = pool_data[actual_symbol]
+                bar_index = -1
+                for idx, bar in enumerate(bars):
+                    bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
+                    if bar_date_str <= current_date:
+                        actual_underlying_price = bar["close"]
+                        bar_index = idx
+                
+                if actual_symbol in stock_hv and bar_index >= 0:
+                    sym_hv = stock_hv[actual_symbol]
+                    if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
+                        actual_iv = sym_hv[bar_index]
+            
+            # Generate Put signal
+            signal = self._generate_backtest_put_signal(
+                actual_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
+            )
+            if signal:
+                all_signals.append(signal)
+                logger.info(f"Generated Put signal for {actual_symbol}")
+        
+        return all_signals
 
     def _generate_sp_in_cc_phase(
         self,
@@ -1155,11 +1087,9 @@ class BinbinGodStrategy(BaseStrategy):
         
         # Can only sell calls for shares we own
         if shares_available <= 0:
-            # Fallback to SP phase
-            self.phase = "SP"
-            return self._generate_backtest_put_signal(
-                symbol, current_date, underlying_price, iv, position_mgr
-            )
+            # No shares available, cannot sell call
+            logger.warning(f"No shares available for {symbol}, cannot generate Call signal")
+            return []
         
         # Default DTE values
         dte_days = int(self.dte_max)
@@ -1343,36 +1273,30 @@ class BinbinGodStrategy(BaseStrategy):
     ) -> Signal | None:
         """Generate trading signal for Binbin God strategy (real-time interface).
         
-        Note: Real-time interface currently supports single-stock focus per call.
-        For multi-stock holdings in CC phase, generates signals for the first held stock.
+        Holdings-driven (no phase concept):
+        - Has stock -> can sell Call
+        - No stock -> can sell Put
         """
         
-        # Check phase and generate appropriate signal
-        if self.phase == "SP":
-            # In SP phase: select the best stock for new puts
-            if self.symbol == "MAG7_AUTO":
-                actual_symbol = self._select_best_stock(market_data)
-            else:
-                actual_symbol = self.symbol
-            
-            return self._generate_put_signal(
-                actual_symbol, current_dt, bars, contracts, portfolio, market_data
-            )
-        else:  # CC phase
-            # In CC phase: generate signals for held stocks
-            held_symbols = self.stock_holding.get_symbols()
-            if not held_symbols:
-                logger.warning("CC phase but no stocks held, switching to SP phase")
-                self.phase = "SP"
-                return None
-            
-            # For real-time interface, focus on the first held stock
-            # (In practice, this method would be called multiple times for different stocks)
-            actual_symbol = held_symbols[0]
-            
+        # Check holdings to determine signal type
+        held_symbols = self.stock_holding.get_symbols()
+        
+        # If holding stock, generate Call signal
+        if held_symbols:
+            actual_symbol = held_symbols[0]  # Focus on first held stock
             return self._generate_call_signal(
                 actual_symbol, current_dt, bars, contracts, portfolio, market_data
             )
+        
+        # If no stock, generate Put signal
+        if self.symbol == "MAG7_AUTO":
+            actual_symbol = self._select_best_stock(market_data)
+        else:
+            actual_symbol = self.symbol
+        
+        return self._generate_put_signal(
+            actual_symbol, current_dt, bars, contracts, portfolio, market_data
+        )
     
     def _generate_put_signal(
         self,
@@ -1470,8 +1394,7 @@ class BinbinGodStrategy(BaseStrategy):
         
         # Check if we have shares to sell calls against
         if shares_held <= 0:
-            logger.warning(f"In CC phase but no {symbol} shares held, switching back to SP")
-            self.phase = "SP"
+            logger.warning(f"No {symbol} shares held, cannot generate Call signal")
             return None
         
         # CRITICAL: Check existing Call positions for THIS stock to prevent over-selling
@@ -1606,8 +1529,10 @@ class BinbinGodStrategy(BaseStrategy):
             try:
                 current_date = current_dt.strftime('%Y-%m-%d') if isinstance(current_dt, datetime) else str(current_dt)[:10]
 
-                # Add strategy phase to position for ML features
-                position_with_phase = {**position, 'strategy_phase': self.phase}
+                # Add strategy phase to position for ML features (holdings-driven)
+                # If we have shares, it's CC; otherwise SP
+                strategy_phase = "CC" if self.stock_holding.shares > 0 else "SP"
+                position_with_phase = {**position, 'strategy_phase': strategy_phase}
 
                 # Get roll recommendation
                 should_roll, recommendation = self.ml_roll_optimizer.should_roll(
@@ -1765,7 +1690,7 @@ class BinbinGodStrategy(BaseStrategy):
         expiry_date = curr_date + timedelta(days=target_dte)
         expiry_str = expiry_date.strftime('%Y%m%d')
 
-        # Determine strike based on phase and right
+        # Determine strike based on right (holdings-driven, no phase)
         # Use ML Delta Optimizer if available for optimal delta selection
         # Get bars for ML optimization
         pool_data = getattr(self, 'mag7_data', {})
@@ -1773,8 +1698,8 @@ class BinbinGodStrategy(BaseStrategy):
         if ml_bars:
             ml_bars = [bar for bar in ml_bars if str(bar.get("date", ""))[:10] <= current_date]
         
-        if (self.phase == "SP" or closed_trade_phase == "CC+SP") and right == "P":
-            # Continue selling puts (including SP opened during CC+SP mode)
+        if right == "P":
+            # Roll Put (we're selling another Put)
             if self.ml_delta_optimization and self.ml_integration:
                 try:
                     # Get ML-optimized delta using optimize_put_delta
@@ -1788,7 +1713,7 @@ class BinbinGodStrategy(BaseStrategy):
                         time_to_expiry=target_dte / 365.0
                     )
                     target_delta = -abs(ml_result.optimal_delta)  # Put delta is negative
-                    self.logger.info(f"Roll SP: ML delta={abs(ml_result.optimal_delta):.3f} (confidence: {ml_result.confidence:.2f})")
+                    self.logger.info(f"Roll Put: ML delta={abs(ml_result.optimal_delta):.3f} (confidence: {ml_result.confidence:.2f})")
                 except Exception as e:
                     self.logger.warning(f"ML delta optimization failed in roll: {e}")
                     target_delta = -abs(self.put_delta)
@@ -1798,9 +1723,10 @@ class BinbinGodStrategy(BaseStrategy):
                 underlying_price, target_dte / 365.0, iv, target_delta, 'P'
             )
             trade_type = "BINBIN_PUT"
+            signal_strategy_phase = "SP"
 
-        elif self.phase == "CC" and right == 'C':
-            # Continue selling calls
+        elif right == 'C':
+            # Roll Call (we're selling another Call against held shares)
             if self.ml_delta_optimization and self.ml_integration:
                 try:
                     # Get cost basis for this specific stock
@@ -1816,7 +1742,7 @@ class BinbinGodStrategy(BaseStrategy):
                         time_to_expiry=target_dte / 365.0
                     )
                     target_delta = abs(ml_result.optimal_delta)  # Call delta is positive
-                    self.logger.info(f"Roll CC: ML delta={ml_result.optimal_delta:.3f} (confidence: {ml_result.confidence:.2f})")
+                    self.logger.info(f"Roll Call: ML delta={ml_result.optimal_delta:.3f} (confidence: {ml_result.confidence:.2f})")
                 except Exception as e:
                     self.logger.warning(f"ML delta optimization failed in roll: {e}")
                     target_delta = self.call_delta
@@ -1826,9 +1752,10 @@ class BinbinGodStrategy(BaseStrategy):
                 underlying_price, target_dte / 365.0, iv, target_delta, 'C'
             )
             trade_type = "BINBIN_CALL"
+            signal_strategy_phase = "CC"
 
         else:
-            # Phase mismatch, don't roll
+            # Unknown right, don't roll
             return None
 
         # Calculate premium
@@ -1847,15 +1774,13 @@ class BinbinGodStrategy(BaseStrategy):
             return None
 
         # Generate signal
-        # Determine strategy_phase based on trade_type and closed_trade_phase
-        # For CC+SP mode, inherit the phase from closed trade
+        # Determine strategy_phase based on right
         if trade_type == "BINBIN_PUT":
-            # Inherit CC+SP if the closed trade was in CC+SP mode, otherwise SP
-            signal_strategy_phase = closed_trade_phase if closed_trade_phase == "CC+SP" else "SP"
+            signal_strategy_phase = "SP"
         elif trade_type == "BINBIN_CALL":
             signal_strategy_phase = "CC"
         else:
-            signal_strategy_phase = self.phase  # Fallback to current phase
+            signal_strategy_phase = "SP"  # Default fallback
         
         signal = Signal(
             symbol=symbol,
@@ -1895,8 +1820,8 @@ class BinbinGodStrategy(BaseStrategy):
             shares_acquired = quantity * 100
             # Use new multi-stock tracking
             self.stock_holding.add_shares(symbol, shares_acquired, strike)
-            self.phase = "CC"  # Switch to Covered Call phase
-            logger.info(f"Put assigned: Bought {shares_acquired} shares of {symbol} @ ${strike}, switching to CC phase")
+            # No phase concept - just log the assignment
+            logger.info(f"Put assigned: Bought {shares_acquired} shares of {symbol} @ ${strike}")
             logger.info(f"Current holdings: {self.stock_holding.holdings}")
         
         elif right == "C":
@@ -1941,11 +1866,8 @@ class BinbinGodStrategy(BaseStrategy):
             # Remove shares using new method
             self.stock_holding.remove_shares(symbol, shares_sold)
             
-            # Check if we still hold any shares
-            if self.stock_holding.shares == 0:
-                self.phase = "SP"  # Switch back to Sell Put phase
-                logger.info("All shares sold, returning to SP phase")
-            else:
+            # Log remaining holdings if any
+            if self.stock_holding.shares > 0:
                 logger.info(f"Remaining holdings: {self.stock_holding.holdings}")
     
     def on_trade_closed(self, trade: dict):
@@ -1975,9 +1897,9 @@ class BinbinGodStrategy(BaseStrategy):
                 
                 # Use new multi-stock tracking
                 self.stock_holding.add_shares(symbol, shares_acquired, strike)
-                self.phase = "CC"  # Switch to Covered Call phase
+                # No phase concept - just log the assignment
                 
-                logger.info(f"Put assigned: Bought {shares_acquired} shares @ ${strike} of {symbol}, switching to CC phase")
+                logger.info(f"Put assigned: Bought {shares_acquired} shares @ ${strike} of {symbol}")
                 logger.info(f"Current holdings: {self.stock_holding.holdings}")
             
             elif right == "C":
@@ -2032,11 +1954,8 @@ class BinbinGodStrategy(BaseStrategy):
                 # Remove shares using new method
                 self.stock_holding.remove_shares(symbol, shares_sold)
                 
-                # Check if we still hold any shares
-                if self.stock_holding.shares == 0:
-                    self.phase = "SP"  # Switch back to Sell Put phase
-                    logger.info("All shares sold, returning to SP phase")
-                else:
+                # Log remaining holdings if any
+                if self.stock_holding.shares > 0:
                     logger.info(f"Remaining holdings: {self.stock_holding.holdings}")
         
         # Return additional stock P&L for engine to add to cumulative_pnl
@@ -2193,14 +2112,17 @@ class BinbinGodStrategy(BaseStrategy):
     
     def get_performance_report(self) -> Dict[str, Any]:
         """Generate comprehensive performance report with selection history."""
+        # Determine phase from holdings (for backward compatibility)
+        current_phase = "CC" if self.stock_holding.shares > 0 else "SP"
+        
         # Debug logging
-        self.logger.info(f"BinbinGod Performance Report: phase={self.phase}, shares={self.stock_holding.shares}, holdings={self.stock_holding.holdings}")
+        self.logger.info(f"BinbinGod Performance Report: shares={self.stock_holding.shares}, holdings={self.stock_holding.holdings}")
 
         return {
             "strategy": "binbin_god",
             # current_state: for compatibility with Wheel's monitoring dashboard
             "current_state": {
-                "phase": self.phase,
+                "phase": current_phase,
                 "shares_held": self.stock_holding.shares,
                 "cost_basis": round(self.stock_holding.cost_basis, 2),
                 "total_premium_collected": round(self.stock_holding.total_premium_collected, 2),
@@ -2219,7 +2141,7 @@ class BinbinGodStrategy(BaseStrategy):
                 "phase_transitions": 0,
             },
             # Top-level fields for easy access
-            "phase": self.phase,
+            "phase": current_phase,
             "shares_held": self.stock_holding.shares,
             "cost_basis": round(self.stock_holding.cost_basis, 2),
             "total_premium_collected": round(self.stock_holding.total_premium_collected, 2),
