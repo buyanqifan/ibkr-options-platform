@@ -78,6 +78,10 @@ def score_single_stock(symbol: str, bars: List[Dict], current_price: float,
         pe_score * weights["pe_score"]
     )
     
+    # Apply liquidity penalty for very low liquidity (aligned with original binbin_god.py)
+    if liquidity_score < 30:
+        total_score *= 0.8  # 20% penalty for low liquidity
+    
     return StockScore(
         symbol=symbol,
         pe_ratio=pe_ratio,
