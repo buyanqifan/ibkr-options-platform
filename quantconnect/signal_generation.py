@@ -77,14 +77,8 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     current_position = get_current_position(algo, symbol)
     traditional_delta, cc_min_strike = 0.30, None
     if strategy_phase == "CC" and algo.cc_optimization_enabled and cost_basis > 0:
-        adj_delta, cc_min_strike, log_msg = get_cc_optimization_params(
-            cost_basis, underlying_price,
-            algo.cc_optimization_enabled, algo.cc_min_delta_cost, 
-            algo.cc_cost_basis_threshold, algo.cc_min_strike_premium,
-            getattr(algo, 'cc_profit_protection_enabled', True),
-            getattr(algo, 'cc_profit_threshold', 0.20),
-            getattr(algo, 'cc_profit_delta', 0.20)
-        )
+        adj_delta, cc_min_strike, log_msg = get_cc_optimization_params(cost_basis, underlying_price,
+            algo.cc_optimization_enabled, algo.cc_min_delta_cost, algo.cc_cost_basis_threshold, algo.cc_min_strike_premium)
         if log_msg: algo.Log(log_msg); traditional_delta = adj_delta
     signal = algo.ml_integration.generate_signal(symbol=symbol, current_price=underlying_price, cost_basis=cost_basis,
         bars=bars, strategy_phase=strategy_phase, portfolio_state=portfolio_state, current_position=current_position)
