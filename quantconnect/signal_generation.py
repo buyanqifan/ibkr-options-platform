@@ -17,7 +17,7 @@ from qc_portfolio import (
 
 
 def get_portfolio_state(algo) -> Dict:
-    positions = [{'symbol': str(h.Symbol), 'quantity': h.Quantity, 'market_value': h.HoldingsValue}
+    positions = [{'symbol': h.Symbol.Value if hasattr(h.Symbol, 'Value') else str(h.Symbol), 'quantity': h.Quantity, 'market_value': h.HoldingsValue}
                  for h in algo.Portfolio.Values if h.Invested]
     cost_basis_dict = {}
     for symbol in algo.stock_pool:
