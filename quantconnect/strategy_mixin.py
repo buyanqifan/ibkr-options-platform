@@ -14,25 +14,18 @@ def rebalance(algo):
         return
     check_position_management(algo, execute_signal, find_option_by_greeks)
     open_count = get_option_position_count(algo)
-    algo.Log(f"Rebalance: open_positions={open_count}, max_positions={algo.max_positions}")
+    algo.Log(f"POSITIONS: {open_count}/{algo.max_positions}")
     if open_count >= algo.max_positions:
-        algo.Log("Rebalance: max positions reached, skipping")
         return
     signals = generate_ml_signals(algo)
-    algo.Log(f"Rebalance: generated {len(signals)} signals")
     if not signals:
-        algo.Log("Rebalance: no signals generated")
         return
     best_signal, algo._last_selected_stock, algo._selection_count, algo._last_stock_scores = \
         select_best_signal_with_memory(signals, algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores)
     if best_signal:
-        algo.Log(f"Rebalance: best_signal={best_signal.symbol} confidence={best_signal.confidence:.2f}")
+        algo.Log(f"SIGNAL: {best_signal.symbol} ({best_signal.action})")
         if best_signal.confidence >= algo.ml_min_confidence:
             execute_signal(algo, best_signal, find_option_by_greeks)
-        else:
-            algo.Log(f"Rebalance: confidence too low (min={algo.ml_min_confidence})")
-    else:
-        algo.Log("Rebalance: no best_signal selected")
 
 
 def on_end_of_algorithm(algo):
@@ -43,7 +36,6 @@ def on_end_of_algorithm(algo):
     initial_capital = algo.initial_capital
     total_return = (total_value - initial_capital) / initial_capital * 100 if initial_capital > 0 else 0
     
-    # Get holdings info from QC Portfolio
     held_symbols = get_symbols_with_holdings(algo, algo.stock_pool)
     total_shares = sum(algo.Portfolio[algo.equities[s].Symbol].Quantity for s in held_symbols if algo.equities.get(s) and algo.Portfolio.ContainsKey(algo.equities[s].Symbol))
     

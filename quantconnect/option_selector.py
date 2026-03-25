@@ -21,9 +21,9 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
     underlying_price = algo.Securities[equity_symbol].Price
     option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
     if not option_chain:
-        algo.Log(f"find_option: no option_chain for {symbol}")
+        
         return None
-    algo.Log(f"find_option: {symbol} chain_size={len(option_chain)} target_delta={target_delta:.2f} dte=[{dte_min},{dte_max}] underlying={underlying_price:.2f}")
+    algo.Log(f"FIND_OPTION: {symbol}")
     suitable = []
     stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'tolerance': 0}
     for option_symbol in option_chain:
@@ -57,10 +57,10 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
             continue
         suitable.append(build_option_result(option_symbol, strike, option_symbol.ID.Date, dte,
             delta, iv, premium, abs(delta - target_delta), premium * 0.99, premium * 1.01))
-    algo.Log(f"find_option stats: right={stats['right']} dte={stats['dte']} itm={stats['itm']} tolerance={stats['tolerance']} suitable={len(suitable)}")
+    
     if not suitable:
-        algo.Log(f"find_option: no suitable options found for {symbol}")
+        algo.Log(f"NO_OPTION: {symbol}")
         return None
-    algo.Log(f"find_option: found {len(suitable)} suitable options for {symbol}")
+    
     suitable.sort(key=lambda x: x['delta_diff'])
     return suitable[0]

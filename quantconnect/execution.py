@@ -46,13 +46,13 @@ def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
     # Check if price data is available
     if security.HasData and security.Price > 0:
         # Data ready - use MarketOrder
-        algo.Log(f"Option data ready, MarketOrder: {option_symbol} @ market")
+        
         return algo.MarketOrder(option_symbol, quantity)
     else:
         # Data not ready - use LimitOrder with theoretical price
         # For sell orders (negative quantity), set limit slightly below theoretical
         limit_price = theoretical_price * 0.98 if quantity < 0 else theoretical_price * 1.02
-        algo.Log(f"Option data not ready, LimitOrder: {option_symbol} @ ${limit_price:.2f} (theoretical: ${theoretical_price:.2f})")
+        
         return algo.LimitOrder(option_symbol, quantity, limit_price)
 
 
@@ -86,7 +86,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         max_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
         max_by_limit = algo.max_positions - current_positions
         quantity = min(max_by_margin, max_by_limit)
-        algo.Log(f"Position sizing: available_margin=${available_margin:.0f}, usable=${usable_margin:.0f}, margin_per_contract=${estimated_margin_per_contract:.0f}, max_by_margin={max_by_margin}, quantity={quantity}")
+        
     else:
         shares_held = get_shares_held(algo, signal.symbol)
         existing_call_contracts = get_call_position_contracts(algo, signal.symbol)
@@ -98,7 +98,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
             return
     if quantity <= 0: return
     quantity = -quantity
-    algo.Log(f"Selling {abs(quantity)} {signal.symbol} {target_right} @ ${selected['premium']:.2f}")
+    algo.Log(f"SELL: {signal.symbol} {target_right}")
     option_symbol = selected['option_symbol']
     # Use safe execution to handle data readiness
     ticket = safe_execute_option_order(algo, option_symbol, quantity, selected['premium'])
@@ -114,7 +114,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
             'entry_date': algo.Time.strftime('%Y-%m-%d'),
             'ml_signal': signal,
         })
-        algo.Log(f"Executed: {signal.action} {signal.num_contracts} {signal.symbol} @ ${fill_price:.2f}")
+        algo.Log(f"EXEC: {signal.action} {signal.symbol}")
 
 
 def execute_roll(algo, signal: StrategySignal, find_option_func):
