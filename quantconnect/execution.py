@@ -106,10 +106,11 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         right_str = 'P' if target_right == OptionRight.Put else 'C'
         position_id = f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{selected['strike']:.0f}_{right_str}"
         # Save position metadata (entry Greeks, etc.) - QC doesn't track this
+        strategy_phase = "SP" if "PUT" in signal.action else "CC"
         save_position_metadata(algo, position_id, {
             'delta_at_entry': selected['delta'],
             'iv_at_entry': selected['iv'],
-            'strategy_phase': algo.phase,
+            'strategy_phase': strategy_phase,
             'entry_date': algo.Time.strftime('%Y-%m-%d'),
             'ml_signal': signal,
         })
@@ -142,10 +143,11 @@ def execute_roll(algo, signal: StrategySignal, find_option_func):
             right_str = 'P' if target_right == OptionRight.Put else 'C'
             new_pos_id = f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{new_selected['strike']:.0f}_{right_str}"
             # Save position metadata for new position
+            strategy_phase = "SP" if "PUT" in signal.action else "CC"
             save_position_metadata(algo, new_pos_id, {
                 'delta_at_entry': new_selected['delta'],
                 'iv_at_entry': new_selected['iv'],
-                'strategy_phase': algo.phase,
+                'strategy_phase': strategy_phase,
                 'entry_date': algo.Time.strftime('%Y-%m-%d'),
                 'ml_signal': signal,
             })
