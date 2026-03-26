@@ -396,6 +396,14 @@ class MLRollOptimizer:
         actions = ["LET_EXPIRE", "ROLL_FORWARD", "ROLL_OUT", "CLOSE_EARLY"]
         action = actions[action_idx]
 
+        # CRITICAL: In SP phase, only allow ROLL_FORWARD or LET_EXPIRE
+        # ROLL_OUT and CLOSE_EARLY would break Wheel cycle by avoiding assignment
+        strategy_phase = feat.get('strategy_phase', 0)  # 0=SP, 1=CC
+        if strategy_phase == 0 and action in ["ROLL_OUT", "CLOSE_EARLY"]:
+            # Override: In SP phase, let the option expire for assignment
+            action = "LET_EXPIRE"
+            confidence = 0.90
+
         # Estimate improvement
         expected_improvement = self._estimate_roll_pnl_improvement(
             feat, action, base_dte_range, base_delta
