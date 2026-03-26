@@ -428,17 +428,17 @@ class MLRollOptimizer:
 
         if action == "ROLL_FORWARD":
             # Close current, open new
-            # Benefit: Capture remaining premium + new premium
-            # Cost: Slippage on close
+            # Benefit: New premium received
+            # Cost: Buyback current position + Slippage
 
             # Estimate new premium (based on IV and DTE)
             new_dte = base_dte_range[1]
             iv_multiplier = 1 + (iv_rank - 50) / 100  # Higher IV = more premium
             estimated_new_premium = base_delta * 100 * iv_multiplier * (new_dte / 45)
 
-            # Net benefit: close current + new premium - slippage
+            # Net benefit: new premium - buyback cost - slippage
             slippage = premium_remaining * 0.05  # 5% slippage estimate
-            improvement = premium_remaining + estimated_new_premium - slippage
+            improvement = estimated_new_premium - premium_remaining - slippage
 
             return max(0, improvement)
 

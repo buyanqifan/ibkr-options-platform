@@ -51,6 +51,11 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
     # Get current state
     held_symbols = get_symbols_with_holdings(algo, algo.stock_pool)  # Symbols with stock
     
+    # Log when we have stock holdings (important for CC debugging)
+    if held_symbols:
+        shares_info = {s: get_shares_held(algo, s) for s in held_symbols}
+        algo.Log(f"HOLDINGS: {shares_info}")
+    
     # Generate SELL_CALL for symbols we hold stock
     for symbol in held_symbols:
         sig = generate_signal_for_symbol(algo, symbol, "CC", portfolio_state)

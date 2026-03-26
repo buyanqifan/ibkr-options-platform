@@ -407,7 +407,8 @@ class MLRollOptimizer:
             iv_multiplier = 1 + (iv_rank - 50) / 100
             estimated_new_premium = base_delta * 100 * iv_multiplier * (new_dte / 45)
             slippage = premium_remaining * 0.05
-            improvement = premium_remaining + estimated_new_premium - slippage
+            # Correct calculation: new premium received - buyback cost - slippage
+            improvement = estimated_new_premium - premium_remaining - slippage
             return max(0, improvement)
         
         elif action == "ROLL_OUT":
