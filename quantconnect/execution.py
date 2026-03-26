@@ -1,4 +1,6 @@
-"""Trade execution functions for BinbinGod Strategy."""
+"""Trade execution functions for BinbinGod Strategy.
+# Updated: 2026-03-25 - Fix import cache issue
+"""
 from typing import Dict, Optional
 from AlgorithmImports import OptionRight, OrderStatus, Resolution
 from ml_integration import StrategySignal
