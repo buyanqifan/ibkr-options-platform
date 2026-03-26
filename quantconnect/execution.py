@@ -7,7 +7,8 @@ from signals import calculate_pnl_metrics
 from option_pricing import BlackScholes
 from qc_portfolio import (
     get_option_position_count, get_shares_held, get_call_position_contracts,
-    get_position_for_symbol, save_position_metadata, remove_position_metadata
+    get_position_for_symbol, save_position_metadata, remove_position_metadata,
+    get_total_stock_holdings_value, get_stock_holding_count
 )
 
 RISK_FREE_RATE = 0.05
@@ -80,13 +81,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         return
     current_positions = get_option_position_count(algo)
     if target_right == OptionRight.Put:
-        estimated_margin_per_contract = selected['strike'] * 100 * algo.margin_rate_per_contract
-        available_margin = algo.Portfolio.MarginRemaining
-        usable_margin = available_margin * (1 - algo.margin_buffer_pct)
-        max_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
-        max_by_limit = algo.max_positions - current_positions
-        quantity = min(max_by_margin, max_by_limit)
-        
+        quantity = calculate_put_quantity(algo, selected, current_positions, underlying_price, signal.symbol)
     else:
         shares_held = get_shares_held(algo, signal.symbol)
         existing_call_contracts = get_call_position_contracts(algo, signal.symbol)
@@ -114,6 +109,69 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
             'entry_date': algo.Time.strftime('%Y-%m-%d'),
             'ml_signal': signal,
         })
+
+
+def calculate_put_quantity(algo, selected: Dict, current_positions: int, underlying_price: float, symbol: str) -> int:
+    """Calculate number of Put contracts to sell with improved margin management.
+    
+    Improvements:
+    1. Use more accurate margin estimation (QC standard formula)
+    2. Reduce positions when holding stock (stock ties up capital)
+    3. Apply global margin budget constraint
+    """
+    strike = selected['strike']
+    premium = selected.get('premium', 0)
+    
+    # === More accurate margin estimation ===
+    # QC uses: max(20% * underlying - OTM amount, 10% * strike) + premium
+    # For naked short put, OTM amount = max(0, underlying - strike)
+    otm_amount = max(0, underlying_price - strike)
+    margin_method_1 = 0.20 * underlying_price * 100 - otm_amount * 100
+    margin_method_2 = 0.10 * strike * 100
+    estimated_margin_per_contract = max(margin_method_1, margin_method_2) + premium * 100
+    
+    # Ensure minimum margin estimate
+    fallback_margin = strike * 100 * algo.margin_rate_per_contract
+    estimated_margin_per_contract = max(estimated_margin_per_contract, fallback_margin)
+    
+    # === Get available margin ===
+    available_margin = algo.Portfolio.MarginRemaining
+    usable_margin = available_margin * (1 - algo.margin_buffer_pct)
+    
+    # === Reduce positions when holding stock ===
+    # Stock holdings tie up capital, reduce max positions accordingly
+    stock_value = get_total_stock_holdings_value(algo, algo.stock_pool)
+    stock_holding_count = get_stock_holding_count(algo, algo.stock_pool)
+    
+    # Each stock holding reduces available Put slots
+    # If we have 2 stocks, reduce max_positions by 2-3 for new Puts
+    adjusted_max_positions = algo.max_positions - stock_holding_count
+    
+    # Also reduce based on stock value relative to initial capital
+    # If stock value > 30% of capital, further reduce positions
+    stock_value_ratio = stock_value / algo.initial_capital if algo.initial_capital > 0 else 0
+    if stock_value_ratio > 0.30:
+        # Reduce positions proportionally (max 50% reduction)
+        reduction_factor = min(0.5, stock_value_ratio)
+        adjusted_max_positions = max(1, int(adjusted_max_positions * (1 - reduction_factor)))
+    
+    # === Calculate quantity limits ===
+    max_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
+    max_by_limit = max(0, adjusted_max_positions - current_positions)
+    
+    # === Global margin budget: don't use more than 60% of initial capital for new positions ===
+    total_margin_used = algo.Portfolio.TotalMarginUsed
+    margin_budget = algo.initial_capital * 0.60
+    remaining_budget = max(0, margin_budget - total_margin_used)
+    max_by_budget = max(0, int(remaining_budget / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 0
+    
+    quantity = min(max_by_margin, max_by_limit, max_by_budget)
+    
+    # Log if position is limited due to stock holdings or margin
+    if stock_holding_count > 0 and quantity < (algo.max_positions - current_positions):
+        algo.Log(f"PUT_LIMIT: stocks={stock_holding_count}, adj_max={adjusted_max_positions}, qty={quantity}")
+    
+    return max(0, quantity)
 
 
 def execute_roll(algo, signal: StrategySignal, find_option_func):

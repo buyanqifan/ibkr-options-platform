@@ -247,3 +247,31 @@ def remove_position_metadata(algo, pos_id: str):
 def get_position_metadata(algo, pos_id: str) -> Dict:
     """Get position metadata."""
     return getattr(algo, 'position_metadata', {}).get(pos_id, {})
+
+
+def get_total_stock_holdings_value(algo, stock_pool: List[str] = None) -> float:
+    """Get total market value of all stock holdings.
+    
+    This is used to determine how much capital is tied up in stocks,
+    which affects how many new Put positions we should open.
+    """
+    total_value = 0.0
+    for holding in algo.Portfolio.Values:
+        if not holding.Invested or holding.Quantity <= 0:
+            continue
+        symbol = holding.Symbol
+        # Check if it's equity (not an option)
+        is_option = hasattr(symbol, 'SecurityType') and symbol.SecurityType == SecurityType.Option
+        if not is_option:
+            sym_str = symbol.Value if hasattr(symbol, 'Value') else str(symbol).split()[0]
+            if stock_pool is None or sym_str in stock_pool:
+                total_value += abs(holding.HoldingsValue)
+    return total_value
+
+
+def get_stock_holding_count(algo, stock_pool: List[str] = None) -> int:
+    """Get count of symbols with stock holdings.
+    
+    Returns the number of different stocks held (not the total shares).
+    """
+    return len(get_symbols_with_holdings(algo, stock_pool))
