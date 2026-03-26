@@ -4,11 +4,37 @@ No phase concept - QC handles assignment automatically, we just log and record.
 """
 from datetime import datetime
 from option_utils import calculate_dte
-from execution import record_trade
+from execution import record_trade, execute_signal
 from qc_portfolio import (
     get_option_positions, get_shares_held, get_cost_basis,
     get_position_metadata, remove_position_metadata, get_symbols_with_holdings
 )
+from signal_generation import generate_signal_for_symbol, get_portfolio_state
+from option_selector import find_option_by_greeks
+
+
+def try_sell_cc_immediately(algo, symbol):
+    """Try to sell CC immediately after Put assignment to protect stock from margin call.
+    
+    This is critical because:
+    1. Put assignment happens at market close
+    2. Margin check happens before next rebalance
+    3. If we don't sell CC immediately, stock may be liquidated
+    """
+    algo.Log(f"IMMEDIATE_CC: Attempting to sell CC for {symbol} after Put assignment")
+    
+    portfolio_state = get_portfolio_state(algo)
+    signal = generate_signal_for_symbol(algo, symbol, "CC", portfolio_state)
+    
+    if signal:
+        algo.Log(f"IMMEDIATE_CC: Generated signal for {symbol}, delta={signal.delta:.2f}")
+        if signal.confidence >= algo.ml_min_confidence:
+            execute_signal(algo, signal, find_option_by_greeks)
+            algo.Log(f"IMMEDIATE_CC: Executed CC for {symbol}")
+        else:
+            algo.Log(f"IMMEDIATE_CC: Confidence {signal.confidence:.2f} < min {algo.ml_min_confidence}")
+    else:
+        algo.Log(f"IMMEDIATE_CC: No valid CC signal for {symbol}")
 
 
 def check_expired_options(algo):
@@ -48,6 +74,9 @@ def check_expired_options(algo):
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
                 algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f}")
+                
+                # CRITICAL: Immediately try to sell CC to protect stock from margin call
+                try_sell_cc_immediately(algo, symbol)
         
         elif right == "C":
             # Call assignment: QC sold shares for us at strike price

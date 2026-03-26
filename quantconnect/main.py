@@ -51,7 +51,45 @@ class BinbinGodStrategy(QCAlgorithm):
     def OnOrderEvent(self, orderEvent):
         """Called on order event."""
         if orderEvent.Status == OrderStatus.Filled:
-            self.Log(f"Filled: {orderEvent.Symbol} @ ${orderEvent.FillPrice:.2f}")
+            symbol = orderEvent.Symbol
+            qty = orderEvent.FillQuantity
+            price = orderEvent.FillPrice
+            # Log stock trades separately for debugging
+            if symbol.SecurityType == SecurityType.Equity:
+                action = "BUY" if qty > 0 else "SELL"
+                self.Log(f"STOCK_{action}: {symbol} qty={qty} @ ${price:.2f}")
+            else:
+                self.Log(f"Filled: {symbol} @ ${price:.2f}")
+
+    def OnMarginCallWarning(self):
+        """Called when margin is getting low."""
+        margin_remaining = self.Portfolio.MarginRemaining
+        margin_used = self.Portfolio.TotalMarginUsed
+        self.Log(f"MARGIN_WARNING: Remaining=${margin_remaining:.2f}, Used=${margin_used:.2f}")
+
+    def OnMarginCall(self, requests):
+        """Called when margin call occurs - QC wants to liquidate positions.
+        
+        We prioritize keeping stock and selling options instead.
+        Returns list of orders to submit for margin call.
+        """
+        self.Log(f"MARGIN_CALL: {len(requests)} liquidation requests")
+        
+        # Log what QC wants to liquidate
+        for req in requests:
+            self.Log(f"  -> Liquidate: {req.Symbol} qty={req.Quantity}")
+        
+        # Separate stock vs option requests
+        stock_requests = [r for r in requests if r.Symbol.SecurityType == SecurityType.Equity]
+        option_requests = [r for r in requests if r.Symbol.SecurityType == SecurityType.Option]
+        
+        # If QC wants to sell stock, try to liquidate options first
+        if stock_requests:
+            self.Log(f"MARGIN_CALL: Preventing {len(stock_requests)} stock liquidations")
+            # Only return option liquidations - try to keep stock
+            return option_requests
+        
+        return requests
 
     def Rebalance(self):
         rebalance(self)
