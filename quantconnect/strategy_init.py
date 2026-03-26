@@ -24,7 +24,9 @@ def init_dates(algo):
 def init_parameters(algo):
     algo.initial_capital = float(algo.GetParameter("initial_capital", 100000))
     algo.SetCash(algo.initial_capital)
-    algo.max_positions = int(algo.GetParameter("max_positions", 10))
+    # max_positions from config is now a CEILING, actual value computed dynamically
+    algo.max_positions_ceiling = int(algo.GetParameter("max_positions", 10))
+    algo.max_positions = algo.max_positions_ceiling  # Will be recalculated dynamically
     algo.profit_target_pct = float(algo.GetParameter("profit_target_pct", 50))
     algo.stop_loss_pct = float(algo.GetParameter("stop_loss_pct", 999999))
     algo.max_risk_per_trade = float(algo.GetParameter("max_risk_per_trade", 0.02))
@@ -48,6 +50,8 @@ def init_parameters(algo):
     algo.ml_min_confidence = float(algo.GetParameter("ml_min_confidence", 0.4))
     algo.stock_pool = algo.GetParameter("stock_pool", ",".join(MAG7_STOCKS)).split(",")
     algo.weights = {"iv_rank": 0.35, "technical": 0.25, "momentum": 0.20, "pe_score": 0.20}
+    # Target margin utilization for position sizing (60% of capital)
+    algo.target_margin_utilization = float(algo.GetParameter("target_margin_utilization", 0.60))
 
 
 def init_ml(algo):

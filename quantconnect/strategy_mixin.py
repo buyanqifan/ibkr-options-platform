@@ -2,7 +2,7 @@
 from signals import select_best_signal_with_memory
 from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events
 from signal_generation import generate_ml_signals
-from execution import execute_signal
+from execution import execute_signal, calculate_dynamic_max_positions
 from position_management import check_position_management
 from expiry import check_expired_options, update_ml_models
 from option_selector import find_option_by_greeks
@@ -12,6 +12,10 @@ from qc_portfolio import get_option_position_count, get_symbols_with_holdings
 def rebalance(algo):
     if algo.IsWarmingUp:
         return
+    
+    # Dynamically update max_positions based on current stock prices
+    algo.max_positions = calculate_dynamic_max_positions(algo)
+    
     check_position_management(algo, execute_signal, find_option_by_greeks)
     open_count = get_option_position_count(algo)
     if open_count >= algo.max_positions:

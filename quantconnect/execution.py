@@ -14,6 +14,53 @@ from qc_portfolio import (
 RISK_FREE_RATE = 0.05
 
 
+def calculate_dynamic_max_positions(algo) -> int:
+    """Dynamically calculate max positions based on capital and stock prices.
+    
+    Formula:
+    - Available margin budget = initial_capital * target_margin_utilization
+    - Average margin per position = avg_stock_price * 100 * margin_rate
+    - Max positions = budget / margin_per_position
+    - Capped by max_positions_ceiling from config
+    
+    Returns:
+        Dynamically calculated max positions
+    """
+    # Get average stock price from the pool
+    total_price = 0.0
+    count = 0
+    for symbol in algo.stock_pool:
+        equity = algo.equities.get(symbol)
+        if equity and algo.Securities.ContainsKey(equity.Symbol):
+            price = algo.Securities[equity.Symbol].Price
+            if price > 0:
+                total_price += price
+                count += 1
+    
+    if count == 0:
+        return algo.max_positions_ceiling  # Fallback to config value
+    
+    avg_price = total_price / count
+    
+    # Calculate margin budget (60% of capital by default)
+    margin_budget = algo.initial_capital * algo.target_margin_utilization
+    
+    # Estimate margin per contract using standard formula
+    # max(20% * price, 10% * price) * 100 ≈ 20% * price * 100
+    margin_per_contract = avg_price * 100 * 0.20
+    
+    # Calculate max positions
+    if margin_per_contract > 0:
+        dynamic_max = int(margin_budget / margin_per_contract)
+    else:
+        dynamic_max = algo.max_positions_ceiling
+    
+    # Cap by ceiling from config and ensure at least 1
+    result = max(1, min(dynamic_max, algo.max_positions_ceiling))
+    
+    return result
+
+
 def bs_put_price(S, K, T, sigma):
     return BlackScholes.put_price(S, K, T, RISK_FREE_RATE, sigma)
 
@@ -118,6 +165,7 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     1. Use more accurate margin estimation (QC standard formula)
     2. Reduce positions when holding stock (stock ties up capital)
     3. Apply global margin budget constraint
+    4. Use dynamically calculated max_positions
     """
     strike = selected['strike']
     premium = selected.get('premium', 0)
@@ -159,9 +207,9 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     max_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
     max_by_limit = max(0, adjusted_max_positions - current_positions)
     
-    # === Global margin budget: don't use more than 60% of initial capital for new positions ===
+    # === Global margin budget: don't use more than target utilization ===
     total_margin_used = algo.Portfolio.TotalMarginUsed
-    margin_budget = algo.initial_capital * 0.60
+    margin_budget = algo.initial_capital * algo.target_margin_utilization
     remaining_budget = max(0, margin_budget - total_margin_used)
     max_by_budget = max(0, int(remaining_budget / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 0
     

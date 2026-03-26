@@ -4,7 +4,7 @@
         "end_date": "2024-12-31",
         "initial_capital": 100000,
         "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
-        "max_positions": 10,
+        "max_positions_ceiling": 15,
         "profit_target_pct": 50,
         "stop_loss_pct": 999999,
         "allow_sp_in_cc_phase": true,
@@ -13,6 +13,7 @@
         
         "margin_buffer_pct": 0.50,
         "margin_rate_per_contract": 0.25,
+        "target_margin_utilization": 0.60,
         
         "ml_enabled": true,
         "ml_exploration_rate": 0.1,
