@@ -19,12 +19,27 @@ def rebalance(algo):
     signals = generate_ml_signals(algo)
     if not signals:
         return
-    best_signal, algo._last_selected_stock, algo._selection_count, algo._last_stock_scores = \
-        select_best_signal_with_memory(signals, algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores)
-    if best_signal:
-        algo.Log(f"SIGNAL: {best_signal.symbol} ({best_signal.action})")
-        if best_signal.confidence >= algo.ml_min_confidence:
-            execute_signal(algo, best_signal, find_option_by_greeks)
+    
+    # Separate SP and CC signals - both can execute in same cycle
+    sp_signals = [s for s in signals if s.action == "SELL_PUT"]
+    cc_signals = [s for s in signals if s.action == "SELL_CALL"]
+    
+    # Execute best CC signal first (if we have stock, we should sell calls)
+    if cc_signals and open_count < algo.max_positions:
+        best_cc = max(cc_signals, key=lambda x: x.confidence)
+        algo.Log(f"CC_SIGNAL: {best_cc.symbol} delta={best_cc.delta:.2f}")
+        if best_cc.confidence >= algo.ml_min_confidence:
+            execute_signal(algo, best_cc, find_option_by_greeks)
+            open_count = get_option_position_count(algo)
+    
+    # Execute best SP signal (with memory to avoid frequent switching)
+    if sp_signals and open_count < algo.max_positions:
+        best_sp, algo._last_selected_stock, algo._selection_count, algo._last_stock_scores = \
+            select_best_signal_with_memory(sp_signals, algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores)
+        if best_sp:
+            algo.Log(f"SP_SIGNAL: {best_sp.symbol} delta={best_sp.delta:.2f}")
+            if best_sp.confidence >= algo.ml_min_confidence:
+                execute_signal(algo, best_sp, find_option_by_greeks)
 
 
 def on_end_of_algorithm(algo):

@@ -90,7 +90,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
     else:
         shares_held = get_shares_held(algo, signal.symbol)
         existing_call_contracts = get_call_position_contracts(algo, signal.symbol)
-        shares_covered = existing_call_contracts
+        shares_covered = existing_call_contracts * 100  # Each contract covers 100 shares
         shares_available = shares_held - shares_covered
         quantity = min(max(0, shares_available // 100), algo.max_positions)
         if quantity <= 0:
