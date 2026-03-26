@@ -84,11 +84,12 @@ class BinbinGodStrategy(QCAlgorithm):
         option_requests = [r for r in requests if r.Symbol.SecurityType == SecurityType.Option]
         
         # If QC wants to sell stock, try to liquidate options first
-        if stock_requests:
-            self.Log(f"MARGIN_CALL: Preventing {len(stock_requests)} stock liquidations")
+        if stock_requests and option_requests:
+            self.Log(f"MARGIN_CALL: Preventing {len(stock_requests)} stock liquidations, liquidating {len(option_requests)} options instead")
             # Only return option liquidations - try to keep stock
             return option_requests
         
+        # Otherwise, return all requests (QC's original plan)
         return requests
 
     def Rebalance(self):
