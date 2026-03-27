@@ -26,10 +26,14 @@ A dynamic stock selection Wheel strategy for MAG7 stocks with ML optimization.
 
 ```json
 {
-    "ml_enabled": true,
+    "initial_capital": 300000,
     "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
-    "max_positions": 10,
-    "allow_sp_in_cc_phase": true
+    "max_positions_ceiling": 15,
+    "target_margin_utilization": 0.60,
+    "margin_buffer_pct": 0.50,
+    "position_aggressiveness": 1.0,
+    "ml_enabled": true,
+    "stop_loss_pct": 999999
 }
 ```
 

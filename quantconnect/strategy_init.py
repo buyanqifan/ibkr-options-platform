@@ -43,6 +43,10 @@ def _as_float(value, default=0.0):
         return default
 
 
+def _clamp(value, low, high):
+    return max(low, min(high, value))
+
+
 def init_dates(algo):
     start_date_param = algo.GetParameter("start_date")
     end_date_param = algo.GetParameter("end_date")
@@ -73,12 +77,16 @@ def init_parameters(algo):
     algo._stop_loss_disabled = algo.stop_loss_pct >= 999999
     algo.margin_buffer_pct = _as_float(_get_param(algo, "margin_buffer_pct", 0.50), 0.50)
     algo.margin_rate_per_contract = _as_float(_get_param(algo, "margin_rate_per_contract", 0.25), 0.25)
-    algo.max_put_contracts_per_symbol = _as_int(_get_param(algo, "max_put_contracts_per_symbol", 6), 6)
-    algo.max_put_contracts_total = _as_int(_get_param(algo, "max_put_contracts_total", 20), 20)
-    algo.max_contracts_per_trade = _as_int(_get_param(algo, "max_contracts_per_trade", 5), 5)
-    algo.allow_sp_in_cc_phase = _as_bool(_get_param(algo, "allow_sp_in_cc_phase", True), True)
-    algo.sp_in_cc_margin_threshold = _as_float(_get_param(algo, "sp_in_cc_margin_threshold", 0.5), 0.5)
-    algo.sp_in_cc_max_positions = _as_int(_get_param(algo, "sp_in_cc_max_positions", 3), 3)
+    # Position aggressiveness (0.3 conservative -> 1.0 baseline -> 2.0 aggressive)
+    algo.position_aggressiveness = _clamp(_as_float(_get_param(algo, "position_aggressiveness", 1.0), 1.0), 0.3, 2.0)
+
+    # Dynamic caps derived from aggressiveness (no hard-coded contract counts)
+    symbol_cap_factor = 0.30 + 0.30 * algo.position_aggressiveness
+    total_cap_factor = 1.20 + 0.80 * algo.position_aggressiveness
+    trade_cap_factor = 0.60 + 0.40 * algo.position_aggressiveness
+    algo.max_put_contracts_per_symbol = max(1, int(algo.max_positions_ceiling * symbol_cap_factor))
+    algo.max_put_contracts_total = max(2, int(algo.max_positions_ceiling * total_cap_factor))
+    algo.max_contracts_per_trade = max(1, int(algo.max_put_contracts_per_symbol * trade_cap_factor))
     algo.cc_optimization_enabled = _as_bool(_get_param(algo, "cc_optimization_enabled", True), True)
     algo.cc_min_delta_cost = _as_float(_get_param(algo, "cc_min_delta_cost", 0.15), 0.15)
     algo.cc_cost_basis_threshold = _as_float(_get_param(algo, "cc_cost_basis_threshold", 0.05), 0.05)
@@ -142,6 +150,7 @@ def log_effective_parameters(algo):
         f"max_put_contracts_per_symbol={algo.max_put_contracts_per_symbol}, "
         f"max_put_contracts_total={algo.max_put_contracts_total}, "
         f"max_contracts_per_trade={algo.max_contracts_per_trade}, "
+        f"position_aggressiveness={algo.position_aggressiveness}, "
         f"stop_loss_pct={algo.stop_loss_pct}, "
         f"ml_enabled={algo.ml_enabled}, "
         f"ml_min_confidence={algo.ml_min_confidence}, "

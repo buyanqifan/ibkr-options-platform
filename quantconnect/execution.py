@@ -89,7 +89,8 @@ def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
     # Subscribe if not already in Securities
     if not algo.Securities.ContainsKey(option_symbol):
         algo.Log(f"Subscribing to option contract: {option_symbol}")
-        algo.AddOptionContract(option_symbol, Resolution.Daily)
+        # Use Minute so contract receives intraday bars before we trade.
+        algo.AddOptionContract(option_symbol, Resolution.Minute)
     
     security = algo.Securities[option_symbol]
     
@@ -99,11 +100,9 @@ def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
         
         return algo.MarketOrder(option_symbol, quantity)
     else:
-        # Data not ready - use LimitOrder with theoretical price
-        # For sell orders (negative quantity), set limit slightly below theoretical
-        limit_price = theoretical_price * 0.98 if quantity < 0 else theoretical_price * 1.02
-        
-        return algo.LimitOrder(option_symbol, quantity, limit_price)
+        # Data not ready yet. Defer order to next rebalance cycle.
+        algo.Log(f"ORDER_DEFERRED: {option_symbol} waiting for first bar")
+        return None
 
 
 def make_signal(symbol, action, delta=0, dte_min=30, dte_max=45, num_contracts=1, confidence=0.5, reasoning=""):
@@ -239,6 +238,8 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     # === Existing put exposure limits ===
     total_put_contracts = 0
     symbol_put_contracts = 0
+    total_put_notional = 0.0
+    symbol_put_notional = 0.0
     for holding in algo.Portfolio.Values:
         if not holding.Invested:
             continue
@@ -248,9 +249,16 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
         if hs.ID.OptionRight != OptionRight.Put:
             continue
         contracts = abs(holding.Quantity)
+        strike_h = float(hs.ID.StrikePrice)
+        put_notional = contracts * strike_h * 100
         total_put_contracts += contracts
+        total_put_notional += put_notional
         if hasattr(hs, "Underlying") and hs.Underlying and hs.Underlying.Value == symbol:
             symbol_put_contracts += contracts
+            symbol_put_notional += put_notional
+
+    # Include current stock exposure in notional-based caps
+    symbol_stock_notional = get_shares_held(algo, symbol) * max(underlying_price, 0)
 
     max_by_symbol_contracts = max(0, algo.max_put_contracts_per_symbol - symbol_put_contracts)
     max_by_total_contracts = max(0, algo.max_put_contracts_total - total_put_contracts)
@@ -271,6 +279,18 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     leverage_budget = portfolio_value * algo.max_leverage
     remaining_leverage_budget = max(0, leverage_budget - total_margin_used)
     max_by_leverage = max(0, int(remaining_leverage_budget / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 0
+
+    # === Notional assignment caps (dynamic by strike and aggressiveness) ===
+    # These caps keep worst-case assignment exposure proportional to account size.
+    aggr = getattr(algo, "position_aggressiveness", 1.0)
+    per_symbol_notional_cap = portfolio_value * (0.25 + 0.35 * aggr)   # 0.355x ~ 0.95x PV
+    total_notional_cap = portfolio_value * (0.70 + 0.90 * aggr)        # 0.97x ~ 2.50x PV
+    candidate_notional = strike * 100
+
+    remaining_symbol_notional = max(0.0, per_symbol_notional_cap - (symbol_put_notional + symbol_stock_notional))
+    remaining_total_notional = max(0.0, total_notional_cap - (total_put_notional + stock_value))
+    max_by_symbol_notional = int(remaining_symbol_notional / candidate_notional) if candidate_notional > 0 else 0
+    max_by_total_notional = int(remaining_total_notional / candidate_notional) if candidate_notional > 0 else 0
     
     quantity = min(
         max_by_margin,
@@ -280,6 +300,8 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
         max_by_symbol_contracts,
         max_by_total_contracts,
         max_by_trade_cap,
+        max_by_symbol_notional,
+        max_by_total_notional,
     )
     
     # Log if position is limited due to stock holdings or margin
@@ -288,7 +310,8 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     if quantity <= 0:
         algo.Log(
             f"PUT_BLOCK:{symbol} margin={max_by_margin} budget={max_by_budget} lev={max_by_leverage} "
-            f"symcap={max_by_symbol_contracts} totalcap={max_by_total_contracts} slots={max_by_limit}"
+            f"symcap={max_by_symbol_contracts} totalcap={max_by_total_contracts} "
+            f"symnot={max_by_symbol_notional} totalnot={max_by_total_notional} slots={max_by_limit}"
         )
     
     return max(0, quantity)
@@ -302,7 +325,8 @@ def execute_roll(algo, signal: StrategySignal, find_option_func, existing_positi
     # Use safe execution for closing the existing position
     close_ticket = safe_execute_option_order(
         algo, pos_info['option_symbol'], -pos_info['quantity'], pos_info['entry_price'])
-    if close_ticket.Status != OrderStatus.Filled: return
+    if not close_ticket or close_ticket.Status != OrderStatus.Filled:
+        return
     pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
     record_trade(algo, signal.symbol, pos_info['right'], pnl, "ROLL")
     remove_position_metadata(algo, pos_id)
@@ -328,7 +352,7 @@ def execute_close(algo, signal: StrategySignal, existing_position: Optional[Dict
     # (positions should have data, but use safe execution for consistency)
     close_ticket = safe_execute_option_order(
         algo, pos_info['option_symbol'], -pos_info['quantity'], pos_info['entry_price'])
-    if close_ticket.Status == OrderStatus.Filled:
+    if close_ticket and close_ticket.Status == OrderStatus.Filled:
         pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
         record_trade(algo, signal.symbol, pos_info['right'], pnl, signal.reasoning or "SIGNAL_CLOSE")
         remove_position_metadata(algo, pos_id)

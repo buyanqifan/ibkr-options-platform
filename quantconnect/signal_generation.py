@@ -83,7 +83,10 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     if strategy_phase == "CC" and algo.cc_optimization_enabled and cost_basis > 0:
         adj_delta, cc_min_strike, log_msg = get_cc_optimization_params(cost_basis, underlying_price,
             algo.cc_optimization_enabled, algo.cc_min_delta_cost, algo.cc_cost_basis_threshold, algo.cc_min_strike_premium)
-        if log_msg: algo.Log(log_msg); traditional_delta = adj_delta
+        # Apply CC-adjusted delta based on optimization result, not log message presence.
+        traditional_delta = adj_delta
+        if log_msg:
+            algo.Log(log_msg)
     signal = algo.ml_integration.generate_signal(symbol=symbol, current_price=underlying_price, cost_basis=cost_basis,
         bars=bars, strategy_phase=strategy_phase, portfolio_state=portfolio_state, current_position=current_position)
     if signal and algo.ml_enabled:
