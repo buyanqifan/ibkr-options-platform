@@ -1,8 +1,9 @@
 """BinbinGod Strategy for QuantConnect - Wheel strategy with ML optimization."""
 from AlgorithmImports import *
-from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events
+from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events, log_effective_parameters
 from strategy_mixin import rebalance, on_end_of_algorithm
 from expiry import check_expired_options, update_ml_models
+from execution import handle_order_event
 
 class BinbinGodStrategy(QCAlgorithm):
     """BinbinGod Strategy - Intelligent stock selection + Full Wheel logic + ML optimization."""
@@ -14,6 +15,7 @@ class BinbinGodStrategy(QCAlgorithm):
         init_ml(self)
         init_securities(self)
         init_state(self)
+        log_effective_parameters(self)
         schedule_events(self)
         self.Log(f"BinbinGod Strategy initialized with stock pool: {self.stock_pool}")
         self.Log(f"ML optimization enabled: {self.ml_enabled}")
@@ -50,6 +52,7 @@ class BinbinGodStrategy(QCAlgorithm):
 
     def OnOrderEvent(self, orderEvent):
         """Called on order event."""
+        handle_order_event(self, orderEvent)
         if orderEvent.Status == OrderStatus.Filled:
             symbol = orderEvent.Symbol
             qty = orderEvent.FillQuantity

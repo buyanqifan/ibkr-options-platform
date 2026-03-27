@@ -2,7 +2,7 @@
 # Updated: 2026-03-25 - Fix import cache issue
 """
 from typing import Dict, Optional
-from AlgorithmImports import OptionRight, OrderStatus, Resolution
+from AlgorithmImports import OptionRight, OrderStatus, Resolution, SecurityType
 from ml_integration import StrategySignal
 from option_utils import calculate_dte
 from signals import calculate_pnl_metrics
@@ -112,6 +112,49 @@ def make_signal(symbol, action, delta=0, dte_min=30, dte_max=45, num_contracts=1
         expected_premium=0.0, expected_return=0.0, expected_risk=0.0, assignment_probability=0.0)
 
 
+def _enqueue_open_order_metadata(algo, ticket, signal: StrategySignal, selected: Dict, target_right):
+    """Queue open-order metadata and persist after OrderEvent fill."""
+    if not ticket or ticket.OrderId is None:
+        return
+    if not hasattr(algo, "pending_order_metadata"):
+        algo.pending_order_metadata = {}
+    strategy_phase = "SP" if target_right == OptionRight.Put else "CC"
+    algo.pending_order_metadata[ticket.OrderId] = {
+        "symbol": signal.symbol,
+        "right": "P" if target_right == OptionRight.Put else "C",
+        "strike": float(selected["strike"]),
+        "expiry": selected["expiry"].strftime("%Y%m%d"),
+        "delta_at_entry": selected.get("delta", 0),
+        "iv_at_entry": selected.get("iv", 0.25),
+        "strategy_phase": strategy_phase,
+        "entry_date": algo.Time.strftime("%Y-%m-%d"),
+        "ml_signal": signal,
+    }
+
+
+def handle_order_event(algo, order_event):
+    """Persist option metadata on fill for asynchronously filled orders."""
+    if order_event.Status != OrderStatus.Filled:
+        return
+    symbol = order_event.Symbol
+    if not hasattr(symbol, "SecurityType") or symbol.SecurityType != SecurityType.Option:
+        return
+    # Opening short option position -> negative fill quantity
+    if order_event.FillQuantity >= 0:
+        return
+    pending = getattr(algo, "pending_order_metadata", {}).pop(order_event.OrderId, None)
+    if not pending:
+        return
+    pos_id = f"{pending['symbol']}_{pending['expiry']}_{pending['strike']:.0f}_{pending['right']}"
+    save_position_metadata(algo, pos_id, {
+        "delta_at_entry": pending["delta_at_entry"],
+        "iv_at_entry": pending["iv_at_entry"],
+        "strategy_phase": pending["strategy_phase"],
+        "entry_date": pending["entry_date"],
+        "ml_signal": pending["ml_signal"],
+    })
+
+
 def execute_signal(algo, signal: StrategySignal, find_option_func):
     if not signal or signal.action == "HOLD": return
     if signal.action == "ROLL": execute_roll(algo, signal, find_option_func); return
@@ -145,19 +188,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
     option_symbol = selected['option_symbol']
     # Use safe execution to handle data readiness
     ticket = safe_execute_option_order(algo, option_symbol, quantity, selected['premium'])
-    if ticket.Status == OrderStatus.Filled:
-        fill_price = ticket.AverageFillPrice or selected['premium']
-        right_str = 'P' if target_right == OptionRight.Put else 'C'
-        position_id = f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{selected['strike']:.0f}_{right_str}"
-        # Save position metadata (entry Greeks, etc.) - QC doesn't track this
-        strategy_phase = "SP" if "PUT" in signal.action else "CC"
-        save_position_metadata(algo, position_id, {
-            'delta_at_entry': selected['delta'],
-            'iv_at_entry': selected['iv'],
-            'strategy_phase': strategy_phase,
-            'entry_date': algo.Time.strftime('%Y-%m-%d'),
-            'ml_signal': signal,
-        })
+    _enqueue_open_order_metadata(algo, ticket, signal, selected, target_right)
 
 
 def calculate_put_quantity(algo, selected: Dict, current_positions: int, underlying_price: float, symbol: str) -> int:
@@ -185,8 +216,8 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     estimated_margin_per_contract = max(estimated_margin_per_contract, fallback_margin)
     
     # === Get available margin ===
-    available_margin = algo.Portfolio.MarginRemaining
-    usable_margin = available_margin * (1 - algo.margin_buffer_pct)
+    available_margin = max(0.0, algo.Portfolio.MarginRemaining)
+    usable_margin = max(0.0, available_margin * (1 - algo.margin_buffer_pct))
     
     # === Reduce positions when holding stock ===
     # Stock holdings tie up capital, reduce max positions accordingly
@@ -205,27 +236,66 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
         reduction_factor = min(0.5, stock_value_ratio)
         adjusted_max_positions = max(1, int(adjusted_max_positions * (1 - reduction_factor)))
     
+    # === Existing put exposure limits ===
+    total_put_contracts = 0
+    symbol_put_contracts = 0
+    for holding in algo.Portfolio.Values:
+        if not holding.Invested:
+            continue
+        hs = holding.Symbol
+        if not (hasattr(hs, "SecurityType") and hs.SecurityType == SecurityType.Option):
+            continue
+        if hs.ID.OptionRight != OptionRight.Put:
+            continue
+        contracts = abs(holding.Quantity)
+        total_put_contracts += contracts
+        if hasattr(hs, "Underlying") and hs.Underlying and hs.Underlying.Value == symbol:
+            symbol_put_contracts += contracts
+
+    max_by_symbol_contracts = max(0, algo.max_put_contracts_per_symbol - symbol_put_contracts)
+    max_by_total_contracts = max(0, algo.max_put_contracts_total - total_put_contracts)
+    max_by_trade_cap = max(0, algo.max_contracts_per_trade)
+
     # === Calculate quantity limits ===
-    max_by_margin = max(1, int(usable_margin / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 1
+    max_by_margin = int(usable_margin / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
     max_by_limit = max(0, adjusted_max_positions - current_positions)
     
     # === Global margin budget: don't use more than target utilization ===
     total_margin_used = algo.Portfolio.TotalMarginUsed
-    margin_budget = algo.initial_capital * algo.target_margin_utilization
+    portfolio_value = max(algo.Portfolio.TotalPortfolioValue, 0.0)
+    margin_budget = portfolio_value * algo.target_margin_utilization
     remaining_budget = max(0, margin_budget - total_margin_used)
     max_by_budget = max(0, int(remaining_budget / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 0
     
-    quantity = min(max_by_margin, max_by_limit, max_by_budget)
+    # === Hard leverage budget ===
+    leverage_budget = portfolio_value * algo.max_leverage
+    remaining_leverage_budget = max(0, leverage_budget - total_margin_used)
+    max_by_leverage = max(0, int(remaining_leverage_budget / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 0
+    
+    quantity = min(
+        max_by_margin,
+        max_by_limit,
+        max_by_budget,
+        max_by_leverage,
+        max_by_symbol_contracts,
+        max_by_total_contracts,
+        max_by_trade_cap,
+    )
     
     # Log if position is limited due to stock holdings or margin
     if stock_holding_count > 0 and quantity < (algo.max_positions - current_positions):
         algo.Log(f"PUT_LIMIT: stocks={stock_holding_count}, adj_max={adjusted_max_positions}, qty={quantity}")
+    if quantity <= 0:
+        algo.Log(
+            f"PUT_BLOCK:{symbol} margin={max_by_margin} budget={max_by_budget} lev={max_by_leverage} "
+            f"symcap={max_by_symbol_contracts} totalcap={max_by_total_contracts} slots={max_by_limit}"
+        )
     
     return max(0, quantity)
 
 
-def execute_roll(algo, signal: StrategySignal, find_option_func):
-    existing = get_position_for_symbol(algo, signal.symbol)
+def execute_roll(algo, signal: StrategySignal, find_option_func, existing_position: Optional[Dict] = None):
+    existing = existing_position or get_position_for_symbol(algo, signal.symbol)
     if not existing: return
     pos_info = existing
     pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
@@ -247,22 +317,11 @@ def execute_roll(algo, signal: StrategySignal, find_option_func):
         new_option_symbol = new_selected['option_symbol']
         # Use safe execution to handle data readiness
         new_ticket = safe_execute_option_order(algo, new_option_symbol, new_qty, new_selected['premium'])
-        if new_ticket.Status == OrderStatus.Filled:
-            right_str = 'P' if target_right == OptionRight.Put else 'C'
-            new_pos_id = f"{signal.symbol}_{algo.Time.strftime('%Y%m%d')}_{new_selected['strike']:.0f}_{right_str}"
-            # Save position metadata for new position
-            strategy_phase = "SP" if "PUT" in signal.action else "CC"
-            save_position_metadata(algo, new_pos_id, {
-                'delta_at_entry': new_selected['delta'],
-                'iv_at_entry': new_selected['iv'],
-                'strategy_phase': strategy_phase,
-                'entry_date': algo.Time.strftime('%Y-%m-%d'),
-                'ml_signal': signal,
-            })
+        _enqueue_open_order_metadata(algo, new_ticket, signal, new_selected, target_right)
 
 
-def execute_close(algo, signal: StrategySignal):
-    pos_info = get_position_for_symbol(algo, signal.symbol)
+def execute_close(algo, signal: StrategySignal, existing_position: Optional[Dict] = None):
+    pos_info = existing_position or get_position_for_symbol(algo, signal.symbol)
     if not pos_info: return
     pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
     # For closing, use entry price as reference for limit order fallback

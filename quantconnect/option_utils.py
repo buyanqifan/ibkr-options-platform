@@ -194,7 +194,8 @@ def should_roll_position(
     stop_loss_pct: float,
     stop_loss_disabled: bool,
     roll_threshold_pct: float = 80,
-    min_dte_for_roll: int = 7
+    min_dte_for_roll: int = 7,
+    strategy_phase: str = "SP",
 ) -> Tuple[str, str]:
     """Determine if position should be rolled or closed.
     
@@ -234,7 +235,8 @@ def should_roll_position(
     #         return "CLOSE_PROFIT", f"Profit target: {pnl_pct:.0f}% captured (target: {profit_target_pct:.0f}%)"
     
     # PRIORITY 4: Stop loss (disabled by default for Wheel)
-    if not stop_loss_disabled and pnl_pct <= -stop_loss_pct:
+    # Strategy design: SP phase should not stop-loss; accept assignment in wheel cycle.
+    if strategy_phase != "SP" and not stop_loss_disabled and pnl_pct <= -stop_loss_pct:
         return "CLOSE_LOSS", f"Stop loss: {pnl_pct:.0f}% loss"
     
     return "HOLD", "Position within normal parameters"

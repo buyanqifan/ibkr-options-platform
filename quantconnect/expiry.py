@@ -5,6 +5,7 @@ No phase concept - QC handles assignment automatically, we just log and record.
 from datetime import datetime
 from option_utils import calculate_dte
 from execution import record_trade, execute_signal
+from signals import calculate_pnl_metrics
 from qc_portfolio import (
     get_option_positions, get_shares_held, get_cost_basis,
     get_position_metadata, remove_position_metadata, get_symbols_with_holdings
@@ -88,8 +89,10 @@ def check_expired_options(algo):
                 stock_pnl = (strike - cost_basis) * shares_sold if cost_basis > 0 else 0
                 algo.Log(f"Call assigned: -{shares_sold} {symbol} @ ${strike:.2f}, Stock P&L: ${stock_pnl:+.2f}")
         
-        # Get P&L from QC (already calculated by platform)
-        pnl = security.Holdings.UnrealizedProfit if hasattr(security, 'Holdings') else 0
+        # Prefer option-leg P&L derived from entry and settlement proxy price.
+        # This is more stable than UnrealizedProfit on delisted contracts.
+        settlement_price = security.Price if security.Price and security.Price > 0 else 0
+        pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], settlement_price, pos_info['quantity'])
         
         # Get metadata for ML learning
         metadata = get_position_metadata(algo, pos_id)
@@ -115,4 +118,5 @@ def check_expired_options(algo):
 
 
 def update_ml_models(algo):
-    if algo.ml_integration.should_retrain(): algo.Log("Retraining ML models...")
+    if algo.ml_integration.should_retrain():
+        algo.Log("Retraining ML models...")

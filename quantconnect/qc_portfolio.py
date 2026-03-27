@@ -192,8 +192,14 @@ def get_call_position_contracts(algo, symbol: str) -> int:
     return contracts
 
 
-def get_position_for_symbol(algo, symbol: str) -> Optional[Dict]:
-    """Get option position info for a specific symbol from QC Portfolio."""
+def get_position_for_symbol(algo, symbol: str, preferred_right: str = None) -> Optional[Dict]:
+    """Get option position info for a specific symbol from QC Portfolio.
+
+    If multiple option positions exist for the same underlying, prioritize:
+    1) preferred_right (if provided, "P" or "C")
+    2) nearest expiry
+    """
+    candidates = []
     for holding in algo.Portfolio.Values:
         if not holding.Invested:
             continue
@@ -203,7 +209,7 @@ def get_position_for_symbol(algo, symbol: str) -> Optional[Dict]:
                 right_str = 'P' if pos_symbol.ID.OptionRight == OptionRight.Put else 'C'
                 pos_id = f"{symbol}_{pos_symbol.ID.Date.strftime('%Y%m%d')}_{pos_symbol.ID.StrikePrice:.0f}_{right_str}"
                 metadata = getattr(algo, 'position_metadata', {}).get(pos_id, {})
-                return {
+                candidates.append({
                     'symbol': symbol,
                     'option_symbol': pos_symbol,
                     'right': right_str,
@@ -214,8 +220,15 @@ def get_position_for_symbol(algo, symbol: str) -> Optional[Dict]:
                     'delta_at_entry': metadata.get('delta_at_entry', 0),
                     'iv_at_entry': metadata.get('iv_at_entry', 0.25),
                     'strategy_phase': metadata.get('strategy_phase', 'SP'),
-                }
-    return None
+                })
+    if not candidates:
+        return None
+    if preferred_right in ("P", "C"):
+        filtered = [c for c in candidates if c["right"] == preferred_right]
+        if filtered:
+            candidates = filtered
+    candidates.sort(key=lambda p: p["expiry"])
+    return candidates[0]
 
 
 # ============ Metadata tracking (for data QC doesn't provide) ============

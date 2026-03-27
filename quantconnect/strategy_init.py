@@ -8,6 +8,41 @@ from ml_integration import MLOptimizationConfig
 MAG7_STOCKS = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
 
 
+def _get_param(algo, name, default=None):
+    """Read QC parameter with default fallback for empty string."""
+    value = algo.GetParameter(name)
+    if value is None or value == "":
+        return default
+    return value
+
+
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "on"):
+        return True
+    if text in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+
+def _as_int(value, default=0):
+    try:
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _as_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
 def init_dates(algo):
     start_date_param = algo.GetParameter("start_date")
     end_date_param = algo.GetParameter("end_date")
@@ -22,36 +57,42 @@ def init_dates(algo):
 
 
 def init_parameters(algo):
-    algo.initial_capital = float(algo.GetParameter("initial_capital", 100000))
+    algo.initial_capital = _as_float(_get_param(algo, "initial_capital", 100000), 100000.0)
     algo.SetCash(algo.initial_capital)
-    # max_positions from config is now a CEILING, actual value computed dynamically
-    algo.max_positions_ceiling = int(algo.GetParameter("max_positions", 10))
+    # Backward compatible: support both max_positions and max_positions_ceiling
+    max_pos_raw = _get_param(algo, "max_positions", None)
+    if max_pos_raw is None:
+        max_pos_raw = _get_param(algo, "max_positions_ceiling", 10)
+    algo.max_positions_ceiling = _as_int(max_pos_raw, 10)
     algo.max_positions = algo.max_positions_ceiling  # Will be recalculated dynamically
-    algo.profit_target_pct = float(algo.GetParameter("profit_target_pct", 50))
-    algo.stop_loss_pct = float(algo.GetParameter("stop_loss_pct", 999999))
-    algo.max_risk_per_trade = float(algo.GetParameter("max_risk_per_trade", 0.02))
-    algo.max_leverage = float(algo.GetParameter("max_leverage", 1.0))
+    algo.profit_target_pct = _as_float(_get_param(algo, "profit_target_pct", 50), 50.0)
+    algo.stop_loss_pct = _as_float(_get_param(algo, "stop_loss_pct", 999999), 999999.0)
+    algo.max_risk_per_trade = _as_float(_get_param(algo, "max_risk_per_trade", 0.02), 0.02)
+    algo.max_leverage = _as_float(_get_param(algo, "max_leverage", 1.0), 1.0)
     algo._profit_target_disabled = algo.profit_target_pct >= 999999
     algo._stop_loss_disabled = algo.stop_loss_pct >= 999999
-    algo.margin_buffer_pct = float(algo.GetParameter("margin_buffer_pct", 0.50))
-    algo.margin_rate_per_contract = float(algo.GetParameter("margin_rate_per_contract", 0.25))
-    algo.allow_sp_in_cc_phase = bool(algo.GetParameter("allow_sp_in_cc_phase", True))
-    algo.sp_in_cc_margin_threshold = float(algo.GetParameter("sp_in_cc_margin_threshold", 0.5))
-    algo.sp_in_cc_max_positions = int(algo.GetParameter("sp_in_cc_max_positions", 3))
-    algo.cc_optimization_enabled = bool(algo.GetParameter("cc_optimization_enabled", True))
-    algo.cc_min_delta_cost = float(algo.GetParameter("cc_min_delta_cost", 0.15))
-    algo.cc_cost_basis_threshold = float(algo.GetParameter("cc_cost_basis_threshold", 0.05))
-    algo.cc_min_strike_premium = float(algo.GetParameter("cc_min_strike_premium", 0.02))
+    algo.margin_buffer_pct = _as_float(_get_param(algo, "margin_buffer_pct", 0.50), 0.50)
+    algo.margin_rate_per_contract = _as_float(_get_param(algo, "margin_rate_per_contract", 0.25), 0.25)
+    algo.max_put_contracts_per_symbol = _as_int(_get_param(algo, "max_put_contracts_per_symbol", 6), 6)
+    algo.max_put_contracts_total = _as_int(_get_param(algo, "max_put_contracts_total", 20), 20)
+    algo.max_contracts_per_trade = _as_int(_get_param(algo, "max_contracts_per_trade", 5), 5)
+    algo.allow_sp_in_cc_phase = _as_bool(_get_param(algo, "allow_sp_in_cc_phase", True), True)
+    algo.sp_in_cc_margin_threshold = _as_float(_get_param(algo, "sp_in_cc_margin_threshold", 0.5), 0.5)
+    algo.sp_in_cc_max_positions = _as_int(_get_param(algo, "sp_in_cc_max_positions", 3), 3)
+    algo.cc_optimization_enabled = _as_bool(_get_param(algo, "cc_optimization_enabled", True), True)
+    algo.cc_min_delta_cost = _as_float(_get_param(algo, "cc_min_delta_cost", 0.15), 0.15)
+    algo.cc_cost_basis_threshold = _as_float(_get_param(algo, "cc_cost_basis_threshold", 0.05), 0.05)
+    algo.cc_min_strike_premium = _as_float(_get_param(algo, "cc_min_strike_premium", 0.02), 0.02)
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
-    algo.ml_enabled = bool(algo.GetParameter("ml_enabled", True))
-    algo.ml_exploration_rate = float(algo.GetParameter("ml_exploration_rate", 0.1))
-    algo.ml_learning_rate = float(algo.GetParameter("ml_learning_rate", 0.01))
-    algo.ml_adoption_rate = float(algo.GetParameter("ml_adoption_rate", 0.5))
-    algo.ml_min_confidence = float(algo.GetParameter("ml_min_confidence", 0.4))
-    algo.stock_pool = algo.GetParameter("stock_pool", ",".join(MAG7_STOCKS)).split(",")
+    algo.ml_enabled = _as_bool(_get_param(algo, "ml_enabled", True), True)
+    algo.ml_exploration_rate = _as_float(_get_param(algo, "ml_exploration_rate", 0.1), 0.1)
+    algo.ml_learning_rate = _as_float(_get_param(algo, "ml_learning_rate", 0.01), 0.01)
+    algo.ml_adoption_rate = _as_float(_get_param(algo, "ml_adoption_rate", 0.5), 0.5)
+    algo.ml_min_confidence = _as_float(_get_param(algo, "ml_min_confidence", 0.4), 0.4)
+    algo.stock_pool = str(_get_param(algo, "stock_pool", ",".join(MAG7_STOCKS))).split(",")
     algo.weights = {"iv_rank": 0.35, "technical": 0.25, "momentum": 0.20, "pe_score": 0.20}
     # Target margin utilization for position sizing (60% of capital)
-    algo.target_margin_utilization = float(algo.GetParameter("target_margin_utilization", 0.60))
+    algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.60), 0.60)
 
 
 def init_ml(algo):
@@ -83,9 +124,29 @@ def init_state(algo):
     # Use QC Portfolio for position tracking (no manual dict needed)
     # position_metadata tracks entry Greeks (QC doesn't have this)
     init_position_tracking(algo)
+    algo.pending_order_metadata = {}
     algo.trade_history, algo.ml_signals_history = [], []
     algo.total_trades, algo.winning_trades, algo.total_pnl = 0, 0, 0.0
     algo.SetWarmUp(60)
+
+
+def log_effective_parameters(algo):
+    """Log effective runtime parameters for QC backtest verification."""
+    algo.Log(
+        "EFFECTIVE_PARAMS: "
+        f"initial_capital={algo.initial_capital}, "
+        f"max_positions_ceiling={algo.max_positions_ceiling}, "
+        f"target_margin_utilization={algo.target_margin_utilization}, "
+        f"margin_buffer_pct={algo.margin_buffer_pct}, "
+        f"max_leverage={algo.max_leverage}, "
+        f"max_put_contracts_per_symbol={algo.max_put_contracts_per_symbol}, "
+        f"max_put_contracts_total={algo.max_put_contracts_total}, "
+        f"max_contracts_per_trade={algo.max_contracts_per_trade}, "
+        f"stop_loss_pct={algo.stop_loss_pct}, "
+        f"ml_enabled={algo.ml_enabled}, "
+        f"ml_min_confidence={algo.ml_min_confidence}, "
+        f"stock_pool={algo.stock_pool}"
+    )
 
 
 def schedule_events(algo):

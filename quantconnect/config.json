@@ -14,6 +14,9 @@
         "margin_buffer_pct": 0.50,
         "margin_rate_per_contract": 0.25,
         "target_margin_utilization": 0.60,
+        "max_put_contracts_per_symbol": 6,
+        "max_put_contracts_total": 20,
+        "max_contracts_per_trade": 5,
         
         "ml_enabled": true,
         "ml_exploration_rate": 0.1,
