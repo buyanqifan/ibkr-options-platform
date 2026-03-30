@@ -124,6 +124,10 @@ def init_parameters(algo):
         0.05,
         1.5,
     )
+    algo.stock_inventory_cap_enabled = _as_bool(_get_param(algo, "stock_inventory_cap_enabled", True), True)
+    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.20), 0.20), 0.05, 1.0)
+    algo.stock_inventory_cap_floor = _clamp(_as_float(_get_param(algo, "stock_inventory_cap_floor", 0.50), 0.50), 0.10, 1.0)
+    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.90), 0.90), 0.50, 1.20)
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
     algo.ml_enabled = _as_bool(_get_param(algo, "ml_enabled", True), True)
     algo.ml_exploration_rate = _as_float(_get_param(algo, "ml_exploration_rate", 0.1), 0.1)
@@ -194,6 +198,9 @@ def log_effective_parameters(algo):
         f"dynamic_symbol_risk_enabled={algo.dynamic_symbol_risk_enabled}, "
         f"symbol_state_cap_floor={algo.symbol_state_cap_floor}, "
         f"symbol_assignment_base_cap={algo.symbol_assignment_base_cap}, "
+        f"stock_inventory_cap_enabled={algo.stock_inventory_cap_enabled}, "
+        f"stock_inventory_base_cap={algo.stock_inventory_base_cap}, "
+        f"stock_inventory_block_threshold={algo.stock_inventory_block_threshold}, "
         f"repair_call_delta={algo.repair_call_delta}, "
         f"stop_loss_pct={algo.stop_loss_pct}, "
         f"ml_enabled={algo.ml_enabled}, "

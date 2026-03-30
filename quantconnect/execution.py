@@ -177,6 +177,18 @@ def _calculate_symbol_state_risk_multiplier(
     }
 
 
+def _calculate_stock_inventory_cap(algo, portfolio_value: float, symbol_state_multiplier: float) -> float:
+    """Dynamic cap for stock inventory held after assignments."""
+    if not getattr(algo, "stock_inventory_cap_enabled", True):
+        return portfolio_value
+    base_cap = portfolio_value * getattr(algo, "stock_inventory_base_cap", 0.20)
+    dynamic_multiplier = max(
+        getattr(algo, "stock_inventory_cap_floor", 0.50),
+        min(1.0, symbol_state_multiplier),
+    )
+    return max(0.0, base_cap * dynamic_multiplier)
+
+
 def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
     """Safely execute option order with data readiness check.
     
@@ -403,11 +415,14 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     per_symbol_notional_cap = base_symbol_notional_cap * symbol_state_multiplier
     total_notional_cap = portfolio_value * (0.70 + 0.90 * aggr)        # 0.97x ~ 2.50x PV
     candidate_notional = strike * 100
+    stock_inventory_cap = _calculate_stock_inventory_cap(algo, portfolio_value, symbol_state_multiplier)
 
     remaining_symbol_notional = max(0.0, per_symbol_notional_cap - (symbol_put_notional + symbol_stock_notional))
     remaining_total_notional = max(0.0, total_notional_cap - (total_put_notional + stock_value))
+    remaining_stock_inventory = max(0.0, stock_inventory_cap - symbol_stock_notional)
     max_by_symbol_notional = int(remaining_symbol_notional / candidate_notional) if candidate_notional > 0 else 0
     max_by_total_notional = int(remaining_total_notional / candidate_notional) if candidate_notional > 0 else 0
+    max_by_stock_inventory = int(remaining_stock_inventory / candidate_notional) if candidate_notional > 0 else 0
     
     quantity = min(
         max_by_margin,
@@ -419,6 +434,7 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
         max_by_trade_cap,
         max_by_symbol_notional,
         max_by_total_notional,
+        max_by_stock_inventory,
     )
     
     # Log if position is limited due to stock holdings or margin
@@ -428,7 +444,8 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
         algo.Log(
             f"PUT_BLOCK:{symbol} margin={max_by_margin} budget={max_by_budget} lev={max_by_leverage} "
             f"symcap={max_by_symbol_contracts}/{symbol_cap} totalcap={max_by_total_contracts} "
-            f"symnot={max_by_symbol_notional} totalnot={max_by_total_notional} slots={max_by_limit} "
+            f"symnot={max_by_symbol_notional} totalnot={max_by_total_notional} stockcap={max_by_stock_inventory} "
+            f"slots={max_by_limit} "
             f"state={symbol_state_multiplier:.2f} vol={symbol_state['vol_ratio']:.2f} "
             f"dd={symbol_state['drawdown']:.2f} mom={symbol_state['momentum_20d']:.2f} "
             f"exp={symbol_state['exposure_ratio']:.2f}"
