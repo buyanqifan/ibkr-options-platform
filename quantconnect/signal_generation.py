@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from ml_integration import StrategySignal
 from signals import get_cc_optimization_params
 from scoring import score_single_stock
+from helpers import is_symbol_on_cooldown
 from qc_portfolio import (
     get_symbols_with_holdings, get_cost_basis,
     get_position_for_symbol, get_option_position_count, get_call_position_contracts,
@@ -64,6 +65,8 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
     # Generate SELL_PUT for ALL symbols in pool (allowed anytime)
     # This allows: SP while holding stock, SP while having other Puts
     for symbol in algo.stock_pool:
+        if is_symbol_on_cooldown(algo, symbol):
+            continue
         sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
         if sig: signals.append(sig)
     
@@ -78,8 +81,10 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     bars = algo.price_history.get(symbol, [])
     if len(bars) < 20: return None
     cost_basis = get_cost_basis(algo, symbol)
-    current_position = get_current_position(algo, symbol)
+    preferred_right = "C" if strategy_phase == "CC" else "P"
+    current_position = get_position_for_symbol(algo, symbol, preferred_right=preferred_right)
     traditional_delta, cc_min_strike = 0.30, None
+    repair_mode = False
     if strategy_phase == "CC" and algo.cc_optimization_enabled and cost_basis > 0:
         adj_delta, cc_min_strike, log_msg = get_cc_optimization_params(cost_basis, underlying_price,
             algo.cc_optimization_enabled, algo.cc_min_delta_cost, algo.cc_cost_basis_threshold, algo.cc_min_strike_premium)
@@ -87,6 +92,19 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
         traditional_delta = adj_delta
         if log_msg:
             algo.Log(log_msg)
+        drawdown_vs_cost = (cost_basis - underlying_price) / cost_basis if cost_basis > 0 else 0.0
+        if drawdown_vs_cost >= algo.repair_call_threshold_pct:
+            repair_mode = True
+            traditional_delta = max(traditional_delta, algo.repair_call_delta)
+            repair_min_strike = max(underlying_price * 1.01, cost_basis * (1 - algo.repair_call_max_discount_pct))
+            if cc_min_strike is None:
+                cc_min_strike = repair_min_strike
+            else:
+                cc_min_strike = max(underlying_price * 1.01, min(cc_min_strike, repair_min_strike))
+            algo.Log(
+                f"CC_REPAIR:{symbol}:drawdown={drawdown_vs_cost:.1%}:"
+                f"delta>={traditional_delta:.2f}:minstrike={cc_min_strike:.2f}"
+            )
     signal = algo.ml_integration.generate_signal(symbol=symbol, current_price=underlying_price, cost_basis=cost_basis,
         bars=bars, strategy_phase=strategy_phase, portfolio_state=portfolio_state, current_position=current_position)
     if signal and algo.ml_enabled:
@@ -97,6 +115,10 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
             adaptive_delta, _ = algo.adaptive_strategy.select_call_delta(traditional_delta, signal.delta, signal.delta_confidence, signal.reasoning)
         signal.delta = adaptive_delta
     if signal:
+        if repair_mode and strategy_phase == "CC":
+            signal.delta = max(signal.delta, algo.repair_call_delta)
+            signal.dte_min = max(algo.repair_call_dte_min, min(signal.dte_min, algo.repair_call_dte_max))
+            signal.dte_max = min(max(signal.dte_max, signal.dte_min), algo.repair_call_dte_max)
         score = score_single_stock(symbol, bars, underlying_price, algo.weights)
         signal.ml_score_adjustment = (score.total_score - 50) / 100
         if cc_min_strike is not None: signal.min_strike = cc_min_strike

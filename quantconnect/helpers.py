@@ -2,6 +2,8 @@
 Helper classes for BinbinGod Strategy.
 """
 
+from datetime import timedelta
+import math
 from typing import Dict, List
 from dataclasses import dataclass, field
 
@@ -75,3 +77,35 @@ class StockHolding:
             primary = max(self.holdings.items(), key=lambda x: x[1]["shares"])
             self.symbol = primary[0]
             self.cost_basis = primary[1]["cost_basis"]
+
+
+def set_symbol_cooldown(algo, symbol: str, days: int, reason: str = ""):
+    """Block new short-put entries for a symbol until a future date."""
+    if days <= 0:
+        return
+    if not hasattr(algo, "symbol_cooldowns"):
+        algo.symbol_cooldowns = {}
+    current_end = algo.symbol_cooldowns.get(symbol)
+    new_end = algo.Time + timedelta(days=days)
+    if current_end is None or new_end > current_end:
+        algo.symbol_cooldowns[symbol] = new_end
+        msg = f"COOLDOWN_SET:{symbol}:{days}d"
+        if reason:
+            msg += f":{reason}"
+        algo.Log(msg)
+
+
+def get_symbol_cooldown_days_remaining(algo, symbol: str) -> int:
+    """Return remaining cooldown days for a symbol."""
+    expiry = getattr(algo, "symbol_cooldowns", {}).get(symbol)
+    if not expiry:
+        return 0
+    remaining_seconds = (expiry - algo.Time).total_seconds()
+    if remaining_seconds <= 0:
+        return 0
+    return max(0, int(math.ceil(remaining_seconds / 86400)))
+
+
+def is_symbol_on_cooldown(algo, symbol: str) -> bool:
+    """Check whether a symbol is currently blocked from new short puts."""
+    return get_symbol_cooldown_days_remaining(algo, symbol) > 0

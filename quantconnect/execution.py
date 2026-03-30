@@ -1,10 +1,10 @@
 """Trade execution functions for BinbinGod Strategy.
 # Updated: 2026-03-25 - Fix import cache issue
 """
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from AlgorithmImports import OptionRight, OrderStatus, Resolution, SecurityType
 from ml_integration import StrategySignal
-from option_utils import calculate_dte
+from option_utils import calculate_dte, calculate_historical_vol
 from signals import calculate_pnl_metrics
 from option_pricing import BlackScholes
 from qc_portfolio import (
@@ -69,6 +69,112 @@ def bs_put_price(S, K, T, sigma):
 
 def bs_call_price(S, K, T, sigma):
     return BlackScholes.call_price(S, K, T, RISK_FREE_RATE, sigma)
+
+
+def calculate_volatility_weighted_symbol_cap(algo, symbol: str) -> int:
+    """Adjust per-symbol put cap so high-vol names consume fewer slots.
+
+    This cap is one-way: it can reduce exposure to volatile names, but it
+    should never increase a symbol above the base configured cap.
+    """
+    base_cap = max(1, int(getattr(algo, "max_put_contracts_per_symbol", 1)))
+    lookback = max(5, int(getattr(algo, "volatility_lookback", 20)))
+
+    symbol_bars = algo.price_history.get(symbol, [])
+    symbol_vol = calculate_historical_vol(symbol_bars, window=lookback)
+    if symbol_vol <= 0:
+        return base_cap
+
+    pool_vols = []
+    for pool_symbol in algo.stock_pool:
+        bars = algo.price_history.get(pool_symbol, [])
+        if len(bars) >= lookback + 1:
+            vol = calculate_historical_vol(bars, window=lookback)
+            if vol > 0:
+                pool_vols.append(vol)
+
+    if not pool_vols:
+        return base_cap
+
+    avg_pool_vol = sum(pool_vols) / len(pool_vols)
+    raw_multiplier = avg_pool_vol / symbol_vol if symbol_vol > 0 else 1.0
+    multiplier = max(
+        getattr(algo, "volatility_cap_floor", 0.35),
+        min(raw_multiplier, min(1.0, getattr(algo, "volatility_cap_ceiling", 1.0))),
+    )
+    return max(1, int(round(base_cap * multiplier)))
+
+
+def _calculate_symbol_state_risk_multiplier(
+    algo,
+    symbol: str,
+    underlying_price: float,
+    symbol_put_notional: float,
+    symbol_stock_notional: float,
+    portfolio_value: float,
+) -> Tuple[float, Dict[str, float]]:
+    """Compute a one-way risk discount from symbol state and existing exposure."""
+    if not getattr(algo, "dynamic_symbol_risk_enabled", True):
+        return 1.0, {
+            "vol_ratio": 1.0,
+            "drawdown": 0.0,
+            "momentum_20d": 0.0,
+            "exposure_ratio": 0.0,
+        }
+
+    lookback = max(5, int(getattr(algo, "volatility_lookback", 20)))
+    bars = algo.price_history.get(symbol, [])
+
+    symbol_vol = calculate_historical_vol(bars, window=lookback) if len(bars) >= lookback + 1 else 0.25
+    pool_vols = []
+    for pool_symbol in algo.stock_pool:
+        pool_bars = algo.price_history.get(pool_symbol, [])
+        if len(pool_bars) >= lookback + 1:
+            pool_vols.append(calculate_historical_vol(pool_bars, window=lookback))
+    avg_pool_vol = (sum(pool_vols) / len(pool_vols)) if pool_vols else max(symbol_vol, 0.25)
+    vol_ratio = symbol_vol / avg_pool_vol if avg_pool_vol > 0 else 1.0
+
+    closes = [float(b.get("close", 0)) for b in bars if b.get("close", 0)]
+    momentum_20d = 0.0
+    if len(closes) >= 20 and closes[-20] > 0:
+        momentum_20d = underlying_price / closes[-20] - 1.0
+
+    dd_lookback = max(20, int(getattr(algo, "symbol_drawdown_lookback", 60)))
+    recent_closes = closes[-dd_lookback:] if closes else []
+    peak_price = max(recent_closes) if recent_closes else max(underlying_price, 1.0)
+    drawdown = max(0.0, (peak_price - underlying_price) / peak_price) if peak_price > 0 else 0.0
+
+    assignment_exposure = symbol_put_notional + symbol_stock_notional
+    exposure_ratio = assignment_exposure / portfolio_value if portfolio_value > 0 else 0.0
+
+    volatility_penalty = max(
+        0.35,
+        1.0 - max(0.0, vol_ratio - 1.0) * getattr(algo, "symbol_volatility_sensitivity", 0.75),
+    )
+    downtrend_penalty = max(
+        0.35,
+        1.0 - max(0.0, -momentum_20d) * getattr(algo, "symbol_downtrend_sensitivity", 1.50),
+    )
+    drawdown_penalty = max(
+        0.25,
+        1.0 - drawdown * getattr(algo, "symbol_drawdown_sensitivity", 1.20),
+    )
+    exposure_penalty = max(
+        0.20,
+        1.0 - exposure_ratio * getattr(algo, "symbol_exposure_sensitivity", 1.25),
+    )
+
+    raw_multiplier = volatility_penalty * downtrend_penalty * drawdown_penalty * exposure_penalty
+    multiplier = max(
+        getattr(algo, "symbol_state_cap_floor", 0.20),
+        min(raw_multiplier, getattr(algo, "symbol_state_cap_ceiling", 1.0)),
+    )
+    return multiplier, {
+        "vol_ratio": vol_ratio,
+        "drawdown": drawdown,
+        "momentum_20d": momentum_20d,
+        "exposure_ratio": exposure_ratio,
+    }
 
 
 def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
@@ -260,9 +366,20 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     # Include current stock exposure in notional-based caps
     symbol_stock_notional = get_shares_held(algo, symbol) * max(underlying_price, 0)
 
-    max_by_symbol_contracts = max(0, algo.max_put_contracts_per_symbol - symbol_put_contracts)
+    symbol_cap = calculate_volatility_weighted_symbol_cap(algo, symbol)
+    portfolio_value = max(algo.Portfolio.TotalPortfolioValue, 0.0)
+    symbol_state_multiplier, symbol_state = _calculate_symbol_state_risk_multiplier(
+        algo,
+        symbol,
+        underlying_price,
+        symbol_put_notional,
+        symbol_stock_notional,
+        portfolio_value,
+    )
+    symbol_cap = max(1, int(symbol_cap * symbol_state_multiplier))
+    max_by_symbol_contracts = max(0, symbol_cap - symbol_put_contracts)
     max_by_total_contracts = max(0, algo.max_put_contracts_total - total_put_contracts)
-    max_by_trade_cap = max(0, algo.max_contracts_per_trade)
+    max_by_trade_cap = max(0, min(algo.max_contracts_per_trade, symbol_cap))
 
     # === Calculate quantity limits ===
     max_by_margin = int(usable_margin / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
@@ -270,7 +387,6 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     
     # === Global margin budget: don't use more than target utilization ===
     total_margin_used = algo.Portfolio.TotalMarginUsed
-    portfolio_value = max(algo.Portfolio.TotalPortfolioValue, 0.0)
     margin_budget = portfolio_value * algo.target_margin_utilization
     remaining_budget = max(0, margin_budget - total_margin_used)
     max_by_budget = max(0, int(remaining_budget / estimated_margin_per_contract)) if estimated_margin_per_contract > 0 else 0
@@ -283,7 +399,8 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     # === Notional assignment caps (dynamic by strike and aggressiveness) ===
     # These caps keep worst-case assignment exposure proportional to account size.
     aggr = getattr(algo, "position_aggressiveness", 1.0)
-    per_symbol_notional_cap = portfolio_value * (0.25 + 0.35 * aggr)   # 0.355x ~ 0.95x PV
+    base_symbol_notional_cap = portfolio_value * getattr(algo, "symbol_assignment_base_cap", (0.25 + 0.35 * aggr))
+    per_symbol_notional_cap = base_symbol_notional_cap * symbol_state_multiplier
     total_notional_cap = portfolio_value * (0.70 + 0.90 * aggr)        # 0.97x ~ 2.50x PV
     candidate_notional = strike * 100
 
@@ -310,8 +427,11 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     if quantity <= 0:
         algo.Log(
             f"PUT_BLOCK:{symbol} margin={max_by_margin} budget={max_by_budget} lev={max_by_leverage} "
-            f"symcap={max_by_symbol_contracts} totalcap={max_by_total_contracts} "
-            f"symnot={max_by_symbol_notional} totalnot={max_by_total_notional} slots={max_by_limit}"
+            f"symcap={max_by_symbol_contracts}/{symbol_cap} totalcap={max_by_total_contracts} "
+            f"symnot={max_by_symbol_notional} totalnot={max_by_total_notional} slots={max_by_limit} "
+            f"state={symbol_state_multiplier:.2f} vol={symbol_state['vol_ratio']:.2f} "
+            f"dd={symbol_state['drawdown']:.2f} mom={symbol_state['momentum_20d']:.2f} "
+            f"exp={symbol_state['exposure_ratio']:.2f}"
         )
     
     return max(0, quantity)

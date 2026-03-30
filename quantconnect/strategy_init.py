@@ -91,6 +91,39 @@ def init_parameters(algo):
     algo.cc_min_delta_cost = _as_float(_get_param(algo, "cc_min_delta_cost", 0.15), 0.15)
     algo.cc_cost_basis_threshold = _as_float(_get_param(algo, "cc_cost_basis_threshold", 0.05), 0.05)
     algo.cc_min_strike_premium = _as_float(_get_param(algo, "cc_min_strike_premium", 0.02), 0.02)
+    algo.repair_call_threshold_pct = _as_float(_get_param(algo, "repair_call_threshold_pct", 0.08), 0.08)
+    algo.repair_call_delta = _clamp(_as_float(_get_param(algo, "repair_call_delta", 0.35), 0.35), 0.20, 0.60)
+    algo.repair_call_dte_min = _as_int(_get_param(algo, "repair_call_dte_min", 7), 7)
+    algo.repair_call_dte_max = _as_int(_get_param(algo, "repair_call_dte_max", 21), 21)
+    algo.repair_call_max_discount_pct = _as_float(_get_param(algo, "repair_call_max_discount_pct", 0.08), 0.08)
+    algo.defensive_put_roll_enabled = _as_bool(_get_param(algo, "defensive_put_roll_enabled", True), True)
+    algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 200), 200.0)
+    algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.10), 0.10)
+    algo.defensive_put_roll_min_dte = _as_int(_get_param(algo, "defensive_put_roll_min_dte", 7), 7)
+    algo.defensive_put_roll_max_dte = _as_int(_get_param(algo, "defensive_put_roll_max_dte", 14), 14)
+    algo.defensive_put_roll_dte_min = _as_int(_get_param(algo, "defensive_put_roll_dte_min", 21), 21)
+    algo.defensive_put_roll_dte_max = _as_int(_get_param(algo, "defensive_put_roll_dte_max", 60), 60)
+    algo.defensive_put_roll_delta = _clamp(_as_float(_get_param(algo, "defensive_put_roll_delta", 0.20), 0.20), 0.10, 0.40)
+    algo.assignment_cooldown_days = _as_int(_get_param(algo, "assignment_cooldown_days", 20), 20)
+    algo.large_loss_cooldown_days = _as_int(_get_param(algo, "large_loss_cooldown_days", 15), 15)
+    algo.large_loss_cooldown_pct = _as_float(_get_param(algo, "large_loss_cooldown_pct", 100), 100.0)
+    algo.volatility_cap_floor = _clamp(_as_float(_get_param(algo, "volatility_cap_floor", 0.35), 0.35), 0.10, 1.0)
+    algo.volatility_cap_ceiling = _clamp(_as_float(_get_param(algo, "volatility_cap_ceiling", 1.0), 1.0), 1.0, 3.0)
+    algo.volatility_lookback = _as_int(_get_param(algo, "volatility_lookback", 20), 20)
+    algo.dynamic_symbol_risk_enabled = _as_bool(_get_param(algo, "dynamic_symbol_risk_enabled", True), True)
+    algo.symbol_state_cap_floor = _clamp(_as_float(_get_param(algo, "symbol_state_cap_floor", 0.20), 0.20), 0.05, 1.0)
+    algo.symbol_state_cap_ceiling = _clamp(_as_float(_get_param(algo, "symbol_state_cap_ceiling", 1.0), 1.0), 0.50, 1.0)
+    algo.symbol_drawdown_lookback = _as_int(_get_param(algo, "symbol_drawdown_lookback", 60), 60)
+    algo.symbol_drawdown_sensitivity = _as_float(_get_param(algo, "symbol_drawdown_sensitivity", 1.20), 1.20)
+    algo.symbol_downtrend_sensitivity = _as_float(_get_param(algo, "symbol_downtrend_sensitivity", 1.50), 1.50)
+    algo.symbol_volatility_sensitivity = _as_float(_get_param(algo, "symbol_volatility_sensitivity", 0.75), 0.75)
+    algo.symbol_exposure_sensitivity = _as_float(_get_param(algo, "symbol_exposure_sensitivity", 1.25), 1.25)
+    default_symbol_assignment_cap = 0.25 + 0.35 * algo.position_aggressiveness
+    algo.symbol_assignment_base_cap = _clamp(
+        _as_float(_get_param(algo, "symbol_assignment_base_cap", default_symbol_assignment_cap), default_symbol_assignment_cap),
+        0.05,
+        1.5,
+    )
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
     algo.ml_enabled = _as_bool(_get_param(algo, "ml_enabled", True), True)
     algo.ml_exploration_rate = _as_float(_get_param(algo, "ml_exploration_rate", 0.1), 0.1)
@@ -133,6 +166,7 @@ def init_state(algo):
     # position_metadata tracks entry Greeks (QC doesn't have this)
     init_position_tracking(algo)
     algo.pending_order_metadata = {}
+    algo.symbol_cooldowns = {}
     algo.trade_history, algo.ml_signals_history = [], []
     algo.total_trades, algo.winning_trades, algo.total_pnl = 0, 0, 0.0
     algo.SetWarmUp(60)
@@ -151,6 +185,16 @@ def log_effective_parameters(algo):
         f"max_put_contracts_total={algo.max_put_contracts_total}, "
         f"max_contracts_per_trade={algo.max_contracts_per_trade}, "
         f"position_aggressiveness={algo.position_aggressiveness}, "
+        f"defensive_put_roll_enabled={algo.defensive_put_roll_enabled}, "
+        f"defensive_put_roll_loss_pct={algo.defensive_put_roll_loss_pct}, "
+        f"defensive_put_roll_itm_buffer_pct={algo.defensive_put_roll_itm_buffer_pct}, "
+        f"defensive_put_roll_max_dte={algo.defensive_put_roll_max_dte}, "
+        f"assignment_cooldown_days={algo.assignment_cooldown_days}, "
+        f"large_loss_cooldown_days={algo.large_loss_cooldown_days}, "
+        f"dynamic_symbol_risk_enabled={algo.dynamic_symbol_risk_enabled}, "
+        f"symbol_state_cap_floor={algo.symbol_state_cap_floor}, "
+        f"symbol_assignment_base_cap={algo.symbol_assignment_base_cap}, "
+        f"repair_call_delta={algo.repair_call_delta}, "
         f"stop_loss_pct={algo.stop_loss_pct}, "
         f"ml_enabled={algo.ml_enabled}, "
         f"ml_min_confidence={algo.ml_min_confidence}, "

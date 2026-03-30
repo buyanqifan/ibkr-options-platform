@@ -12,6 +12,7 @@ from qc_portfolio import (
 )
 from signal_generation import generate_signal_for_symbol, get_portfolio_state
 from option_selector import find_option_by_greeks
+from helpers import set_symbol_cooldown
 
 
 def try_sell_cc_immediately(algo, symbol):
@@ -75,6 +76,7 @@ def check_expired_options(algo):
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
                 algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f}")
+                set_symbol_cooldown(algo, symbol, algo.assignment_cooldown_days, "put_assignment")
                 
                 # CRITICAL: Immediately try to sell CC to protect stock from margin call
                 try_sell_cc_immediately(algo, symbol)

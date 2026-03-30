@@ -2,9 +2,10 @@
 from datetime import datetime
 from AlgorithmImports import OptionRight
 from ml_integration import StrategySignal
-from option_utils import should_roll_position, calculate_dte
+from option_utils import should_roll_position, calculate_dte, should_defensively_roll_short_put
 from signals import build_position_data, calculate_pnl_metrics
 from execution import make_signal, execute_roll, execute_close
+from helpers import set_symbol_cooldown
 from qc_portfolio import get_option_positions
 
 
@@ -21,14 +22,46 @@ def check_position_management(algo, execute_signal_func, find_option_func):
         pnl, pnl_pct = calculate_pnl_metrics(entry_price, current_price, pos_info['quantity'])
         premium_captured_pct = ((entry_price - current_price) / entry_price * 100) if entry_price > 0 else 0
         dte = calculate_dte(pos_info['expiry'], algo.Time)
+        equity = algo.equities.get(pos_info['symbol'])
+        underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
         # Only log positions with issues (losing or near expiry)
         if premium_captured_pct < 0 or dte <= 7:
             algo.Log(f"POS: {pos_info['symbol']} {pos_info['right']} cap={premium_captured_pct:.0f}% DTE={dte}")
+
+        if pos_info.get("right") == "P" and algo.defensive_put_roll_enabled:
+            should_def_roll, def_reason = should_defensively_roll_short_put(
+                underlying_price=underlying_price,
+                strike=pos_info['strike'],
+                dte=dte,
+                pnl_pct=pnl_pct,
+                min_dte=algo.defensive_put_roll_min_dte,
+                max_dte=algo.defensive_put_roll_max_dte,
+                itm_buffer_pct=algo.defensive_put_roll_itm_buffer_pct,
+                max_loss_pct=algo.defensive_put_roll_loss_pct,
+            )
+            if should_def_roll:
+                target_delta = abs(pos_info['delta_at_entry']) if pos_info.get('delta_at_entry', 0) > 0 else 0.30
+                target_delta = min(target_delta, algo.defensive_put_roll_delta)
+                signal = make_signal(
+                    pos_info['symbol'], "ROLL",
+                    delta=target_delta,
+                    dte_min=algo.defensive_put_roll_dte_min,
+                    dte_max=max(algo.defensive_put_roll_dte_min, algo.defensive_put_roll_dte_max),
+                    num_contracts=abs(pos_info['quantity']),
+                    confidence=0.95,
+                    reasoning=def_reason,
+                )
+                set_symbol_cooldown(
+                    algo,
+                    pos_info['symbol'],
+                    algo.large_loss_cooldown_days,
+                    "put_defensive_roll",
+                )
+                execute_roll(algo, signal, find_option_func, existing_position=pos_info)
+                continue
         
         if algo.ml_enabled and hasattr(algo.ml_integration, 'roll_optimizer'):
             position_data = build_position_data(pos_info, current_price, pnl_pct, dte)
-            equity = algo.equities.get(pos_info['symbol'])
-            underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
             market_data = {
                 'price': underlying_price,
                 'iv': 0.25,
@@ -41,11 +74,15 @@ def check_position_management(algo, execute_signal_func, find_option_func):
                     current_date=algo.Time.strftime('%Y-%m-%d'), min_confidence=algo.ml_min_confidence)
                 
                 # SP policy: short-put positions should not use CLOSE_EARLY/ROLL_OUT.
-                if pos_info.get("right") == "P" and roll_rec.action in ["CLOSE_EARLY", "ROLL_OUT"]:
+                if pos_info.get("right") == "P" and roll_rec.action == "CLOSE_EARLY":
+                    should_roll = False
+                elif pos_info.get("right") == "P" and roll_rec.action == "ROLL_OUT" and not algo.defensive_put_roll_enabled:
                     should_roll = False
 
                 if should_roll and roll_rec.action in ["ROLL_FORWARD", "ROLL_OUT", "CLOSE_EARLY"]:
                     algo.Log(f"ML triggered action: {roll_rec.action} - {roll_rec.reasoning}")
+                    if pos_info.get("right") == "P" and roll_rec.action == "ROLL_OUT":
+                        set_symbol_cooldown(algo, pos_info['symbol'], algo.large_loss_cooldown_days, "ml_put_roll")
                     handle_roll_action(algo, roll_rec, pos_info, pos_id, find_option_func)
                     continue
             except Exception as e:
@@ -58,11 +95,15 @@ def check_position_management(algo, execute_signal_func, find_option_func):
             strategy_phase=strategy_phase)
         
         if action == "ROLL":
+            if pos_info.get("right") == "P" and pnl_pct <= -algo.large_loss_cooldown_pct:
+                set_symbol_cooldown(algo, pos_info['symbol'], algo.large_loss_cooldown_days, "put_loss_roll")
             signal = make_signal(pos_info['symbol'], "ROLL", delta=abs(pos_info['delta_at_entry']),
                 dte_min=30, dte_max=45, num_contracts=abs(pos_info['quantity']), confidence=0.8, reasoning=reasoning)
             execute_roll(algo, signal, find_option_func, existing_position=pos_info)
         elif action.startswith("CLOSE"):
             algo.Log(f"CLOSE: {reasoning}")
+            if pos_info.get("right") == "P" and pnl_pct <= -algo.large_loss_cooldown_pct:
+                set_symbol_cooldown(algo, pos_info['symbol'], algo.large_loss_cooldown_days, "put_loss_close")
             signal = make_signal(pos_info['symbol'], "CLOSE", dte_min=0, dte_max=0, num_contracts=0, confidence=0.9, reasoning=reasoning)
             execute_close(algo, signal, existing_position=pos_info)
 

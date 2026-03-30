@@ -242,6 +242,32 @@ def should_roll_position(
     return "HOLD", "Position within normal parameters"
 
 
+def should_defensively_roll_short_put(
+    underlying_price: float,
+    strike: float,
+    dte: int,
+    pnl_pct: float,
+    min_dte: int,
+    max_dte: int,
+    itm_buffer_pct: float,
+    max_loss_pct: float,
+) -> Tuple[bool, str]:
+    """Determine whether a short put should be rolled defensively."""
+    if underlying_price <= 0 or strike <= 0 or dte < min_dte:
+        return False, ""
+    if max_dte > 0 and dte > max_dte:
+        return False, ""
+
+    itm_pct = max(0.0, (strike - underlying_price) / strike)
+    if itm_pct >= itm_buffer_pct:
+        return True, f"Defensive roll: underlying {itm_pct:.1%} below strike with {dte} DTE"
+
+    if pnl_pct <= -max_loss_pct:
+        return True, f"Defensive roll: option loss {pnl_pct:.0f}% exceeds {max_loss_pct:.0f}%"
+
+    return False, ""
+
+
 def calculate_dte(expiry: Any, current_time: datetime) -> int:
     """Calculate days to expiry.
     
