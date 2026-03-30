@@ -683,6 +683,9 @@ def run_binbin_backtest(
         "cc_min_delta_cost": 0.15,
         "cc_cost_basis_threshold": 0.05,
         "cc_min_strike_premium": 0.02,
+        "parity_mode": "none",
+        "contract_universe_mode": "legacy_theoretical",
+        "ml_confidence_gate": None,
     }
     
     try:
@@ -951,4 +954,3 @@ def export_binbin_backtest_result(n_clicks, result, params):
         filename=filename,
         mime_type="application/json",
     )
-

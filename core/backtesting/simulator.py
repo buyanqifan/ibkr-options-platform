@@ -456,5 +456,74 @@ class TradeSimulator:
         self.open_positions = remaining
         return closed
 
+    def check_position_management(
+        self,
+        current_date: str,
+        price_lookup: dict[str, float],
+        iv: float,
+        profit_target_pct: float,
+        stop_loss_pct: float,
+    ) -> tuple[list[TradeRecord], list[OptionPosition]]:
+        """Check only proactive close/roll rules, leaving expiry for a later phase."""
+        closed: list[TradeRecord] = []
+        remaining: list[OptionPosition] = []
+        for pos in self.open_positions:
+            symbol_price = price_lookup.get(pos.symbol, pos.underlying_entry)
+            trade = self.check_exits_for_position(
+                pos=pos,
+                current_date=current_date,
+                underlying_price=symbol_price,
+                iv=iv,
+                profit_target_pct=profit_target_pct,
+                stop_loss_pct=stop_loss_pct,
+                min_dte=-999,
+            )
+            if trade and trade.exit_reason not in ("EXPIRY", "ASSIGNMENT"):
+                closed.append(trade)
+            else:
+                if trade and trade in self.closed_trades:
+                    self.closed_trades.remove(trade)
+                remaining.append(pos)
+        return closed, remaining
+
+    def check_expiries(
+        self,
+        current_date: str,
+        price_lookup: dict[str, float],
+        iv: float,
+    ) -> tuple[list[TradeRecord], list[OptionPosition]]:
+        """Check only expiry/assignment events for the current date."""
+        from datetime import datetime
+
+        closed: list[TradeRecord] = []
+        remaining: list[OptionPosition] = []
+        for pos in self.open_positions:
+            symbol_price = price_lookup.get(pos.symbol, pos.underlying_entry)
+            try:
+                expiry_date = datetime.strptime(pos.expiry, "%Y%m%d").date()
+                curr_date = datetime.strptime(current_date, "%Y-%m-%d").date()
+                dte = (expiry_date - curr_date).days
+            except (ValueError, TypeError):
+                dte = 999
+
+            if dte > 0:
+                remaining.append(pos)
+                continue
+
+            trade = self.check_exits_for_position(
+                pos=pos,
+                current_date=current_date,
+                underlying_price=symbol_price,
+                iv=iv,
+                profit_target_pct=999999,
+                stop_loss_pct=999999,
+                min_dte=0,
+            )
+            if trade:
+                closed.append(trade)
+            else:
+                remaining.append(pos)
+        return closed, remaining
+
     def get_total_open_pnl(self) -> float:
         return sum(p.current_pnl for p in self.open_positions)

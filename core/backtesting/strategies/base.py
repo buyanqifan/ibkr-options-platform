@@ -21,6 +21,10 @@ class Signal:
     underlying_price: float = 0.0  # Stock price at entry (for tracking in backtest)
     margin_requirement: float = None  # Optional: strategy can provide specific margin requirement
     strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
+    confidence: float = 1.0
+    reasoning: str = ""
+    ml_score_adjustment: float = 0.0
+    metadata: dict[str, Any] | None = None
 
 
 class BaseStrategy(ABC):

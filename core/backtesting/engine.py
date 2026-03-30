@@ -15,6 +15,12 @@ from core.backtesting.strategies.wheel import WheelStrategy
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy  # New: Binbin God strategy
 from core.backtesting.position_manager import PositionManager
 from core.backtesting.cost_model import TradingCostModel  # New: Trading cost model
+from core.backtesting.qc_parity import (
+    BinbinGodParityConfig,
+    EventTracer,
+    calculate_dynamic_max_positions_from_prices,
+)
+from core.backtesting.qc_trace_adapter import adapt_qc_trace
 from utils.logger import setup_logger
 
 logger = setup_logger("backtest_engine")
@@ -70,6 +76,485 @@ class BacktestEngine:
 
         return closest_price
 
+    def _build_parity_context(
+        self,
+        strategy,
+        position_mgr: PositionManager,
+        simulator: TradeSimulator,
+        bar_date: str,
+        pool_data: dict,
+        fallback_price: float,
+        dynamic_max_positions: int,
+    ) -> dict:
+        """Build a QC-style portfolio snapshot for parity sizing."""
+        price_by_symbol = {}
+        stock_holdings_value = 0.0
+        for symbol in getattr(strategy, "stock_pool", []):
+            price = self._get_price_for_symbol(symbol, bar_date, pool_data) or fallback_price
+            price_by_symbol[symbol] = price
+        for symbol, holding in getattr(strategy.stock_holding, "holdings", {}).items():
+            price = price_by_symbol.get(symbol, fallback_price)
+            stock_holdings_value += holding["shares"] * price
+
+        open_option_pnl = simulator.get_total_open_pnl()
+        portfolio_value = position_mgr.net_capital + stock_holdings_value + open_option_pnl
+        margin_remaining = max(0.0, portfolio_value * position_mgr.max_leverage - position_mgr.total_margin_used)
+        return {
+            "portfolio_value": portfolio_value,
+            "margin_remaining": margin_remaining,
+            "total_margin_used": position_mgr.total_margin_used,
+            "stock_holdings_value": stock_holdings_value,
+            "stock_holding_count": len(getattr(strategy.stock_holding, "holdings", {})),
+            "price_by_symbol": price_by_symbol,
+            "dynamic_max_positions": dynamic_max_positions,
+        }
+
+    def _open_signal_position(
+        self,
+        strategy,
+        signal,
+        simulator: TradeSimulator,
+        position_mgr: PositionManager,
+        cost_model: TradingCostModel,
+        tracer: EventTracer,
+        bar_date: str,
+        entry_underlying_price: float,
+    ) -> bool:
+        """Open a parity-mode option position."""
+        if signal.confidence < strategy.ml_min_confidence:
+            tracer.record(
+                bar_date,
+                "order_deferred",
+                symbol=signal.symbol,
+                action="SELL_PUT" if signal.right == "P" else "SELL_CALL",
+                right=signal.right,
+                qty=abs(signal.quantity),
+                reason="below_confidence_gate",
+                confidence=signal.confidence,
+            )
+            return False
+
+        margin_per_contract = signal.margin_requirement if signal.margin_requirement is not None else signal.strike * 100
+        total_margin = abs(signal.quantity) * margin_per_contract
+        position_id = f"{signal.symbol}_{bar_date}_{signal.strike}_{signal.right}"
+        if not position_mgr.allocate_margin(
+            position_id=position_id,
+            strategy=strategy.name,
+            symbol=signal.symbol,
+            entry_date=bar_date,
+            margin_amount=total_margin,
+        ):
+            tracer.record(
+                bar_date,
+                "order_deferred",
+                symbol=signal.symbol,
+                action="SELL_PUT" if signal.right == "P" else "SELL_CALL",
+                right=signal.right,
+                qty=abs(signal.quantity),
+                reason="insufficient_margin",
+            )
+            return False
+
+        entry_commission = cost_model.calculate_commission(signal.quantity)
+        entry_slippage = cost_model.calculate_slippage(signal.quantity)
+        pos = OptionPosition(
+            symbol=signal.symbol,
+            entry_date=bar_date,
+            expiry=signal.expiry,
+            strike=signal.strike,
+            right=signal.right,
+            trade_type=signal.trade_type,
+            quantity=signal.quantity,
+            entry_price=signal.premium,
+            underlying_entry=entry_underlying_price,
+            iv_at_entry=signal.iv,
+            delta_at_entry=signal.delta,
+            capital_at_entry=position_mgr.net_capital,
+            position_id=position_id,
+            strategy_phase=getattr(signal, "strategy_phase", "SP"),
+            entry_commission=entry_commission,
+            entry_slippage=entry_slippage,
+        )
+        simulator.open_position(pos)
+        position_mgr.cumulative_pnl -= (entry_commission + entry_slippage)
+        tracer.record(
+            bar_date,
+            "contract_selected",
+            symbol=signal.symbol,
+            action="SELL_PUT" if signal.right == "P" else "SELL_CALL",
+            right=signal.right,
+            strike=signal.strike,
+            expiry=signal.expiry,
+            qty=abs(signal.quantity),
+        )
+        tracer.record(
+            bar_date,
+            "order_opened",
+            symbol=signal.symbol,
+            action="SELL_PUT" if signal.right == "P" else "SELL_CALL",
+            right=signal.right,
+            strike=signal.strike,
+            expiry=signal.expiry,
+            qty=abs(signal.quantity),
+            confidence=signal.confidence,
+        )
+        return True
+
+    def _process_closed_trades_parity(
+        self,
+        strategy,
+        closed: list,
+        simulator: TradeSimulator,
+        position_mgr: PositionManager,
+        cost_model: TradingCostModel,
+        tracer: EventTracer,
+        bar_date: str,
+        underlying_price: float,
+        iv: float,
+        pool_data: dict,
+        allow_roll: bool,
+    ) -> list[str]:
+        """Apply QC-style bookkeeping for closed trades."""
+        assigned_put_symbols: list[str] = []
+        for trade in closed:
+            exit_cost = cost_model.calculate_total_cost(-trade.quantity)
+            adjusted_pnl = trade.pnl - exit_cost
+            position_id = trade.position_id or f"{trade.symbol}_{trade.entry_date}_{trade.strike}_{trade.right}"
+            position_mgr.release_margin(position_id, adjusted_pnl)
+
+            event_type = "expired"
+            if trade.exit_reason == "ASSIGNMENT" and trade.right == "P":
+                event_type = "assigned_put"
+            elif trade.exit_reason == "ASSIGNMENT" and trade.right == "C":
+                event_type = "assigned_call"
+            elif trade.exit_reason in ("PROFIT_TARGET", "ROLL_FORWARD", "ROLL_OUT"):
+                event_type = "rolled"
+
+            tracer.record(
+                bar_date,
+                event_type,
+                symbol=trade.symbol,
+                right=trade.right,
+                qty=abs(trade.quantity),
+                strike=trade.strike,
+                exit_reason=trade.exit_reason,
+                assignment=trade.exit_reason == "ASSIGNMENT",
+            )
+
+            if trade.exit_reason == "ASSIGNMENT" and trade.trade_type == "BINBIN_PUT":
+                additional_pnl = strategy.on_trade_closed(trade.to_dict()) if hasattr(strategy, "on_trade_closed") else 0.0
+                if additional_pnl:
+                    position_mgr.cumulative_pnl += additional_pnl
+                    trade.pnl += additional_pnl
+                shares_acquired = abs(trade.quantity) * 100
+                stock_cost = trade.strike * shares_acquired
+                stock_position_id = f"{trade.symbol}_{bar_date}_STOCK"
+                position_mgr.allocate_margin(
+                    position_id=stock_position_id,
+                    strategy=strategy.name,
+                    symbol=trade.symbol,
+                    entry_date=bar_date,
+                    margin_amount=stock_cost,
+                )
+                tracer.record(
+                    bar_date,
+                    "stock_opened",
+                    symbol=trade.symbol,
+                    qty=shares_acquired,
+                    strike=trade.strike,
+                    portfolio_pnl_effect=0.0,
+                )
+                assigned_put_symbols.append(trade.symbol)
+            elif trade.exit_reason == "ASSIGNMENT" and trade.trade_type == "BINBIN_CALL":
+                stock_pnl = strategy.on_trade_closed(trade.to_dict()) if hasattr(strategy, "on_trade_closed") else 0.0
+                if stock_pnl:
+                    position_mgr.cumulative_pnl += stock_pnl
+                    trade.pnl += stock_pnl
+                shares_sold = abs(trade.quantity) * 100
+                for pid, alloc in list(position_mgr.allocations.items()):
+                    if pid.startswith(f"{trade.symbol}_") and "_STOCK" in pid and not alloc.released:
+                        position_mgr.release_margin(pid, 0)
+                        break
+                tracer.record(
+                    bar_date,
+                    "stock_closed",
+                    symbol=trade.symbol,
+                    qty=shares_sold,
+                    strike=trade.strike,
+                    portfolio_pnl_effect=round(stock_pnl, 2),
+                )
+            elif hasattr(strategy, "on_trade_closed"):
+                additional_pnl = strategy.on_trade_closed(trade.to_dict())
+                if additional_pnl:
+                    position_mgr.cumulative_pnl += additional_pnl
+                    trade.pnl += additional_pnl
+
+            if allow_roll and hasattr(strategy, "generate_roll_signal") and trade.exit_reason in ("PROFIT_TARGET", "ROLL_FORWARD", "ROLL_OUT"):
+                symbol_price = self._get_price_for_symbol(trade.symbol, bar_date, pool_data) or underlying_price
+                roll_signal = strategy.generate_roll_signal(
+                    closed_trade=trade.to_dict(),
+                    current_date=bar_date,
+                    underlying_price=symbol_price,
+                    iv=iv,
+                )
+                if roll_signal:
+                    self._open_signal_position(
+                        strategy=strategy,
+                        signal=roll_signal,
+                        simulator=simulator,
+                        position_mgr=position_mgr,
+                        cost_model=cost_model,
+                        tracer=tracer,
+                        bar_date=bar_date,
+                        entry_underlying_price=symbol_price,
+                    )
+
+        return assigned_put_symbols
+
+    def _run_binbin_god_qc_parity(
+        self,
+        strategy,
+        params: dict,
+        bars: list[dict],
+        hv: list[float],
+        pool_data: dict,
+    ) -> dict:
+        """Run BinbinGod using QC-style parity timing and bookkeeping."""
+        initial_capital = params.get("initial_capital", 100000)
+        position_mgr = PositionManager(
+            initial_capital=initial_capital,
+            max_leverage=params.get("max_leverage", 1.0),
+            position_percentage=params.get("position_percentage", 0.10),
+            margin_interest_rate=0.05,
+        )
+        cost_model = TradingCostModel(
+            commission_per_contract=params.get("commission_per_contract", 0.65),
+            commission_min=params.get("commission_min", 1.00),
+            slippage_per_contract=params.get("slippage_per_contract", 0.05),
+        )
+        simulator = TradeSimulator()
+        tracer = EventTracer()
+        strategy.set_event_recorder(tracer)
+        daily_pnl = []
+        total_commission = 0.0
+        total_slippage = 0.0
+
+        for i, bar in enumerate(bars):
+            bar_date = str(bar["date"])[:10]
+            underlying_price = bar["close"]
+            iv = hv[i] if i < len(hv) else 0.3
+            if iv <= 0.01:
+                iv = 0.3
+
+            price_series = [
+                self._get_price_for_symbol(symbol, bar_date, pool_data) or underlying_price
+                for symbol in getattr(strategy, "stock_pool", [])
+            ]
+            dynamic_max_positions = calculate_dynamic_max_positions_from_prices(price_series, strategy.parity_config)
+            strategy.max_positions = dynamic_max_positions
+            parity_context = self._build_parity_context(
+                strategy=strategy,
+                position_mgr=position_mgr,
+                simulator=simulator,
+                bar_date=bar_date,
+                pool_data=pool_data,
+                fallback_price=underlying_price,
+                dynamic_max_positions=dynamic_max_positions,
+            )
+            strategy.set_parity_context(parity_context)
+            tracer.snapshot(
+                bar_date,
+                "rebalance_snapshot",
+                portfolio_value=round(parity_context["portfolio_value"], 2),
+                margin_used=round(parity_context["total_margin_used"], 2),
+                margin_remaining=round(parity_context["margin_remaining"], 2),
+                dynamic_max_positions=dynamic_max_positions,
+            )
+
+            managed, still_open = simulator.check_position_management(
+                current_date=bar_date,
+                price_lookup=parity_context["price_by_symbol"],
+                iv=iv,
+                profit_target_pct=strategy.profit_target_pct,
+                stop_loss_pct=999999,
+            )
+            simulator.open_positions = still_open
+            assigned_symbols = self._process_closed_trades_parity(
+                strategy=strategy,
+                closed=managed,
+                simulator=simulator,
+                position_mgr=position_mgr,
+                cost_model=cost_model,
+                tracer=tracer,
+                bar_date=bar_date,
+                underlying_price=underlying_price,
+                iv=iv,
+                pool_data=pool_data,
+                allow_roll=True,
+            )
+
+            strategy.set_parity_context(
+                self._build_parity_context(
+                    strategy=strategy,
+                    position_mgr=position_mgr,
+                    simulator=simulator,
+                    bar_date=bar_date,
+                    pool_data=pool_data,
+                    fallback_price=underlying_price,
+                    dynamic_max_positions=dynamic_max_positions,
+                )
+            )
+            signals = strategy.generate_signals(bar_date, underlying_price, iv, simulator.open_positions, position_mgr=position_mgr)
+            for signal in signals:
+                entry_price = self._get_price_for_symbol(signal.symbol, bar_date, pool_data) or underlying_price
+                opened = self._open_signal_position(
+                    strategy=strategy,
+                    signal=signal,
+                    simulator=simulator,
+                    position_mgr=position_mgr,
+                    cost_model=cost_model,
+                    tracer=tracer,
+                    bar_date=bar_date,
+                    entry_underlying_price=entry_price,
+                )
+                if opened:
+                    total_commission += cost_model.calculate_commission(signal.quantity)
+                    total_slippage += cost_model.calculate_slippage(signal.quantity)
+
+            expired, still_open = simulator.check_expiries(
+                current_date=bar_date,
+                price_lookup=self._build_parity_context(
+                    strategy=strategy,
+                    position_mgr=position_mgr,
+                    simulator=simulator,
+                    bar_date=bar_date,
+                    pool_data=pool_data,
+                    fallback_price=underlying_price,
+                    dynamic_max_positions=dynamic_max_positions,
+                )["price_by_symbol"],
+                iv=iv,
+            )
+            simulator.open_positions = still_open
+            assigned_symbols.extend(
+                self._process_closed_trades_parity(
+                    strategy=strategy,
+                    closed=expired,
+                    simulator=simulator,
+                    position_mgr=position_mgr,
+                    cost_model=cost_model,
+                    tracer=tracer,
+                    bar_date=bar_date,
+                    underlying_price=underlying_price,
+                    iv=iv,
+                    pool_data=pool_data,
+                    allow_roll=False,
+                )
+            )
+
+            for symbol in assigned_symbols:
+                symbol_price = self._get_price_for_symbol(symbol, bar_date, pool_data) or underlying_price
+                immediate_signal = strategy.generate_immediate_cc_signal(
+                    symbol=symbol,
+                    current_date=bar_date,
+                    underlying_price=symbol_price,
+                    iv=iv,
+                    open_positions=simulator.open_positions,
+                    position_mgr=position_mgr,
+                )
+                if immediate_signal:
+                    opened = self._open_signal_position(
+                        strategy=strategy,
+                        signal=immediate_signal,
+                        simulator=simulator,
+                        position_mgr=position_mgr,
+                        cost_model=cost_model,
+                        tracer=tracer,
+                        bar_date=bar_date,
+                        entry_underlying_price=symbol_price,
+                    )
+                    if opened:
+                        total_commission += cost_model.calculate_commission(immediate_signal.quantity)
+                        total_slippage += cost_model.calculate_slippage(immediate_signal.quantity)
+
+            daily_interest = position_mgr.apply_daily_interest()
+            stock_unrealized_pnl = 0.0
+            for symbol, holding in getattr(strategy.stock_holding, "holdings", {}).items():
+                symbol_price = self._get_price_for_symbol(symbol, bar_date, pool_data) or underlying_price
+                stock_unrealized_pnl += holding["shares"] * (symbol_price - holding["cost_basis"])
+            open_pnl = simulator.get_total_open_pnl() + stock_unrealized_pnl
+            portfolio_value = position_mgr.net_capital + open_pnl
+            tracer.snapshot(
+                bar_date,
+                "end_of_day_valuation",
+                portfolio_value=round(portfolio_value, 2),
+                open_pnl=round(open_pnl, 2),
+                closed_pnl=round(position_mgr.cumulative_pnl, 2),
+                margin_interest=round(daily_interest, 2),
+            )
+            daily_pnl.append(
+                {
+                    "date": bar_date,
+                    "cumulative_pnl": position_mgr.cumulative_pnl + open_pnl,
+                    "closed_pnl": position_mgr.cumulative_pnl,
+                    "open_pnl": open_pnl,
+                    "portfolio_value": portfolio_value,
+                    "margin_interest": daily_interest,
+                    "margin_used": position_mgr.total_margin_used,
+                    "available_margin": position_mgr.available_margin,
+                }
+            )
+
+        if bars:
+            last_bar = bars[-1]
+            last_date = str(last_bar["date"])[:10]
+            last_price = last_bar["close"]
+            last_iv = hv[-1] if hv else 0.3
+            while simulator.open_positions:
+                pos = simulator.open_positions.pop(0)
+                temp = TradeSimulator()
+                temp.open_position(pos)
+                closed_trades = temp.check_exits(last_date, last_price, last_iv, 9999, 9999, min_dte=0)
+                simulator.closed_trades.extend(closed_trades)
+
+        trades = [t.to_dict() for t in simulator.closed_trades]
+        metrics = PerformanceMetrics.calculate(trades, daily_pnl, initial_capital)
+        strategy_performance = strategy.get_performance_report() if hasattr(strategy, "get_performance_report") else {}
+
+        qc_trace_source = params.get("qc_trace") or params.get("qc_trace_path")
+        qc_trace = adapt_qc_trace(qc_trace_source) if qc_trace_source else {"event_trace": [], "portfolio_snapshots": []}
+        parity_report = tracer.build_parity_report(
+            expected_trace=qc_trace.get("event_trace"),
+            expected_snapshots=qc_trace.get("portfolio_snapshots"),
+        )
+
+        underlying_prices = [{"date": str(bar["date"])[:10], "close": bar["close"]} for bar in bars]
+        multi_stock_prices = {}
+        for symbol in getattr(strategy, "stock_pool", []):
+            stock_bars = pool_data.get(symbol, [])
+            if stock_bars:
+                multi_stock_prices[symbol] = [{"date": str(bar["date"])[:10], "close": bar["close"]} for bar in stock_bars]
+
+        return {
+            "metrics": metrics,
+            "trades": trades,
+            "daily_pnl": daily_pnl,
+            "underlying_prices": underlying_prices,
+            "multi_stock_prices": multi_stock_prices,
+            "params": params,
+            "strategy_performance": strategy_performance,
+            "trading_costs": {
+                "total_commission": round(total_commission, 2),
+                "total_slippage": round(total_slippage, 2),
+                "total_costs": round(total_commission + total_slippage, 2),
+                "commission_rate": cost_model.commission_per_contract,
+                "slippage_rate": cost_model.slippage_per_contract,
+            },
+            "event_trace": tracer.event_trace,
+            "portfolio_snapshots": tracer.portfolio_snapshots,
+            "parity_report": parity_report,
+            "qc_trace": qc_trace,
+        }
+
     def run(self, params: dict) -> dict:
         """Execute a backtest and return results.
 
@@ -78,6 +563,11 @@ class BacktestEngine:
                      profit_target_pct, stop_loss_pct, use_synthetic_data
         """
         strategy_name = params["strategy"]
+        parity_config = None
+        if strategy_name == "binbin_god":
+            parity_config = BinbinGodParityConfig.from_params(params)
+            if parity_config.enabled:
+                params = parity_config.apply_to_params(params)
         symbol = params["symbol"]
         start_date = params["start_date"]
         end_date = params["end_date"]
@@ -151,6 +641,15 @@ class BacktestEngine:
                     stock_hv[pool_symbol] = self._rolling_hv(pool_prices, window=20)
             strategy.stock_hv = stock_hv
             logger.info(f"BinbinGod: Calculated HV for {list(stock_hv.keys())}")
+
+        if strategy_name == "binbin_god" and parity_config and parity_config.enabled:
+            return self._run_binbin_god_qc_parity(
+                strategy=strategy,
+                params=params,
+                bars=bars,
+                hv=hv,
+                pool_data=getattr(strategy, "mag7_data", {}),
+            )
 
         # Initialize position manager for capital allocation and margin tracking
         position_mgr = PositionManager(
@@ -797,6 +1296,20 @@ class BacktestEngine:
                 "total_costs": round(total_commission + total_slippage, 2),
                 "commission_rate": cost_model.commission_per_contract,
                 "slippage_rate": cost_model.slippage_per_contract,
+            },
+            "event_trace": [],
+            "portfolio_snapshots": [],
+            "parity_report": {
+                "status": "disabled",
+                "thresholds": {
+                    "daily_portfolio_value_pct": 1.0,
+                    "final_total_return_pct": 2.0,
+                    "max_drawdown_pct": 2.0,
+                    "total_trades": 1.0,
+                },
+                "event_count": 0,
+                "snapshot_count": 0,
+                "first_mismatch": None,
             },
         }
 

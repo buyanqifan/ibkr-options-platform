@@ -30,6 +30,13 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from core.backtesting.strategies.base import BaseStrategy, Signal
 from core.backtesting.pricing import OptionsPricer
+from core.backtesting.qc_parity import (
+    BinbinGodParityConfig,
+    calculate_dynamic_max_positions_from_prices,
+    calculate_put_quantity_qc,
+    select_contract_from_lattice,
+    select_best_signal_with_memory,
+)
 from core.ml.dte_optimizer import DTEOptimizerML, DTEOptimizationConfig, DTEOptimizationResult
 import logging
 
@@ -152,58 +159,67 @@ class BinbinGodStrategy(BaseStrategy):
         return "binbin_god"
     
     def __init__(self, config: Dict[str, Any]):
+        parity_config = BinbinGodParityConfig.from_params(config)
+        resolved_config = parity_config.apply_to_params(config) if parity_config.enabled else dict(config)
         # Don't call super().__init__ to avoid double ML initialization
         # Instead, manually set base class attributes
-        self.params = config
-        self.dte_min = config.get("dte_min", 30)
-        self.dte_max = config.get("dte_max", 45)
-        self.delta_target = config.get("delta_target", 0.30)
-        self.profit_target_pct = config.get("profit_target_pct", 50)
-        self.stop_loss_pct = config.get("stop_loss_pct", 999999)  # Disabled by default - Wheel strategy doesn't use traditional stop loss
-        self.initial_capital = config.get("initial_capital", 100000)
-        self.max_risk_per_trade = config.get("max_risk_per_trade", 0.02)
-        self.max_leverage = config.get("max_leverage", 1.0)
-        
-        self.config = config
-        self.symbol = config.get("symbol", "MAG7_AUTO")
-        self.max_positions = config.get("max_positions", 10)
-        self.use_synthetic_data = config.get("use_synthetic_data", False)
+        self.params = resolved_config
+        self.parity_config = parity_config
+        self.parity_mode = parity_config.parity_mode
+        self.contract_universe_mode = parity_config.contract_universe_mode
+        self.dte_min = resolved_config.get("dte_min", 30)
+        self.dte_max = resolved_config.get("dte_max", 45)
+        self.delta_target = resolved_config.get("delta_target", 0.30)
+        self.profit_target_pct = resolved_config.get("profit_target_pct", 50)
+        self.stop_loss_pct = resolved_config.get("stop_loss_pct", 999999)  # Disabled by default - Wheel strategy doesn't use traditional stop loss
+        self.initial_capital = resolved_config.get("initial_capital", 100000)
+        self.max_risk_per_trade = resolved_config.get("max_risk_per_trade", 0.02)
+        self.max_leverage = resolved_config.get("max_leverage", 1.0)
+        self.ml_enabled = resolved_config.get("ml_enabled", False)
+        self.ml_min_confidence = resolved_config.get("ml_confidence_gate", resolved_config.get("ml_min_confidence", 0.4))
+
+        self.config = resolved_config
+        self.symbol = resolved_config.get("symbol", "MAG7_AUTO")
+        self.max_positions = resolved_config.get("max_positions", 10)
+        self.use_synthetic_data = resolved_config.get("use_synthetic_data", False)
         
         # Wheel-specific parameters
-        self.put_delta = config.get("put_delta", 0.30)
-        self.call_delta = config.get("call_delta", 0.30)
+        self.put_delta = resolved_config.get("put_delta", 0.30)
+        self.call_delta = resolved_config.get("call_delta", 0.30)
         
         # CC optimization parameters
-        self.cc_optimization_enabled = config.get("cc_optimization_enabled", True)
-        self.cc_min_delta_cost = config.get("cc_min_delta_cost", 0.15)  # Min delta when cost > price
-        self.cc_cost_basis_threshold = config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
-        self.cc_min_strike_premium = config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
+        self.cc_optimization_enabled = resolved_config.get("cc_optimization_enabled", True)
+        self.cc_min_delta_cost = resolved_config.get("cc_min_delta_cost", 0.15)  # Min delta when cost > price
+        self.cc_cost_basis_threshold = resolved_config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
+        self.cc_min_strike_premium = resolved_config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
 
         # SP in CC phase parameters (binbingod策略优化：CC阶段可同时开SP)
-        self.allow_sp_in_cc_phase = config.get("allow_sp_in_cc_phase", True)  # 允许CC阶段开SP
-        self.sp_in_cc_margin_threshold = config.get("sp_in_cc_margin_threshold", 0.5)  # CC阶段开SP的margin使用上限阈值
-        self.sp_in_cc_max_positions = config.get("sp_in_cc_max_positions", 3)  # CC阶段最多开几个SP仓位
+        self.allow_sp_in_cc_phase = resolved_config.get("allow_sp_in_cc_phase", True)  # 允许CC阶段开SP
+        self.sp_in_cc_margin_threshold = resolved_config.get("sp_in_cc_margin_threshold", 0.5)  # CC阶段开SP的margin使用上限阈值
+        self.sp_in_cc_max_positions = resolved_config.get("sp_in_cc_max_positions", 3)  # CC阶段最多开几个SP仓位
         
         # Margin management parameters
-        self.margin_buffer_pct = config.get("margin_buffer_pct", 0.50)  # % of margin to reserve as buffer
-        self.margin_rate_per_contract = config.get("margin_rate_per_contract", 0.25)  # margin rate per contract
+        self.margin_buffer_pct = resolved_config.get("margin_buffer_pct", 0.50)  # % of margin to reserve as buffer
+        self.margin_rate_per_contract = resolved_config.get("margin_rate_per_contract", 0.25)  # margin rate per contract
         
         # ML delta optimization parameters - use BaseStrategy's implementation
-        self.ml_delta_optimization = config.get("ml_delta_optimization", False)
-        self.ml_dte_optimization = config.get("ml_dte_optimization", False)  # Add DTE optimization flag
-        self.ml_adoption_rate = config.get("ml_adoption_rate", 0.5)
+        self.ml_delta_optimization = resolved_config.get("ml_delta_optimization", False)
+        self.ml_dte_optimization = resolved_config.get("ml_dte_optimization", False)  # Add DTE optimization flag
+        self.ml_adoption_rate = resolved_config.get("ml_adoption_rate", 0.5)
         self.ml_integration = None
         self.ml_dte_optimizer = None  # Add DTE optimizer
 
         # ML roll optimization parameters (replaces traditional stop loss / profit target)
-        self.ml_roll_optimization = config.get("ml_roll_optimization", False)
+        self.ml_roll_optimization = resolved_config.get("ml_roll_optimization", False)
         self.ml_roll_optimizer = None
-        self.ml_roll_confidence_threshold = config.get("ml_roll_confidence_threshold", 0.6)
+        self.ml_roll_confidence_threshold = resolved_config.get("ml_roll_confidence_threshold", 0.6)
 
         # ML Position Optimization
-        self.ml_position_optimization = config.get("ml_position_optimization", False)
+        self.ml_position_optimization = resolved_config.get("ml_position_optimization", False)
         self.ml_position_optimizer = None
         self.position_recommendations = []  # Track ML recommendations for analysis
+        self.event_recorder = None
+        self._parity_context = {}
 
         self.logger = logging.getLogger("binbin_god")
         
@@ -215,7 +231,7 @@ class BinbinGodStrategy(BaseStrategy):
                     ml_optimization_enabled=self.ml_delta_optimization,
                     ml_dte_optimization_enabled=self.ml_dte_optimization,
                     fallback_delta=self.call_delta,
-                    config=config.get("ml_config")
+                    config=resolved_config.get("ml_config")
                 )
                 self.adaptive_strategy = AdaptiveDeltaStrategy(
                     ml_integration=self.ml_integration,
@@ -237,7 +253,7 @@ class BinbinGodStrategy(BaseStrategy):
             try:
                 from core.ml.roll_optimizer import MLRollOptimizer
                 self.ml_roll_optimizer = MLRollOptimizer(
-                    model_path=config.get("ml_roll_model_path")
+                    model_path=resolved_config.get("ml_roll_model_path")
                 )
                 self.logger.info("ML Roll Optimizer initialized for intelligent roll management")
             except ImportError as e:
@@ -252,7 +268,7 @@ class BinbinGodStrategy(BaseStrategy):
             try:
                 from core.ml.position_optimizer import MLPositionOptimizer, WheelPositionIntegration
                 self.ml_position_optimizer = WheelPositionIntegration(
-                    optimizer=MLPositionOptimizer(model_path=config.get("ml_position_model_path")),
+                    optimizer=MLPositionOptimizer(model_path=resolved_config.get("ml_position_model_path")),
                     enabled=True,
                     fallback_to_rules=True,
                 )
@@ -279,6 +295,7 @@ class BinbinGodStrategy(BaseStrategy):
         self._last_selected_stock = None
         self._selection_count = 0
         self._min_hold_cycles = 3  # Minimum cycles before switching
+        self._last_stock_scores = {}
         
         # Selection history: track stock switches for visualization
         self.selection_history = []  # List of {"date": date, "from": symbol, "to": symbol}
@@ -290,7 +307,7 @@ class BinbinGodStrategy(BaseStrategy):
         self.stock_holding = StockHolding()
         
         # Stock pool for selection (default: MAG7)
-        self.stock_pool = config.get("stock_pool", MAG7_STOCKS.copy())
+        self.stock_pool = resolved_config.get("stock_pool", MAG7_STOCKS.copy())
         
         # Storage for analysis
         self.mag7_analysis = {
@@ -301,6 +318,65 @@ class BinbinGodStrategy(BaseStrategy):
         # Check if profit target/stop loss are disabled
         self._profit_target_disabled = self.profit_target_pct >= 999999
         self._stop_loss_disabled = self.stop_loss_pct >= 999999
+
+    def set_event_recorder(self, recorder):
+        """Attach parity event recorder."""
+        self.event_recorder = recorder
+
+    def set_parity_context(self, context: Optional[Dict[str, Any]]):
+        """Attach transient engine context used by parity mode sizing."""
+        self._parity_context = context or {}
+
+    def _record_event(self, current_date: str, event_type: str, **payload: Any):
+        if self.event_recorder is not None:
+            self.event_recorder.record(current_date, event_type, **payload)
+
+    def _is_qc_parity_enabled(self) -> bool:
+        return self.parity_config.enabled and self.contract_universe_mode == "qc_emulated_lattice"
+
+    def _get_symbol_market_state(
+        self,
+        symbol: str,
+        current_date: str,
+        underlying_price: float,
+        iv: float,
+    ) -> tuple[float, float, List[Dict[str, Any]]]:
+        """Resolve symbol-specific price, IV, and bars for the current date."""
+        pool_data = getattr(self, "mag7_data", {})
+        stock_hv = getattr(self, "stock_hv", {})
+        actual_underlying_price = underlying_price
+        actual_iv = iv
+        filtered_bars: List[Dict[str, Any]] = []
+
+        bars = pool_data.get(symbol, [])
+        if bars:
+            filtered_bars = [bar for bar in bars if str(bar.get("date", ""))[:10] <= current_date]
+            if filtered_bars:
+                actual_underlying_price = filtered_bars[-1]["close"]
+                bar_index = len(filtered_bars) - 1
+                sym_hv = stock_hv.get(symbol, [])
+                if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
+                    actual_iv = sym_hv[bar_index]
+
+        return actual_underlying_price, actual_iv, filtered_bars
+
+    def _calculate_signal_confidence(
+        self,
+        symbol: str,
+        bars: List[Dict[str, Any]],
+        underlying_price: float,
+        strategy_phase: str,
+    ) -> tuple[float, float]:
+        """Build a deterministic QC-style confidence score from stock ranking."""
+        if not bars:
+            return 0.0, 0.0
+        score = self._score_stocks({symbol: bars})
+        if not score:
+            return 0.0, 0.0
+        base_confidence = max(0.0, min(1.0, score[0].total_score / 100.0))
+        if strategy_phase == "CC":
+            base_confidence = min(1.0, base_confidence + 0.05)
+        return base_confidence, (score[0].total_score - 50.0) / 100.0
     
     def _score_stocks(self, market_data: Dict[str, Any]) -> List[StockScore]:
         """Score all stocks in the pool based on metrics."""
@@ -633,6 +709,15 @@ class BinbinGodStrategy(BaseStrategy):
         - No stock and no Put -> can sell Put
         - Both can happen simultaneously
         """
+        if self._is_qc_parity_enabled():
+            return self._generate_qc_parity_signals(
+                current_date=current_date,
+                underlying_price=underlying_price,
+                iv=iv,
+                open_positions=open_positions,
+                position_mgr=position_mgr,
+            )
+
         from datetime import datetime
         
         # Log current holdings state
@@ -771,6 +856,93 @@ class BinbinGodStrategy(BaseStrategy):
         
         return all_signals
 
+    def _generate_qc_parity_signals(
+        self,
+        current_date: str,
+        underlying_price: float,
+        iv: float,
+        open_positions: list,
+        position_mgr=None,
+    ) -> list[Signal]:
+        """Generate QC-style parity signals: best CC first, then best SP."""
+        wheel_positions = [p for p in open_positions if p.trade_type in ("BINBIN_PUT", "BINBIN_CALL")]
+        held_symbols = self.stock_holding.get_symbols()
+        stock_pool = getattr(self, "stock_pool", MAG7_STOCKS)
+
+        if "price_by_symbol" in self._parity_context:
+            prices = list(self._parity_context["price_by_symbol"].values())
+            self.max_positions = calculate_dynamic_max_positions_from_prices(prices, self.parity_config)
+
+        cc_candidates: list[Signal] = []
+        existing_call_coverage: Dict[str, int] = {}
+        for pos in wheel_positions:
+            if pos.trade_type == "BINBIN_CALL":
+                existing_call_coverage[pos.symbol] = existing_call_coverage.get(pos.symbol, 0) + abs(pos.quantity)
+
+        for stock_symbol in held_symbols:
+            shares_held = self.stock_holding.get_shares(stock_symbol)
+            covered_contracts = existing_call_coverage.get(stock_symbol, 0)
+            shares_available = shares_held - covered_contracts * 100
+            if shares_available <= 0:
+                continue
+            actual_price, actual_iv, _ = self._get_symbol_market_state(stock_symbol, current_date, underlying_price, iv)
+            stock_cost_basis = self.stock_holding.holdings.get(stock_symbol, {}).get("cost_basis", 0)
+            cc_candidates.extend(
+                self._generate_backtest_call_signal(
+                    stock_symbol,
+                    current_date,
+                    actual_price,
+                    actual_iv,
+                    position_mgr=position_mgr,
+                    shares_available=shares_available,
+                    cost_basis=stock_cost_basis,
+                )
+            )
+
+        sp_candidates: list[Signal] = []
+        for stock_symbol in stock_pool:
+            actual_price, actual_iv, _ = self._get_symbol_market_state(stock_symbol, current_date, underlying_price, iv)
+            sp_candidates.extend(
+                self._generate_backtest_put_signal(
+                    stock_symbol,
+                    current_date,
+                    actual_price,
+                    actual_iv,
+                    position_mgr=position_mgr,
+                    strategy_phase="SP",
+                    open_positions=wheel_positions,
+                )
+            )
+
+        selected: list[Signal] = []
+        if cc_candidates:
+            best_cc = max(cc_candidates, key=lambda item: item.confidence)
+            selected.append(best_cc)
+
+        if sp_candidates and len(wheel_positions) < self.max_positions:
+            best_sp, self._last_selected_stock, self._selection_count, self._last_stock_scores = select_best_signal_with_memory(
+                sp_candidates,
+                self._last_selected_stock,
+                self._selection_count,
+                self._min_hold_cycles,
+                getattr(self, "_last_stock_scores", {}),
+            )
+            if best_sp:
+                selected.append(best_sp)
+
+        for signal in selected:
+            self._record_event(
+                current_date,
+                "signal_generated",
+                symbol=signal.symbol,
+                action="SELL_PUT" if signal.right == "P" else "SELL_CALL",
+                right=signal.right,
+                qty=abs(signal.quantity),
+                confidence=round(signal.confidence, 4),
+                strategy_phase=signal.strategy_phase,
+            )
+        return selected
+
     def _generate_sp_in_cc_phase(
         self,
         current_date: str,
@@ -907,6 +1079,7 @@ class BinbinGodStrategy(BaseStrategy):
         iv: float,
         position_mgr=None,
         strategy_phase: str = "SP",  # 支持SP或CC+SP模式
+        open_positions: list | None = None,
     ) -> list[Signal]:
         """Generate Sell Put signal for backtesting.
         
@@ -992,11 +1165,43 @@ class BinbinGodStrategy(BaseStrategy):
         elif ml_result:
             logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.5, using fallback delta {self.put_delta}")
         
-        strike = self.select_strike_with_delta(underlying_price, iv, T, "P", effective_delta)
+        contract_metadata = None
+        if self._is_qc_parity_enabled():
+            selected_contract = select_contract_from_lattice(
+                symbol=symbol,
+                current_date=current_date,
+                underlying_price=underlying_price,
+                iv=iv,
+                target_right="P",
+                target_delta=-abs(effective_delta),
+                dte_min=self.dte_min,
+                dte_max=self.dte_max,
+                delta_tolerance=0.05,
+            )
+            if selected_contract is None:
+                self._record_event(
+                    current_date,
+                    "order_deferred",
+                    symbol=symbol,
+                    action="SELL_PUT",
+                    right="P",
+                    reason="no_lattice_contract",
+                    strategy_phase=strategy_phase,
+                )
+                self.delta_target = original_delta
+                return []
+            strike = selected_contract.strike
+            expiry_date = selected_contract.expiry
+            expiry_str = expiry_date.strftime("%Y%m%d")
+            dte_days = selected_contract.dte
+            premium = selected_contract.premium
+            delta = selected_contract.delta
+            contract_metadata = selected_contract.to_dict()
+        else:
+            strike = self.select_strike_with_delta(underlying_price, iv, T, "P", effective_delta)
+            premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
+            delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
         self.delta_target = original_delta
-
-        premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
-        delta = OptionsPricer.delta(underlying_price, strike, T, iv, "P")
 
         # SAFETY CHECK: Skip if premium is too low (indicates strike selection error)
         if premium < 0.01:
@@ -1007,7 +1212,60 @@ class BinbinGodStrategy(BaseStrategy):
             return []
 
         # Position sizing: use ML optimizer if enabled, otherwise traditional
-        if self.ml_position_optimization and self.ml_position_optimizer:
+        if self._is_qc_parity_enabled():
+            parity_state = self._parity_context or {}
+            confidence, ml_score_adjustment = self._calculate_signal_confidence(symbol, ml_bars, underlying_price, strategy_phase)
+            portfolio_value = parity_state.get("portfolio_value", position_mgr.net_capital if position_mgr else self.initial_capital)
+            margin_remaining = parity_state.get("margin_remaining", position_mgr.available_margin if position_mgr else self.initial_capital)
+            total_margin_used = parity_state.get("total_margin_used", position_mgr.total_margin_used if position_mgr else 0.0)
+            stock_holdings_value = parity_state.get("stock_holdings_value", 0.0)
+            stock_holding_count = parity_state.get("stock_holding_count", len(self.stock_holding.get_symbols()))
+            dynamic_max_positions = parity_state.get("dynamic_max_positions", self.max_positions)
+            current_positions = len(open_positions or [])
+            selected_contract = contract_metadata if contract_metadata is not None else {
+                "strike": strike,
+                "premium": premium,
+            }
+            lattice_contract = select_contract_from_lattice(
+                symbol=symbol,
+                current_date=current_date,
+                underlying_price=underlying_price,
+                iv=iv,
+                target_right="P",
+                target_delta=delta,
+                dte_min=max(dte_days, self.dte_min),
+                dte_max=max(dte_days, self.dte_min),
+                delta_tolerance=0.10,
+            )
+            qty_source = lattice_contract or type("SelectedContract", (), {"strike": strike, "premium": premium})()
+            max_contracts, diagnostics = calculate_put_quantity_qc(
+                config=self.parity_config,
+                selected_contract=qty_source,
+                current_positions=current_positions,
+                underlying_price=underlying_price,
+                symbol=symbol,
+                portfolio_value=portfolio_value,
+                margin_remaining=margin_remaining,
+                total_margin_used=total_margin_used,
+                stock_holdings_value=stock_holdings_value,
+                stock_holding_count=stock_holding_count,
+                open_option_positions=open_positions or [],
+                shares_held=self.stock_holding.get_shares(symbol),
+                dynamic_max_positions=dynamic_max_positions,
+            )
+            if max_contracts <= 0:
+                self._record_event(
+                    current_date,
+                    "order_deferred",
+                    symbol=symbol,
+                    action="SELL_PUT",
+                    right="P",
+                    reason="put_quantity_zero",
+                    diagnostics=diagnostics,
+                    strategy_phase=strategy_phase,
+                )
+                return []
+        elif self.ml_position_optimization and self.ml_position_optimizer:
             max_contracts = self._calculate_ml_position_size(
                 symbol=symbol,
                 underlying_price=underlying_price,
@@ -1048,6 +1306,10 @@ class BinbinGodStrategy(BaseStrategy):
             underlying_price=underlying_price,
             margin_requirement=strike * 100,
             strategy_phase=strategy_phase,  # SP or CC+SP
+            confidence=confidence if self._is_qc_parity_enabled() else 1.0,
+            reasoning="QC parity put" if self._is_qc_parity_enabled() else "",
+            ml_score_adjustment=ml_score_adjustment if self._is_qc_parity_enabled() else 0.0,
+            metadata=contract_metadata,
         )]
     
     def _generate_backtest_call_signal(
@@ -1192,14 +1454,47 @@ class BinbinGodStrategy(BaseStrategy):
         else:
             final_delta = call_delta_target
         
-        # Use optimized call-specific delta
-        original_delta = self.delta_target
-        self.delta_target = final_delta
-        strike = self.select_strike_with_constraints(underlying_price, iv, T, "C", additional_constraints)
-        self.delta_target = original_delta
-        
-        premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
-        delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
+        contract_metadata = None
+        if self._is_qc_parity_enabled():
+            min_strike = additional_constraints.get("min_strike")
+            selected_contract = select_contract_from_lattice(
+                symbol=symbol,
+                current_date=current_date,
+                underlying_price=underlying_price,
+                iv=iv,
+                target_right="C",
+                target_delta=abs(final_delta),
+                dte_min=self.dte_min,
+                dte_max=self.dte_max,
+                delta_tolerance=0.05,
+                min_strike=min_strike,
+            )
+            if selected_contract is None:
+                self._record_event(
+                    current_date,
+                    "order_deferred",
+                    symbol=symbol,
+                    action="SELL_CALL",
+                    right="C",
+                    reason="no_lattice_contract",
+                    strategy_phase="CC",
+                )
+                return []
+            strike = selected_contract.strike
+            expiry_date = selected_contract.expiry
+            expiry_str = expiry_date.strftime("%Y%m%d")
+            dte_days = selected_contract.dte
+            premium = selected_contract.premium
+            delta = selected_contract.delta
+            contract_metadata = selected_contract.to_dict()
+        else:
+            # Use optimized call-specific delta
+            original_delta = self.delta_target
+            self.delta_target = final_delta
+            strike = self.select_strike_with_constraints(underlying_price, iv, T, "C", additional_constraints)
+            self.delta_target = original_delta
+            premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
+            delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
 
         # SAFETY CHECK: Skip if premium is too low (indicates strike selection error)
         if premium < 0.01:
@@ -1213,6 +1508,9 @@ class BinbinGodStrategy(BaseStrategy):
         # CC has no additional risk (stock is collateral), so maximize premium income
         max_by_shares = shares_available // 100
         
+        confidence, ml_score_adjustment = (1.0, 0.0)
+        if self._is_qc_parity_enabled():
+            confidence, ml_score_adjustment = self._calculate_signal_confidence(symbol, ml_bars, underlying_price, "CC")
         if self.ml_position_optimization and self.ml_position_optimizer:
             # ML can provide risk assessment, but CC should default to full coverage
             ml_contracts = self._calculate_ml_position_size(
@@ -1260,6 +1558,10 @@ class BinbinGodStrategy(BaseStrategy):
             underlying_price=underlying_price,
             margin_requirement=0.0,  # No additional margin - shares are collateral
             strategy_phase="CC",  # Covered Call phase
+            confidence=confidence,
+            reasoning="QC parity call" if self._is_qc_parity_enabled() else "",
+            ml_score_adjustment=ml_score_adjustment,
+            metadata=contract_metadata,
         )]
     
     def generate_signal(
@@ -1297,6 +1599,36 @@ class BinbinGodStrategy(BaseStrategy):
         return self._generate_put_signal(
             actual_symbol, current_dt, bars, contracts, portfolio, market_data
         )
+
+    def generate_immediate_cc_signal(
+        self,
+        symbol: str,
+        current_date: str,
+        underlying_price: float,
+        iv: float,
+        open_positions: list,
+        position_mgr=None,
+    ) -> Optional[Signal]:
+        """Generate a same-day covered call after put assignment in parity mode."""
+        existing_call_coverage = sum(
+            abs(pos.quantity)
+            for pos in open_positions
+            if pos.trade_type == "BINBIN_CALL" and pos.symbol == symbol
+        )
+        shares_available = self.stock_holding.get_shares(symbol) - existing_call_coverage * 100
+        cost_basis = self.stock_holding.holdings.get(symbol, {}).get("cost_basis", 0)
+        signals = self._generate_backtest_call_signal(
+            symbol=symbol,
+            current_date=current_date,
+            underlying_price=underlying_price,
+            iv=iv,
+            position_mgr=position_mgr,
+            shares_available=shares_available,
+            cost_basis=cost_basis,
+        )
+        if not signals:
+            return None
+        return max(signals, key=lambda item: item.confidence)
     
     def _generate_put_signal(
         self,
