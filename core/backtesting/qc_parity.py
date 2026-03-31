@@ -534,6 +534,123 @@ def calculate_dynamic_max_positions_from_prices(prices: Sequence[float], config:
     return max(1, min(dynamic_max, config.max_positions_ceiling))
 
 
+def _calculate_historical_vol_from_bars(bars: Sequence[Dict[str, Any]], window: int = 20) -> float:
+    if not bars or len(bars) < window + 1:
+        return 0.25
+    closes = [float(bar.get("close", 0.0)) for bar in bars[-(window + 1):] if bar.get("close", 0)]
+    if len(closes) < window + 1:
+        return 0.25
+    returns = []
+    for idx in range(1, len(closes)):
+        prev = closes[idx - 1]
+        if prev <= 0:
+            continue
+        returns.append((closes[idx] - prev) / prev)
+    if len(returns) < 2:
+        return 0.25
+    mean = sum(returns) / len(returns)
+    variance = sum((value - mean) ** 2 for value in returns) / len(returns)
+    return max(variance ** 0.5 * (252 ** 0.5), 0.25)
+
+
+def calculate_volatility_weighted_symbol_cap_qc(
+    config: BinbinGodParityConfig,
+    symbol: str,
+    symbol_history_bars: Sequence[Dict[str, Any]] | None,
+    pool_history_bars: Dict[str, Sequence[Dict[str, Any]]] | None,
+) -> int:
+    base_cap = max(1, int(config.max_put_contracts_per_symbol))
+    lookback = max(5, int(config.volatility_lookback))
+    symbol_vol = _calculate_historical_vol_from_bars(symbol_history_bars or [], window=lookback)
+    if symbol_vol <= 0:
+        return base_cap
+
+    pool_vols = []
+    for bars in (pool_history_bars or {}).values():
+        if bars and len(bars) >= lookback + 1:
+            vol = _calculate_historical_vol_from_bars(bars, window=lookback)
+            if vol > 0:
+                pool_vols.append(vol)
+    if not pool_vols:
+        return base_cap
+
+    avg_pool_vol = sum(pool_vols) / len(pool_vols)
+    raw_multiplier = avg_pool_vol / symbol_vol if symbol_vol > 0 else 1.0
+    multiplier = max(
+        config.volatility_cap_floor,
+        min(raw_multiplier, min(1.0, config.volatility_cap_ceiling)),
+    )
+    return max(1, int(round(base_cap * multiplier)))
+
+
+def calculate_symbol_state_risk_multiplier_qc(
+    config: BinbinGodParityConfig,
+    symbol_history_bars: Sequence[Dict[str, Any]] | None,
+    pool_history_bars: Dict[str, Sequence[Dict[str, Any]]] | None,
+    underlying_price: float,
+    symbol_put_notional: float,
+    symbol_stock_notional: float,
+    portfolio_value: float,
+) -> tuple[float, Dict[str, float]]:
+    if not config.dynamic_symbol_risk_enabled:
+        return 1.0, {
+            "vol_ratio": 1.0,
+            "drawdown": 0.0,
+            "momentum_20d": 0.0,
+            "exposure_ratio": 0.0,
+        }
+
+    lookback = max(5, int(config.volatility_lookback))
+    symbol_bars = list(symbol_history_bars or [])
+    symbol_vol = _calculate_historical_vol_from_bars(symbol_bars, window=lookback) if len(symbol_bars) >= lookback + 1 else 0.25
+
+    pool_vols = []
+    for bars in (pool_history_bars or {}).values():
+        if bars and len(bars) >= lookback + 1:
+            pool_vols.append(_calculate_historical_vol_from_bars(bars, window=lookback))
+    avg_pool_vol = (sum(pool_vols) / len(pool_vols)) if pool_vols else max(symbol_vol, 0.25)
+    vol_ratio = symbol_vol / avg_pool_vol if avg_pool_vol > 0 else 1.0
+
+    closes = [float(bar.get("close", 0.0)) for bar in symbol_bars if bar.get("close", 0)]
+    momentum_20d = 0.0
+    if len(closes) >= 20 and closes[-20] > 0:
+        momentum_20d = underlying_price / closes[-20] - 1.0
+
+    dd_lookback = max(20, int(config.symbol_drawdown_lookback))
+    recent_closes = closes[-dd_lookback:] if closes else []
+    peak_price = max(recent_closes) if recent_closes else max(underlying_price, 1.0)
+    drawdown = max(0.0, (peak_price - underlying_price) / peak_price) if peak_price > 0 else 0.0
+
+    assignment_exposure = symbol_put_notional + symbol_stock_notional
+    exposure_ratio = assignment_exposure / portfolio_value if portfolio_value > 0 else 0.0
+
+    volatility_penalty = max(0.35, 1.0 - max(0.0, vol_ratio - 1.0) * config.symbol_volatility_sensitivity)
+    downtrend_penalty = max(0.35, 1.0 - max(0.0, -momentum_20d) * config.symbol_downtrend_sensitivity)
+    drawdown_penalty = max(0.25, 1.0 - drawdown * config.symbol_drawdown_sensitivity)
+    exposure_penalty = max(0.20, 1.0 - exposure_ratio * config.symbol_exposure_sensitivity)
+
+    raw_multiplier = volatility_penalty * downtrend_penalty * drawdown_penalty * exposure_penalty
+    multiplier = max(config.symbol_state_cap_floor, min(raw_multiplier, config.symbol_state_cap_ceiling))
+    return multiplier, {
+        "vol_ratio": vol_ratio,
+        "drawdown": drawdown,
+        "momentum_20d": momentum_20d,
+        "exposure_ratio": exposure_ratio,
+    }
+
+
+def calculate_stock_inventory_cap_qc(
+    config: BinbinGodParityConfig,
+    portfolio_value: float,
+    symbol_state_multiplier: float,
+) -> float:
+    if not config.stock_inventory_cap_enabled:
+        return portfolio_value
+    base_cap = portfolio_value * config.stock_inventory_base_cap
+    dynamic_multiplier = max(config.stock_inventory_cap_floor, min(1.0, symbol_state_multiplier))
+    return max(0.0, base_cap * dynamic_multiplier)
+
+
 def calculate_put_quantity_qc(
     config: BinbinGodParityConfig,
     selected_contract: LatticeContract,
@@ -548,7 +665,9 @@ def calculate_put_quantity_qc(
     open_option_positions: Sequence[Any],
     shares_held: int,
     dynamic_max_positions: int,
-) -> tuple[int, Dict[str, int]]:
+    symbol_history_bars: Sequence[Dict[str, Any]] | None = None,
+    pool_history_bars: Dict[str, Sequence[Dict[str, Any]]] | None = None,
+) -> tuple[int, Dict[str, float]]:
     strike = selected_contract.strike
     premium = selected_contract.premium
     otm_amount = max(0.0, underlying_price - strike)
@@ -582,9 +701,25 @@ def calculate_put_quantity_qc(
             symbol_put_notional += notional
 
     symbol_stock_notional = shares_held * max(underlying_price, 0.0)
-    max_by_symbol_contracts = max(0, config.max_put_contracts_per_symbol - symbol_put_contracts)
+    symbol_cap = calculate_volatility_weighted_symbol_cap_qc(
+        config,
+        symbol,
+        symbol_history_bars,
+        pool_history_bars,
+    )
+    symbol_state_multiplier, symbol_state = calculate_symbol_state_risk_multiplier_qc(
+        config,
+        symbol_history_bars,
+        pool_history_bars,
+        underlying_price,
+        symbol_put_notional,
+        symbol_stock_notional,
+        portfolio_value,
+    )
+    symbol_cap = max(1, int(symbol_cap * symbol_state_multiplier))
+    max_by_symbol_contracts = max(0, symbol_cap - symbol_put_contracts)
     max_by_total_contracts = max(0, config.max_put_contracts_total - total_put_contracts)
-    max_by_trade_cap = max(0, config.max_contracts_per_trade)
+    max_by_trade_cap = max(0, min(config.max_contracts_per_trade, symbol_cap))
     max_by_margin = int(usable_margin / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
     max_by_limit = max(0, adjusted_max_positions - current_positions)
 
@@ -597,7 +732,8 @@ def calculate_put_quantity_qc(
     max_by_leverage = int(remaining_leverage_budget / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
 
     aggr = config.position_aggressiveness
-    per_symbol_notional_cap = portfolio_value * (0.25 + 0.35 * aggr)
+    base_symbol_notional_cap = portfolio_value * config.symbol_assignment_base_cap
+    per_symbol_notional_cap = base_symbol_notional_cap * symbol_state_multiplier
     total_notional_cap = portfolio_value * (0.70 + 0.90 * aggr)
     candidate_notional = strike * 100
     remaining_symbol_notional = max(0.0, per_symbol_notional_cap - (symbol_put_notional + symbol_stock_notional))
@@ -605,8 +741,7 @@ def calculate_put_quantity_qc(
     max_by_symbol_notional = int(remaining_symbol_notional / candidate_notional) if candidate_notional > 0 else 0
     max_by_total_notional = int(remaining_total_notional / candidate_notional) if candidate_notional > 0 else 0
 
-    stock_inventory_cap = portfolio_value * config.stock_inventory_base_cap if config.stock_inventory_cap_enabled else portfolio_value
-    stock_inventory_cap *= max(config.stock_inventory_cap_floor, 1.0)
+    stock_inventory_cap = calculate_stock_inventory_cap_qc(config, portfolio_value, symbol_state_multiplier)
     remaining_stock_inventory = max(0.0, stock_inventory_cap - symbol_stock_notional)
     max_by_stock_inventory = int(remaining_stock_inventory / candidate_notional) if candidate_notional > 0 else 0
 
@@ -621,8 +756,26 @@ def calculate_put_quantity_qc(
         "symbol_notional": max_by_symbol_notional,
         "total_notional": max_by_total_notional,
         "stock_inventory": max_by_stock_inventory,
+        "symbol_cap": symbol_cap,
+        "state_multiplier": round(symbol_state_multiplier, 4),
+        "vol_ratio": round(symbol_state["vol_ratio"], 4),
+        "drawdown": round(symbol_state["drawdown"], 4),
+        "momentum_20d": round(symbol_state["momentum_20d"], 4),
+        "exposure_ratio": round(symbol_state["exposure_ratio"], 4),
     }
-    quantity = min(diagnostics.values()) if diagnostics else 0
+    limit_keys = (
+        "margin",
+        "slots",
+        "budget",
+        "leverage",
+        "symbol_contracts",
+        "total_contracts",
+        "trade_cap",
+        "symbol_notional",
+        "total_notional",
+        "stock_inventory",
+    )
+    quantity = min(diagnostics[key] for key in limit_keys) if diagnostics else 0
     return max(0, quantity), diagnostics
 
 

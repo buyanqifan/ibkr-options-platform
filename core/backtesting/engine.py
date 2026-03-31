@@ -521,7 +521,16 @@ class BacktestEngine:
                 symbol_price = self._get_price_for_symbol(symbol, bar_date, pool_data) or underlying_price
                 stock_unrealized_pnl += holding["shares"] * (symbol_price - holding["cost_basis"])
             open_pnl = simulator.get_total_open_pnl() + stock_unrealized_pnl
-            portfolio_value = position_mgr.net_capital + open_pnl
+            end_of_day_context = self._build_parity_context(
+                strategy=strategy,
+                position_mgr=position_mgr,
+                simulator=simulator,
+                bar_date=bar_date,
+                pool_data=pool_data,
+                fallback_price=underlying_price,
+                dynamic_max_positions=dynamic_max_positions,
+            )
+            portfolio_value = end_of_day_context["portfolio_value"]
             tracer.snapshot(
                 bar_date,
                 "end_of_day_valuation",
@@ -539,20 +548,20 @@ class BacktestEngine:
                     "portfolio_value": portfolio_value,
                     "margin_interest": daily_interest,
                     "margin_used": position_mgr.total_margin_used,
-                    "available_margin": position_mgr.available_margin,
+                    "available_margin": end_of_day_context["margin_remaining"],
                 }
             )
 
         if bars:
             last_bar = bars[-1]
             last_date = str(last_bar["date"])[:10]
-            last_price = last_bar["close"]
             last_iv = hv[-1] if hv else 0.3
             while simulator.open_positions:
                 pos = simulator.open_positions.pop(0)
                 temp = TradeSimulator()
                 temp.open_position(pos)
-                closed_trades = temp.check_exits(last_date, last_price, last_iv, 9999, 9999, min_dte=0)
+                symbol_last_price = self._get_price_for_symbol(pos.symbol, last_date, pool_data) or last_bar["close"]
+                closed_trades = temp.check_exits(last_date, symbol_last_price, last_iv, 9999, 9999, min_dte=0)
                 simulator.closed_trades.extend(closed_trades)
 
         trades = [t.to_dict() for t in simulator.closed_trades]

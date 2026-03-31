@@ -1,18 +1,23 @@
 """Tests for BinbinGod QC parity helpers and engine mode."""
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("optionlab")
 
+import core.backtesting.strategies.binbin_god as binbin_god_module
 from core.backtesting.engine import BacktestEngine
+from core.backtesting.position_manager import PositionManager
 from core.backtesting.qc_parity import (
     BinbinGodParityConfig,
     build_contract_lattice,
+    calculate_symbol_state_risk_multiplier_qc,
     calculate_dynamic_max_positions_from_prices,
     calculate_put_quantity_qc,
 )
+from core.backtesting.simulator import OptionPosition, TradeSimulator
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
 
 
@@ -39,18 +44,23 @@ def test_qc_parity_config_uses_qc_defaults():
     config = BinbinGodParityConfig.from_params({"parity_mode": "qc"})
     assert config.enabled is True
     assert config.initial_capital == 300000.0
-    assert config.max_positions_ceiling == 60
+    assert config.max_positions_ceiling == 20
     assert config.dte_min == 21
     assert config.dte_max == 60
-    assert config.position_aggressiveness == pytest.approx(2.0)
+    assert config.position_aggressiveness == pytest.approx(1.0)
     assert config.profit_target_pct == pytest.approx(70.0)
-    assert config.margin_buffer_pct == pytest.approx(0.35)
+    assert config.margin_buffer_pct == pytest.approx(0.50)
+    assert config.target_margin_utilization == pytest.approx(0.35)
+    assert config.max_risk_per_trade == pytest.approx(0.02)
     assert config.ml_min_confidence == pytest.approx(0.40)
     assert config.defensive_put_roll_enabled is True
     assert config.assignment_cooldown_days == 20
     assert config.stock_inventory_cap_enabled is True
-    assert config.stock_inventory_base_cap == pytest.approx(0.20)
-    assert config.symbol_assignment_base_cap == pytest.approx(0.95)
+    assert config.stock_inventory_base_cap == pytest.approx(0.15)
+    assert config.stock_inventory_block_threshold == pytest.approx(0.75)
+    assert config.defensive_put_roll_loss_pct == pytest.approx(100.0)
+    assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.05)
+    assert config.symbol_assignment_base_cap == pytest.approx(0.25)
 
 
 def test_binbin_god_strategy_forces_qc_replay_defaults():
@@ -153,6 +163,43 @@ def test_put_quantity_qc_blocks_when_stock_inventory_is_full():
     assert "stock_inventory" in diagnostics
 
 
+def test_put_quantity_qc_applies_max_risk_per_trade_cap():
+    config = BinbinGodParityConfig.from_params(
+        {
+            "parity_mode": "qc",
+            "max_risk_per_trade": 0.01,
+        }
+    )
+    contract = build_contract_lattice(
+        symbol="NVDA",
+        current_date="2024-03-01",
+        underlying_price=100.0,
+        iv=0.80,
+        target_right="P",
+        target_delta=-0.30,
+        dte_min=21,
+        dte_max=45,
+    )[0]
+    quantity, diagnostics = calculate_put_quantity_qc(
+        config=config,
+        selected_contract=contract,
+        current_positions=0,
+        underlying_price=100.0,
+        symbol="NVDA",
+        portfolio_value=100000.0,
+        margin_remaining=100000.0,
+        total_margin_used=0.0,
+        stock_holdings_value=0.0,
+        stock_holding_count=0,
+        open_option_positions=[],
+        shares_held=0,
+        dynamic_max_positions=10,
+    )
+    assert quantity == diagnostics["risk"]
+    assert quantity > 0
+    assert quantity < diagnostics["margin"]
+
+
 def test_generate_immediate_cc_signal_in_parity_mode():
     strategy = BinbinGodStrategy(
         {
@@ -191,6 +238,368 @@ def test_generate_immediate_cc_signal_in_parity_mode():
     assert signal is not None
     assert signal.right == "C"
     assert signal.confidence > 0
+
+
+def test_build_parity_context_includes_stock_market_value():
+    engine = BacktestEngine()
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": False,
+        }
+    )
+    strategy.stock_holding.add_shares("NVDA", 100, 90.0)
+    position_mgr = PositionManager(initial_capital=100000.0, max_leverage=1.0)
+    simulator = TradeSimulator()
+    simulator.open_position(
+        OptionPosition(
+            symbol="NVDA",
+            entry_date="2024-03-01",
+            expiry="20240419",
+            strike=95.0,
+            right="P",
+            trade_type="BINBIN_PUT",
+            quantity=-1,
+            entry_price=1.5,
+            underlying_entry=100.0,
+            iv_at_entry=0.25,
+            delta_at_entry=-0.25,
+            current_pnl=250.0,
+        )
+    )
+    pool_data = {"NVDA": [{"date": "2024-03-15", "close": 110.0}]}
+
+    context = engine._build_parity_context(
+        strategy=strategy,
+        position_mgr=position_mgr,
+        simulator=simulator,
+        bar_date="2024-03-15",
+        pool_data=pool_data,
+        fallback_price=110.0,
+        dynamic_max_positions=10,
+    )
+
+    assert context["stock_holdings_value"] == pytest.approx(11000.0)
+    assert context["portfolio_value"] == pytest.approx(111250.0)
+
+
+def test_parity_put_signal_confidence_follows_qc_ml_semantics(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": True,
+            "ml_delta_optimization": True,
+            "ml_dte_optimization": True,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars}
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 0.0,
+            "stock_holding_count": 0,
+            "price_by_symbol": {"NVDA": bars[-1]["close"]},
+            "dynamic_max_positions": 10,
+        }
+    )
+
+    monkeypatch.setattr(strategy, "_score_stocks", lambda *_args, **_kwargs: [SimpleNamespace(total_score=10.0)])
+    monkeypatch.setattr(
+        strategy.ml_integration,
+        "optimize_put_delta",
+        lambda **_kwargs: SimpleNamespace(optimal_delta=0.28, confidence=0.9, reasoning="delta"),
+    )
+    monkeypatch.setattr(
+        strategy.ml_integration,
+        "optimize_put_dte",
+        lambda **_kwargs: SimpleNamespace(optimal_dte_min=31, optimal_dte_max=37, confidence=0.8, reasoning="dte"),
+    )
+
+    signals = strategy._generate_backtest_put_signal(
+        symbol="NVDA",
+        current_date=bars[-1]["date"],
+        underlying_price=bars[-1]["close"],
+        iv=0.25,
+        open_positions=[],
+    )
+
+    assert signals
+    assert signals[0].confidence == pytest.approx(0.73)
+    assert signals[0].ml_score_adjustment == pytest.approx(-0.40)
+
+
+def test_parity_put_signal_uses_ml_dte_window_for_contract_selection(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": True,
+            "ml_delta_optimization": True,
+            "ml_dte_optimization": True,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars}
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 0.0,
+            "stock_holding_count": 0,
+            "price_by_symbol": {"NVDA": bars[-1]["close"]},
+            "dynamic_max_positions": 10,
+        }
+    )
+
+    monkeypatch.setattr(strategy, "_score_stocks", lambda *_args, **_kwargs: [SimpleNamespace(total_score=60.0)])
+    monkeypatch.setattr(
+        strategy.ml_integration,
+        "optimize_put_delta",
+        lambda **_kwargs: SimpleNamespace(optimal_delta=0.28, confidence=0.9, reasoning="delta"),
+    )
+    monkeypatch.setattr(
+        strategy.ml_integration,
+        "optimize_put_dte",
+        lambda **_kwargs: SimpleNamespace(optimal_dte_min=31, optimal_dte_max=37, confidence=0.8, reasoning="dte"),
+    )
+
+    captured_windows = []
+
+    class FakeContract:
+        def __init__(self):
+            self.strike = 95.0
+            self.expiry = datetime.strptime(bars[-1]["date"], "%Y-%m-%d") + timedelta(days=35)
+            self.dte = 35
+            self.premium = 1.5
+            self.delta = -0.28
+
+        def to_dict(self):
+            return {
+                "strike": self.strike,
+                "expiry": self.expiry,
+                "dte": self.dte,
+                "premium": self.premium,
+                "delta": self.delta,
+            }
+
+    def fake_select_contract_from_lattice(**kwargs):
+        captured_windows.append((kwargs["dte_min"], kwargs["dte_max"]))
+        return FakeContract()
+
+    monkeypatch.setattr(binbin_god_module, "select_contract_from_lattice", fake_select_contract_from_lattice)
+
+    signals = strategy._generate_backtest_put_signal(
+        symbol="NVDA",
+        current_date=bars[-1]["date"],
+        underlying_price=bars[-1]["close"],
+        iv=0.25,
+        open_positions=[],
+    )
+
+    assert signals
+    assert captured_windows == [(31, 37)]
+
+
+def test_parity_put_signal_uses_symbol_specific_cost_basis(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA", "AAPL"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": True,
+            "ml_delta_optimization": True,
+            "ml_dte_optimization": True,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars, "AAPL": bars}
+    strategy.stock_holding.add_shares("NVDA", 100, 250.0)
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 25000.0,
+            "stock_holding_count": 1,
+            "price_by_symbol": {"NVDA": bars[-1]["close"], "AAPL": bars[-1]["close"]},
+            "dynamic_max_positions": 10,
+        }
+    )
+
+    seen_cost_basis = []
+    monkeypatch.setattr(strategy, "_score_stocks", lambda *_args, **_kwargs: [SimpleNamespace(total_score=60.0)])
+
+    def fake_optimize_put_delta(**kwargs):
+        seen_cost_basis.append(kwargs["cost_basis"])
+        return SimpleNamespace(optimal_delta=0.28, confidence=0.9, reasoning="delta")
+
+    monkeypatch.setattr(strategy.ml_integration, "optimize_put_delta", fake_optimize_put_delta)
+    monkeypatch.setattr(
+        strategy.ml_integration,
+        "optimize_put_dte",
+        lambda **kwargs: SimpleNamespace(optimal_dte_min=31, optimal_dte_max=37, confidence=0.8, reasoning=f"dte:{kwargs['cost_basis']}"),
+    )
+
+    signals = strategy._generate_backtest_put_signal(
+        symbol="AAPL",
+        current_date=bars[-1]["date"],
+        underlying_price=bars[-1]["close"],
+        iv=0.25,
+        open_positions=[],
+    )
+
+    assert signals
+    assert seen_cost_basis == [0.0]
+
+
+def test_qc_parity_skips_sell_put_when_stock_inventory_exceeds_block_threshold(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": False,
+            "stock_inventory_base_cap": 0.20,
+            "stock_inventory_block_threshold": 0.90,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars}
+    strategy.stock_holding.add_shares("NVDA", 200, 100.0)
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 20000.0,
+            "stock_holding_count": 1,
+            "price_by_symbol": {"NVDA": 100.0},
+            "dynamic_max_positions": 10,
+        }
+    )
+    recorded = []
+    monkeypatch.setattr(strategy, "_record_event", lambda date, event_type, **payload: recorded.append((date, event_type, payload)))
+    monkeypatch.setattr(strategy, "_generate_backtest_call_signal", lambda *args, **kwargs: [])
+    monkeypatch.setattr(strategy, "_generate_backtest_put_signal", lambda *args, **kwargs: [SimpleNamespace(symbol="NVDA")])
+
+    signals = strategy._generate_qc_parity_signals(
+        current_date=bars[-1]["date"],
+        underlying_price=100.0,
+        iv=0.25,
+        open_positions=[],
+        position_mgr=None,
+    )
+
+    assert signals == []
+    assert recorded
+    assert recorded[0][1] == "order_deferred"
+    assert recorded[0][2]["reason"] == "sp_stock_block"
+
+
+def test_qc_parity_skips_sell_put_for_symbol_with_existing_stock_holdings(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA", "AAPL"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": False,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars, "AAPL": bars}
+    strategy.stock_holding.add_shares("NVDA", 100, 100.0)
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 10000.0,
+            "stock_holding_count": 1,
+            "price_by_symbol": {"NVDA": 100.0, "AAPL": 100.0},
+            "dynamic_max_positions": 10,
+        }
+    )
+
+    recorded = []
+    monkeypatch.setattr(strategy, "_record_event", lambda date, event_type, **payload: recorded.append((date, event_type, payload)))
+    monkeypatch.setattr(strategy, "_generate_backtest_call_signal", lambda *args, **kwargs: [])
+
+    def fake_put_signal(symbol, *args, **kwargs):
+        return [SimpleNamespace(symbol=symbol, right="P", quantity=-1, confidence=0.9, strategy_phase="SP")]
+
+    monkeypatch.setattr(strategy, "_generate_backtest_put_signal", fake_put_signal)
+
+    signals = strategy._generate_qc_parity_signals(
+        current_date=bars[-1]["date"],
+        underlying_price=100.0,
+        iv=0.25,
+        open_positions=[],
+        position_mgr=None,
+    )
+
+    assert [signal.symbol for signal in signals] == ["AAPL"]
+    assert recorded
+    assert recorded[0][1] == "order_deferred"
+    assert recorded[0][2]["symbol"] == "NVDA"
+    assert recorded[0][2]["reason"] == "sp_existing_stock"
+
+
+def test_symbol_state_risk_multiplier_matches_qc_penalty_shape():
+    bars = _make_bars(100.0, 90)
+    stressed_bars = []
+    start = datetime(2024, 1, 1)
+    price = 120.0
+    for offset in range(90):
+        if offset < 60:
+            price *= 0.995
+        else:
+            price *= 0.97
+        stressed_bars.append(
+            {
+                "date": (start + timedelta(days=offset)).strftime("%Y-%m-%d"),
+                "open": price,
+                "high": price * 1.01,
+                "low": price * 0.99,
+                "close": price,
+                "volume": 1_000_000,
+            }
+        )
+
+    config = BinbinGodParityConfig.from_params({"parity_mode": "qc"})
+    multiplier, diagnostics = calculate_symbol_state_risk_multiplier_qc(
+        config=config,
+        symbol_history_bars=stressed_bars,
+        pool_history_bars={"NVDA": stressed_bars, "AAPL": bars},
+        underlying_price=stressed_bars[-1]["close"],
+        symbol_put_notional=25000.0,
+        symbol_stock_notional=25000.0,
+        portfolio_value=100000.0,
+    )
+
+    assert multiplier < 1.0
+    assert diagnostics["drawdown"] > 0
+    assert diagnostics["exposure_ratio"] > 0
 
 
 def test_engine_returns_parity_artifacts():

@@ -440,16 +440,24 @@ class BinbinGodStrategy(BaseStrategy):
         bars: List[Dict[str, Any]],
         underlying_price: float,
         strategy_phase: str,
+        delta_confidence: float = 1.0,
+        dte_confidence: float = 1.0,
+        position_confidence: float = 0.5,
     ) -> tuple[float, float]:
-        """Build a deterministic QC-style confidence score from stock ranking."""
+        """Mirror QC confidence semantics while preserving stock-score tie-breaking."""
+        base_confidence = (
+            max(0.0, min(1.0, delta_confidence)) * 0.35
+            + max(0.0, min(1.0, dte_confidence)) * 0.30
+            + max(0.0, min(1.0, position_confidence)) * 0.35
+        )
+
         if not bars:
-            return 0.0, 0.0
+            return base_confidence, 0.0
+
         score = self._score_stocks({symbol: bars})
         if not score:
-            return 0.0, 0.0
-        base_confidence = max(0.0, min(1.0, score[0].total_score / 100.0))
-        if strategy_phase == "CC":
-            base_confidence = min(1.0, base_confidence + 0.05)
+            return base_confidence, 0.0
+
         return base_confidence, (score[0].total_score - 50.0) / 100.0
     
     def _score_stocks(self, market_data: Dict[str, Any]) -> List[StockScore]:
@@ -832,10 +840,26 @@ class BinbinGodStrategy(BaseStrategy):
             )
 
         sp_candidates: list[Signal] = []
+        portfolio_value = self._parity_context.get("portfolio_value", self.initial_capital)
         for stock_symbol in stock_pool:
             if self.is_symbol_on_cooldown(stock_symbol):
                 continue
             actual_price, actual_iv, _ = self._get_symbol_market_state(stock_symbol, current_date, underlying_price, iv)
+            if self.stock_inventory_cap_enabled:
+                stock_notional = self.stock_holding.get_shares(stock_symbol) * max(actual_price, 0.0)
+                inventory_cap = portfolio_value * self.stock_inventory_base_cap
+                if inventory_cap > 0 and stock_notional >= inventory_cap * self.stock_inventory_block_threshold:
+                    self._record_event(
+                        current_date,
+                        "order_deferred",
+                        symbol=stock_symbol,
+                        action="SELL_PUT",
+                        right="P",
+                        reason="sp_stock_block",
+                        stock_notional=round(stock_notional, 2),
+                        inventory_cap=round(inventory_cap, 2),
+                    )
+                    continue
             sp_candidates.extend(
                 self._generate_backtest_put_signal(
                     stock_symbol,
@@ -1043,7 +1067,8 @@ class BinbinGodStrategy(BaseStrategy):
         # Filter bars up to current_date
         if ml_bars:
             ml_bars = [bar for bar in ml_bars if str(bar.get("date", ""))[:10] <= current_date]
-        
+        symbol_cost_basis = self.stock_holding.holdings.get(symbol, {}).get("cost_basis", 0.0)
+
         # ML Delta optimization
         ml_result = None
         if self.ml_delta_optimization and self.ml_integration:
@@ -1051,7 +1076,7 @@ class BinbinGodStrategy(BaseStrategy):
                 ml_result = self.ml_integration.optimize_put_delta(
                     symbol=symbol,
                     current_price=underlying_price,
-                    cost_basis=self.stock_holding.cost_basis,
+                    cost_basis=symbol_cost_basis,
                     bars=ml_bars,  # Pass actual bars for backtest
                     options_data=[],  # Will be populated by real-time interface
                     iv=iv
@@ -1068,7 +1093,7 @@ class BinbinGodStrategy(BaseStrategy):
                 ml_dte_result = self.ml_integration.optimize_put_dte(
                     symbol=symbol,
                     current_price=underlying_price,
-                    cost_basis=self.stock_holding.cost_basis,
+                    cost_basis=symbol_cost_basis,
                     bars=ml_bars,  # Pass actual bars for backtest
                     options_data=[],  # Will be populated by real-time interface
                     iv=iv,
@@ -1103,20 +1128,25 @@ class BinbinGodStrategy(BaseStrategy):
         elif ml_result:
             logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.5, using fallback delta {self.put_delta}")
         
+        delta_confidence = ml_result.confidence if ml_result is not None else 1.0
+        dte_confidence = ml_dte_result.confidence if ml_dte_result is not None else 1.0
+        position_confidence = 0.5
+
         contract_metadata = None
+        selected_contract_obj = None
         if self._is_qc_parity_enabled():
-            selected_contract = select_contract_from_lattice(
+            selected_contract_obj = select_contract_from_lattice(
                 symbol=symbol,
                 current_date=current_date,
                 underlying_price=underlying_price,
                 iv=iv,
                 target_right="P",
                 target_delta=-abs(effective_delta),
-                dte_min=self.dte_min,
-                dte_max=self.dte_max,
+                dte_min=dte_window_min,
+                dte_max=dte_window_max,
                 delta_tolerance=0.05,
             )
-            if selected_contract is None:
+            if selected_contract_obj is None:
                 self._record_event(
                     current_date,
                     "order_deferred",
@@ -1128,13 +1158,13 @@ class BinbinGodStrategy(BaseStrategy):
                 )
                 self.delta_target = original_delta
                 return []
-            strike = selected_contract.strike
-            expiry_date = selected_contract.expiry
+            strike = selected_contract_obj.strike
+            expiry_date = selected_contract_obj.expiry
             expiry_str = expiry_date.strftime("%Y%m%d")
-            dte_days = selected_contract.dte
-            premium = selected_contract.premium
-            delta = selected_contract.delta
-            contract_metadata = selected_contract.to_dict()
+            dte_days = selected_contract_obj.dte
+            premium = selected_contract_obj.premium
+            delta = selected_contract_obj.delta
+            contract_metadata = selected_contract_obj.to_dict()
         else:
             strike = self.select_strike_with_delta(underlying_price, iv, T, "P", effective_delta)
             premium = OptionsPricer.put_price(underlying_price, strike, T, iv)
@@ -1152,7 +1182,15 @@ class BinbinGodStrategy(BaseStrategy):
         # Position sizing: use ML optimizer if enabled, otherwise traditional
         if self._is_qc_parity_enabled():
             parity_state = self._parity_context or {}
-            confidence, ml_score_adjustment = self._calculate_signal_confidence(symbol, ml_bars, underlying_price, strategy_phase)
+            confidence, ml_score_adjustment = self._calculate_signal_confidence(
+                symbol,
+                ml_bars,
+                underlying_price,
+                strategy_phase,
+                delta_confidence=delta_confidence,
+                dte_confidence=dte_confidence,
+                position_confidence=position_confidence,
+            )
             portfolio_value = parity_state.get("portfolio_value", position_mgr.net_capital if position_mgr else self.initial_capital)
             margin_remaining = parity_state.get("margin_remaining", position_mgr.available_margin if position_mgr else self.initial_capital)
             total_margin_used = parity_state.get("total_margin_used", position_mgr.total_margin_used if position_mgr else 0.0)
@@ -1160,22 +1198,11 @@ class BinbinGodStrategy(BaseStrategy):
             stock_holding_count = parity_state.get("stock_holding_count", len(self.stock_holding.get_symbols()))
             dynamic_max_positions = parity_state.get("dynamic_max_positions", self.max_positions)
             current_positions = len(open_positions or [])
-            selected_contract = contract_metadata if contract_metadata is not None else {
-                "strike": strike,
-                "premium": premium,
-            }
-            lattice_contract = select_contract_from_lattice(
-                symbol=symbol,
-                current_date=current_date,
-                underlying_price=underlying_price,
-                iv=iv,
-                target_right="P",
-                target_delta=delta,
-                dte_min=max(dte_days, self.dte_min),
-                dte_max=max(dte_days, self.dte_min),
-                delta_tolerance=0.10,
-            )
-            qty_source = lattice_contract or type("SelectedContract", (), {"strike": strike, "premium": premium})()
+            qty_source = selected_contract_obj or type("SelectedContract", (), {"strike": strike, "premium": premium})()
+            pool_history_bars = {}
+            for pool_symbol, pool_bars in pool_data.items():
+                if pool_bars:
+                    pool_history_bars[pool_symbol] = [bar for bar in pool_bars if str(bar.get("date", ""))[:10] <= current_date]
             max_contracts, diagnostics = calculate_put_quantity_qc(
                 config=self.parity_config,
                 selected_contract=qty_source,
@@ -1190,6 +1217,8 @@ class BinbinGodStrategy(BaseStrategy):
                 open_option_positions=open_positions or [],
                 shares_held=self.stock_holding.get_shares(symbol),
                 dynamic_max_positions=dynamic_max_positions,
+                symbol_history_bars=ml_bars,
+                pool_history_bars=pool_history_bars,
             )
             if max_contracts <= 0:
                 self._record_event(
@@ -1483,9 +1512,21 @@ class BinbinGodStrategy(BaseStrategy):
         # CC has no additional risk (stock is collateral), so maximize premium income
         max_by_shares = shares_available // 100
         
+        delta_confidence = ml_result.confidence if ml_result is not None else 1.0
+        dte_confidence = ml_dte_result.confidence if ml_dte_result is not None else 1.0
+        position_confidence = 0.5
+
         confidence, ml_score_adjustment = (1.0, 0.0)
         if self._is_qc_parity_enabled():
-            confidence, ml_score_adjustment = self._calculate_signal_confidence(symbol, ml_bars, underlying_price, "CC")
+            confidence, ml_score_adjustment = self._calculate_signal_confidence(
+                symbol,
+                ml_bars,
+                underlying_price,
+                "CC",
+                delta_confidence=delta_confidence,
+                dte_confidence=dte_confidence,
+                position_confidence=position_confidence,
+            )
         if self.ml_position_optimization and self.ml_position_optimizer:
             # ML can provide risk assessment, but CC should default to full coverage
             ml_contracts = self._calculate_ml_position_size(
