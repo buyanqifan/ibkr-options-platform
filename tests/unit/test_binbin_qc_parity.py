@@ -53,6 +53,14 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.symbol_assignment_base_cap == pytest.approx(0.95)
 
 
+def test_binbin_god_strategy_forces_qc_replay_defaults():
+    config = BinbinGodParityConfig.from_params({"strategy": "binbin_god"})
+
+    assert config.enabled is True
+    assert config.parity_mode == "qc"
+    assert config.contract_universe_mode == "qc_emulated_lattice"
+
+
 def test_contract_lattice_respects_min_strike():
     contracts = build_contract_lattice(
         symbol="NVDA",

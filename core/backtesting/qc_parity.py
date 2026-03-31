@@ -122,8 +122,8 @@ def _to_int(value: Any, default: int) -> int:
 class BinbinGodParityConfig:
     """Resolved QC-style parity configuration."""
 
-    parity_mode: str = "none"
-    contract_universe_mode: str = "legacy_theoretical"
+    parity_mode: str = "qc"
+    contract_universe_mode: str = "qc_emulated_lattice"
     ml_confidence_gate: float = 0.40
     initial_capital: float = QC_BINBIN_DEFAULTS["initial_capital"]
     max_positions_ceiling: int = QC_BINBIN_DEFAULTS["max_positions_ceiling"]
@@ -182,10 +182,19 @@ class BinbinGodParityConfig:
 
     @classmethod
     def from_params(cls, params: Dict[str, Any]) -> "BinbinGodParityConfig":
-        parity_mode = str(params.get("parity_mode", "none") or "none").lower()
+        force_qc_replay = True
+        parity_mode = str(params.get("parity_mode", "qc") or "qc").lower()
+        if force_qc_replay:
+            parity_mode = "qc"
         contract_universe_mode = str(
-            params.get("contract_universe_mode", "legacy_theoretical") or "legacy_theoretical"
+            params.get(
+                "contract_universe_mode",
+                "qc_emulated_lattice",
+            )
+            or "qc_emulated_lattice"
         ).lower()
+        if force_qc_replay:
+            contract_universe_mode = "qc_emulated_lattice"
         defaults = dict(QC_BINBIN_DEFAULTS if parity_mode == "qc" else {})
         merged = {**defaults, **params}
 

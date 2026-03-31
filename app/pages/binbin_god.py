@@ -44,7 +44,6 @@ QC_UI_DEFAULTS = {
     "end_date": str(QC_PARAMETER_DEFAULTS.get("end_date", "2024-12-31")),
     "initial_capital": QC_BINBIN_DEFAULTS["initial_capital"],
     "stock_pool_text": ",".join(DEFAULT_STOCK_POOL),
-    "run_mode": "qc",
     "max_positions_ceiling": QC_BINBIN_DEFAULTS["max_positions_ceiling"],
     "max_leverage": 1.0,
     "target_margin_utilization": QC_BINBIN_DEFAULTS["target_margin_utilization"],
@@ -125,16 +124,6 @@ RUN_SETUP_FIELDS = [
         "default": "initial_capital",
         "step": 1000,
         "min": 0,
-    },
-    {
-        "id": "bbg-run-mode",
-        "label": "Run Mode",
-        "type": "select",
-        "default": "run_mode",
-        "options": [
-            {"label": "QC parity", "value": "qc"},
-            {"label": "Native", "value": "native"},
-        ],
     },
     {
         "id": "bbg-stock-pool-text",
@@ -465,7 +454,6 @@ def build_binbin_backtest_params(form_data):
     """Normalize QC-aligned UI inputs into engine parameters."""
     merged = {**QC_UI_DEFAULTS, **(form_data or {})}
     stock_pool = _normalize_stock_pool(merged.get("stock_pool_text"))
-    run_mode = str(merged.get("run_mode", QC_UI_DEFAULTS["run_mode"])).lower()
     ml_enabled = _to_bool(merged.get("ml_enabled"), QC_UI_DEFAULTS["ml_enabled"])
 
     params = {
@@ -535,8 +523,8 @@ def build_binbin_backtest_params(form_data):
         "stock_inventory_base_cap": _to_float(merged.get("stock_inventory_base_cap"), QC_UI_DEFAULTS["stock_inventory_base_cap"]),
         "stock_inventory_cap_floor": _to_float(merged.get("stock_inventory_cap_floor"), QC_UI_DEFAULTS["stock_inventory_cap_floor"]),
         "stock_inventory_block_threshold": _to_float(merged.get("stock_inventory_block_threshold"), QC_UI_DEFAULTS["stock_inventory_block_threshold"]),
-        "parity_mode": "qc" if run_mode == "qc" else "none",
-        "contract_universe_mode": "legacy_theoretical",
+        "parity_mode": "qc",
+        "contract_universe_mode": "qc_emulated_lattice",
     }
     return params
 
@@ -670,7 +658,6 @@ layout = dbc.Container(
     State("bbg-end", "value"),
     State("bbg-initial-capital", "value"),
     State("bbg-stock-pool-text", "value"),
-    State("bbg-run-mode", "value"),
     State("bbg-max-positions-ceiling", "value"),
     State("bbg-max-leverage", "value"),
     State("bbg-target-margin-utilization", "value"),
@@ -732,7 +719,6 @@ def run_binbin_backtest(
     end_date,
     initial_capital,
     stock_pool_text,
-    run_mode,
     max_positions_ceiling,
     max_leverage,
     target_margin_utilization,
@@ -797,7 +783,6 @@ def run_binbin_backtest(
             "end_date": end_date,
             "initial_capital": initial_capital,
             "stock_pool_text": stock_pool_text,
-            "run_mode": run_mode,
             "max_positions_ceiling": max_positions_ceiling,
             "max_leverage": max_leverage,
             "target_margin_utilization": target_margin_utilization,
