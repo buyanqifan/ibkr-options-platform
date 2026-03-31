@@ -321,6 +321,8 @@ class BacktestEngine:
     ) -> dict:
         """Run BinbinGod using QC-style parity timing and bookkeeping."""
         initial_capital = params.get("initial_capital", 100000)
+        warmup_bars = 60
+        warmup_pretrained = False
         position_mgr = PositionManager(
             initial_capital=initial_capital,
             max_leverage=params.get("max_leverage", 1.0),
@@ -370,6 +372,43 @@ class BacktestEngine:
                 margin_remaining=round(parity_context["margin_remaining"], 2),
                 dynamic_max_positions=dynamic_max_positions,
             )
+
+            if i < warmup_bars:
+                tracer.snapshot(
+                    bar_date,
+                    "warmup_snapshot",
+                    progress=i + 1,
+                    required_bars=warmup_bars,
+                )
+                daily_pnl.append(
+                    {
+                        "date": bar_date,
+                        "cumulative_pnl": 0.0,
+                        "closed_pnl": 0.0,
+                        "open_pnl": 0.0,
+                        "portfolio_value": initial_capital,
+                        "margin_interest": 0.0,
+                        "margin_used": position_mgr.total_margin_used,
+                        "available_margin": position_mgr.available_margin,
+                    }
+                )
+                continue
+
+            if (
+                not warmup_pretrained
+                and params.get("ml_delta_optimization", False)
+                and hasattr(strategy, "pretrain_ml_model")
+            ):
+                warmup_history = bars[:warmup_bars]
+                warmup_iv = [value for value in hv[:warmup_bars] if value and value > 0.01]
+                avg_iv = float(np.mean(warmup_iv)) if warmup_iv else 0.25
+                avg_iv = max(0.15, min(0.50, avg_iv))
+                pretrain_stats = strategy.pretrain_ml_model(
+                    warmup_history,
+                    iv_estimate=avg_iv,
+                )
+                logger.info(f"ML Delta pretraining after warmup: {pretrain_stats}")
+                warmup_pretrained = True
 
             managed, still_open = simulator.check_position_management(
                 current_date=bar_date,
@@ -610,8 +649,13 @@ class BacktestEngine:
         if not bars:
             raise ValueError(f"No historical data for {symbol}")
 
-        # Pretrain ML model if enabled (use early portion of historical data)
-        if params.get("ml_delta_optimization", False) and hasattr(strategy, 'pretrain_ml_model'):
+        # Pretrain ML model if enabled (use early portion of historical data).
+        # Binbin God QC replay performs this after its QC-style warmup instead.
+        if (
+            strategy_name != "binbin_god"
+            and params.get("ml_delta_optimization", False)
+            and hasattr(strategy, 'pretrain_ml_model')
+        ):
             # Use first 30% of data for pretraining
             pretrain_size = int(len(bars) * 0.3)
             pretrain_bars = bars[:pretrain_size]
