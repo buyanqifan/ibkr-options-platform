@@ -5,7 +5,7 @@ from __future__ import annotations
 import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import Input, Output, State, callback, ctx, dcc, html, no_update
+from dash import Input, Output, State, callback, dcc, html, no_update
 
 from app.components.charts import (
     create_monthly_heatmap,
@@ -335,17 +335,9 @@ def _derive_symbol(stock_pool: list[str]) -> str:
     return f"CUSTOM_{'_'.join(stock_pool[:3])}" if stock_pool else "MAG7_AUTO"
 
 
-def _no_update_result_response():
-    return no_update, no_update, no_update, no_update, no_update, no_update
-
-
-def _no_update_form_response():
-    return tuple(no_update for _ in ALL_FORM_FIELDS)
-
-
 def _form_values_from_params(params: dict | None):
     if not params:
-        return _no_update_form_response()
+        params = {}
 
     merged = dict(QC_UI_DEFAULTS)
     merged.update(params)
@@ -354,8 +346,9 @@ def _form_values_from_params(params: dict | None):
     return tuple(merged.get(field["default"], QC_UI_DEFAULTS[field["default"]]) for field in ALL_FORM_FIELDS)
 
 
-def _control_from_field(field):
-    default_value = QC_UI_DEFAULTS[field["default"]]
+def _control_from_field(field, defaults=None):
+    defaults = defaults or QC_UI_DEFAULTS
+    default_value = defaults[field["default"]]
     width = field.get("width", 6)
     help_text = field.get("help_text")
     if field["type"] == "switch":
@@ -400,7 +393,7 @@ def _control_from_field(field):
     return dbc.Col(control, md=width)
 
 
-def _build_rows(fields):
+def _build_rows(fields, defaults=None):
     current_row = []
     current_width = 0
     rows = []
@@ -410,7 +403,7 @@ def _build_rows(fields):
             rows.append(dbc.Row(current_row, className="g-2"))
             current_row = []
             current_width = 0
-        current_row.append(_control_from_field(field))
+        current_row.append(_control_from_field(field, defaults))
         current_width += width
         if current_width == 12:
             rows.append(dbc.Row(current_row, className="g-2"))
@@ -461,7 +454,7 @@ def create_strategy_info_card():
     )
 
 
-def create_mag7_analysis_placeholder():
+def create_mag7_analysis_placeholder(initial_children=None):
     """Placeholder for MAG7 analysis display."""
     return dbc.Card(
         [
@@ -473,7 +466,7 @@ def create_mag7_analysis_placeholder():
                 [
                     html.Div(
                         id="binbin-mag7-analysis",
-                        children=[html.P("Run backtest to see MAG7 stock rankings and selection", className="text-muted")],
+                        children=initial_children or [html.P("Run backtest to see MAG7 stock rankings and selection", className="text-muted")],
                     ),
                 ]
             ),
@@ -740,46 +733,62 @@ def _build_binbin_results_view(result, params):
     return mag7_section, content, {"display": "none"}, "d-block mt-2"
 
 
-def restore_binbin_backtest_on_load(pathname):
-    """Restore the last persisted Binbin God result when the page loads."""
-    if pathname != "/binbin-god":
-        return _no_update_result_response()
+def _get_initial_layout_state():
+    """Build initial server-rendered state from the persisted last result."""
+    payload = load_last_binbin_god_result() or {}
+    params = payload.get("params") if isinstance(payload, dict) else None
+    result = payload.get("result") if isinstance(payload, dict) else None
 
-    payload = load_last_binbin_god_result()
-    if not payload:
-        return _no_update_result_response()
+    defaults = dict(QC_UI_DEFAULTS)
+    if params:
+        field_values = _form_values_from_params(params)
+        defaults = {field["default"]: value for field, value in zip(ALL_FORM_FIELDS, field_values)}
 
-    params = payload.get("params")
-    result = payload.get("result")
-    if not params or not result:
-        return _no_update_result_response()
+    if params and result:
+        mag7_section, content, _, export_class = _build_binbin_results_view(result, params)
+        return {
+            "defaults": defaults,
+            "result": result,
+            "params": params,
+            "mag7_children": mag7_section,
+            "results_children": content,
+            "export_class": export_class,
+        }
 
-    mag7_section, content, loading_style, export_class = _build_binbin_results_view(result, params)
-    return result, params, mag7_section, content, loading_style, export_class
+    placeholder = [
+        dbc.Card(
+            [
+                dbc.CardBody(
+                    [
+                        html.Div(
+                            [html.I(className="bi bi-graph-up me-2"), "Run a backtest to see results"],
+                            className="text-center text-muted py-5",
+                        )
+                    ]
+                )
+            ]
+        )
+    ]
+    return {
+        "defaults": defaults,
+        "result": {},
+        "params": {},
+        "mag7_children": None,
+        "results_children": placeholder,
+        "export_class": "d-none",
+    }
 
 
-def restore_binbin_backtest_form(pathname):
-    """Restore form inputs from the last persisted Binbin God params."""
-    if pathname != "/binbin-god":
-        return _no_update_form_response()
-
-    payload = load_last_binbin_god_result()
-    if not payload:
-        return _no_update_form_response()
-
-    return _form_values_from_params(payload.get("params"))
-
-
-def _build_configuration_panel():
+def _build_configuration_panel(defaults):
     return html.Div(
         [
             create_strategy_info_card(),
-            _section_card("Run Setup", _build_rows(RUN_SETUP_FIELDS), color="success"),
-            _section_card("Core Wheel", _build_rows(CORE_WHEEL_FIELDS), color="secondary"),
-            _section_card("ML", _build_rows(ML_FIELDS), color="primary"),
-            _section_card("Covered Call / Repair", _build_rows(CC_REPAIR_FIELDS), color="warning"),
-            _section_card("Defensive Put / Cooldown", _build_rows(DEFENSIVE_FIELDS), color="danger"),
-            _section_card("Symbol Risk / Inventory", _build_rows(SYMBOL_RISK_FIELDS), color="dark"),
+            _section_card("Run Setup", _build_rows(RUN_SETUP_FIELDS, defaults), color="success"),
+            _section_card("Core Wheel", _build_rows(CORE_WHEEL_FIELDS, defaults), color="secondary"),
+            _section_card("ML", _build_rows(ML_FIELDS, defaults), color="primary"),
+            _section_card("Covered Call / Repair", _build_rows(CC_REPAIR_FIELDS, defaults), color="warning"),
+            _section_card("Defensive Put / Cooldown", _build_rows(DEFENSIVE_FIELDS, defaults), color="danger"),
+            _section_card("Symbol Risk / Inventory", _build_rows(SYMBOL_RISK_FIELDS, defaults), color="dark"),
             dbc.Button(
                 [html.I(className="bi bi-play-fill me-2"), "Run Backtest"],
                 id="bbg-run-btn",
@@ -789,7 +798,7 @@ def _build_configuration_panel():
             ),
             html.Div(
                 id="bbg-export-container",
-                className="d-none",
+                className=defaults.get("export_class", "d-none"),
                 children=[
                     dbc.Button("📤 Export for AI Analysis", id="bbg-export-btn", color="info", className="w-100 mt-2", n_clicks=0),
                 ],
@@ -799,9 +808,12 @@ def _build_configuration_panel():
     )
 
 
-layout = dbc.Container(
-    [
-        dcc.Location(id="bbg-page-url", refresh=False),
+def layout():
+    initial_state = _get_initial_layout_state()
+    defaults = dict(initial_state["defaults"])
+    defaults["export_class"] = initial_state["export_class"]
+    return dbc.Container(
+        [
         html.Div(
             [
                 html.H1([html.I(className="bi bi-robot me-2"), "Binbin God Strategy Backtester"], className="mb-2"),
@@ -811,10 +823,10 @@ layout = dbc.Container(
         ),
         dbc.Row(
             [
-                dbc.Col(_build_configuration_panel(), md=4),
+                dbc.Col(_build_configuration_panel(defaults), md=4),
                 dbc.Col(
                     [
-                        create_mag7_analysis_placeholder(),
+                        create_mag7_analysis_placeholder(initial_state["mag7_children"]),
                         html.Div(
                             id="bbg-loading-indicator",
                             style={"display": "none"},
@@ -845,25 +857,12 @@ layout = dbc.Container(
                             type="circle",
                             children=html.Div(
                                 id="binbin-results-container",
-                                children=[
-                                    dbc.Card(
-                                        [
-                                            dbc.CardBody(
-                                                [
-                                                    html.Div(
-                                                        [html.I(className="bi bi-graph-up me-2"), "Run a backtest to see results"],
-                                                        className="text-center text-muted py-5",
-                                                    )
-                                                ]
-                                            )
-                                        ]
-                                    )
-                                ],
+                                children=initial_state["results_children"],
                             ),
                             overlay_style={"visibility": "visible", "opacity": 0.9, "backgroundColor": "#1a1a2e"},
                         ),
-                        dcc.Store(id="binbin-results-store", data={}),
-                        dcc.Store(id="binbin-params-store", data={}),
+                        dcc.Store(id="binbin-results-store", data=initial_state["result"]),
+                        dcc.Store(id="binbin-params-store", data=initial_state["params"]),
                     ],
                     md=8,
                 ),
@@ -883,9 +882,9 @@ layout = dbc.Container(
             """,
             dangerously_allow_html=True,
         ),
-    ],
-    fluid=True,
-)
+        ],
+        fluid=True,
+    )
 
 
 @callback(
@@ -896,7 +895,6 @@ layout = dbc.Container(
     Output("bbg-loading-indicator", "style"),
     Output("bbg-export-container", "className"),
     Input("bbg-run-btn", "n_clicks"),
-    Input("bbg-page-url", "pathname"),
     State("bbg-start", "value"),
     State("bbg-end", "value"),
     State("bbg-initial-capital", "value"),
@@ -954,11 +952,10 @@ layout = dbc.Container(
     State("bbg-stock-inventory-base-cap", "value"),
     State("bbg-stock-inventory-cap-floor", "value"),
     State("bbg-stock-inventory-block-threshold", "value"),
-    prevent_initial_call=False,
+    prevent_initial_call=True,
 )
 def run_binbin_backtest(
     n_clicks,
-    pathname,
     start_date,
     end_date,
     initial_capital,
@@ -1018,16 +1015,8 @@ def run_binbin_backtest(
     stock_inventory_block_threshold,
 ):
     """Run the Binbin God backtest using QC-aligned parameters."""
-    try:
-        triggered_id = ctx.triggered_id
-    except Exception:
-        triggered_id = "bbg-run-btn" if n_clicks else "bbg-page-url"
-
-    if triggered_id == "bbg-page-url" or (triggered_id is None and not n_clicks):
-        return restore_binbin_backtest_on_load(pathname)
-
     if not n_clicks or not start_date or not end_date:
-        return _no_update_result_response()
+        return no_update, no_update, no_update, no_update, no_update, no_update
 
     params = build_binbin_backtest_params(
         {
@@ -1106,16 +1095,6 @@ def run_binbin_backtest(
     save_last_binbin_god_result(params, result)
     mag7_section, content, loading_style, export_class = _build_binbin_results_view(result, params)
     return result, params, mag7_section, content, loading_style, export_class
-
-
-@callback(
-    [Output(field["id"], "value") for field in ALL_FORM_FIELDS],
-    Input("bbg-page-url", "pathname"),
-    prevent_initial_call=False,
-)
-def restore_binbin_backtest_form_values(pathname):
-    """Dash callback wrapper for restoring form values on page load."""
-    return restore_binbin_backtest_form(pathname)
 
 
 @callback(

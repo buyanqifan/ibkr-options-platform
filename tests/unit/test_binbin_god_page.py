@@ -39,6 +39,32 @@ def _collect_ids(node: Any) -> set[str]:
     return ids
 
 
+def _find_component(node: Any, target_id: str):
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        if isinstance(current, (list, tuple)):
+            stack.extend(current)
+            continue
+        if isinstance(current, (str, int, float, bool)):
+            continue
+        if getattr(current, "id", None) == target_id:
+            return current
+        children = getattr(current, "children", None)
+        if isinstance(children, (list, tuple)):
+            stack.extend(children)
+        elif children is not None:
+            stack.append(children)
+    return None
+
+
+def _get_layout(page):
+    layout = page.layout
+    return layout() if callable(layout) else layout
+
+
 def _default_form_inputs() -> dict[str, Any]:
     return {
         "start_date": "2024-01-01",
@@ -129,7 +155,7 @@ class StubEngine:
 def test_layout_contains_qc_fields_and_omits_legacy_controls(monkeypatch):
     page = _load_binbin_god_page(monkeypatch)
 
-    ids = _collect_ids(page.layout)
+    ids = _collect_ids(_get_layout(page))
 
     expected_ids = {
         "bbg-stock-pool-text",
@@ -217,7 +243,6 @@ def test_run_binbin_backtest_submits_qc_payload_and_returns_results(monkeypatch)
 
     result, params, _, content, loading_style, export_class = page.run_binbin_backtest(
         n_clicks=1,
-        pathname="/binbin-god",
         **_default_form_inputs(),
     )
 
@@ -242,7 +267,6 @@ def test_run_binbin_backtest_saves_last_result(monkeypatch):
 
     result, params, _, _, _, _ = page.run_binbin_backtest(
         n_clicks=1,
-        pathname="/binbin-god",
         **_default_form_inputs(),
     )
 
@@ -251,7 +275,7 @@ def test_run_binbin_backtest_saves_last_result(monkeypatch):
     assert saved["params"]["strategy"] == "binbin_god"
 
 
-def test_restore_binbin_backtest_restores_saved_result(monkeypatch):
+def test_layout_uses_last_result_as_initial_state(monkeypatch):
     page = _load_binbin_god_page(monkeypatch)
     params = page.build_binbin_backtest_params(_default_form_inputs())
     result = StubEngine().run(params)
@@ -262,28 +286,13 @@ def test_restore_binbin_backtest_restores_saved_result(monkeypatch):
         lambda: {"params": params, "result": result},
     )
 
-    restored = page.restore_binbin_backtest_on_load("/binbin-god")
+    layout = _get_layout(page)
+    results_store = _find_component(layout, "binbin-results-store")
+    params_store = _find_component(layout, "binbin-params-store")
+    export_container = _find_component(layout, "bbg-export-container")
+    start_input = _find_component(layout, "bbg-start")
 
-    assert restored[0]["metrics"]["total_return_pct"] == 1.0
-    assert restored[1] == params
-    assert restored[3] is not no_update
-    assert restored[5] == "d-block mt-2"
-
-
-def test_restore_binbin_backtest_restores_form_values(monkeypatch):
-    page = _load_binbin_god_page(monkeypatch)
-    params = page.build_binbin_backtest_params(_default_form_inputs())
-
-    monkeypatch.setattr(
-        page,
-        "load_last_binbin_god_result",
-        lambda: {"params": params, "result": StubEngine().run(params)},
-    )
-
-    restored = page.restore_binbin_backtest_form("/binbin-god")
-
-    assert restored[0] == params["start_date"]
-    assert restored[1] == params["end_date"]
-    assert restored[2] == params["initial_capital"]
-    assert restored[3] == ",".join(params["stock_pool"])
-    assert restored[4] == params["max_positions_ceiling"]
+    assert results_store.data["metrics"]["total_return_pct"] == 1.0
+    assert params_store.data == params
+    assert export_container.className == "d-block mt-2"
+    assert start_input.value == params["start_date"]
