@@ -1,19 +1,8 @@
-"""
-ML Position Size Optimizer for QuantConnect
-============================================
+"""ML-based position size optimizer for the wheel strategy.
 
-Machine learning model that optimizes position size based on:
-- Market conditions (IV Rank, VIX, volatility regime)
-- Strategy phase (SP/CC/CC+SP simultaneous)
-- Portfolio state (drawdown, margin utilization)
-- Historical performance patterns
-
-binbingod策略优化: 支持CC阶段同时开SP
-- strategy_phase: "SP" = 卖Put阶段
-                  "CC" = 卖Covered Call阶段
-                  "CC+SP" = 同时操作模式
-
-Output: Optimal number of contracts and risk-adjusted position multiplier.
+This module sizes positions for two runtime phases only:
+- SP: short put
+- CC: covered call
 """
 
 from AlgorithmImports import *
@@ -124,15 +113,12 @@ class MLPositionOptimizer:
                 features['portfolio_concentration'] = 0
         else:
             features['portfolio_concentration'] = 0
-        
         # === Strategy Phase ===
         if strategy_phase == "SP":
             features['strategy_phase'] = 0
-        elif strategy_phase == "CC":
+        else:
             features['strategy_phase'] = 1
-        else:  # CC+SP simultaneous mode
-            features['strategy_phase'] = 2
-        
+
         # === Option Features ===
         underlying_price = option_info.get('underlying_price', market_data.get('price', 100))
         strike = option_info.get('strike', underlying_price * 0.95)
@@ -141,7 +127,7 @@ class MLPositionOptimizer:
         dte = option_info.get('dte', 30)
         
         # Strike distance
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             features['strike_distance_pct'] = (underlying_price - strike) / underlying_price * 100
         else:
             features['strike_distance_pct'] = (strike - underlying_price) / underlying_price * 100
@@ -151,7 +137,7 @@ class MLPositionOptimizer:
         features['premium'] = premium
         
         # Premium yield
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             margin_required = strike * 100
         else:
             margin_required = 0
@@ -168,10 +154,10 @@ class MLPositionOptimizer:
         # === Risk Features ===
         features['assignment_probability'] = self._estimate_assignment_probability(
             underlying_price, strike, dte, iv,
-            'P' if strategy_phase in ("SP", "CC+SP") else 'C'
+            'P' if strategy_phase == "SP" else 'C'
         )
         
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             breakeven = strike - premium
             features['break_even_distance_pct'] = (underlying_price - breakeven) / underlying_price * 100
         else:
@@ -234,7 +220,7 @@ class MLPositionOptimizer:
         Args:
             market_data: Market data
             portfolio_state: Portfolio state
-            strategy_phase: "SP", "CC", or "CC+SP"
+            strategy_phase: "SP", "CC", or "CC"
             option_info: Option details
             base_position: Base position size
             max_position: Maximum position size
@@ -313,9 +299,8 @@ class MLPositionOptimizer:
             reasoning_parts.append("SP phase: -10% (cash reserve)")
         elif strategy_phase == "CC":
             reasoning_parts.append("CC phase: standard (stock collateral)")
-        else:  # CC+SP simultaneous mode
-            multiplier *= 0.85
-            reasoning_parts.append("CC+SP simultaneous: -15% (dual margin usage)")
+        else:
+            reasoning_parts.append("CC phase: standard (stock collateral)")
         
         # === Assignment probability adjustment ===
         assign_prob = features['assignment_probability']
@@ -451,7 +436,7 @@ class MLPositionOptimizer:
         strike_distance = features['strike_distance_pct'] / 100
         strike = 100  # Approximate
         
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             return (strike - premium) * 100 * num_contracts
         else:
             return premium * 100 * num_contracts
@@ -480,11 +465,8 @@ class MLPositionOptimizer:
                 option_info = trade.get('option_info', {})
                 
                 is_put = trade.get('trade_type', '').endswith('PUT')
-                is_cc_phase_sp = trade.get('cc_phase_sp', False)
                 
-                if is_put and is_cc_phase_sp:
-                    strategy_phase = "CC+SP"
-                elif is_put:
+                if is_put:
                     strategy_phase = "SP"
                 else:
                     strategy_phase = "CC"

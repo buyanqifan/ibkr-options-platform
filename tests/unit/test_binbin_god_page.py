@@ -94,14 +94,15 @@ def _default_form_inputs() -> dict[str, Any]:
         "end_date": "2025-12-31",
         "initial_capital": 300000,
         "stock_pool_text": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
-        "max_positions_ceiling": 60,
+        "max_positions_ceiling": 20,
         "max_leverage": 1.0,
-        "target_margin_utilization": 0.60,
-        "position_aggressiveness": 2.0,
+        "target_margin_utilization": 0.35,
+        "position_aggressiveness": 1.0,
         "profit_target_pct": 70,
         "stop_loss_pct": 999999,
-        "margin_buffer_pct": 0.35,
+        "margin_buffer_pct": 0.50,
         "margin_rate_per_contract": 0.25,
+        "max_risk_per_trade": 0.02,
         "dte_min": 21,
         "dte_max": 60,
         "put_delta": 0.30,
@@ -121,8 +122,8 @@ def _default_form_inputs() -> dict[str, Any]:
         "repair_call_dte_max": 21,
         "repair_call_max_discount_pct": 0.08,
         "defensive_put_roll_enabled": True,
-        "defensive_put_roll_loss_pct": 200,
-        "defensive_put_roll_itm_buffer_pct": 0.10,
+        "defensive_put_roll_loss_pct": 100,
+        "defensive_put_roll_itm_buffer_pct": 0.05,
         "defensive_put_roll_min_dte": 7,
         "defensive_put_roll_max_dte": 14,
         "defensive_put_roll_dte_min": 21,
@@ -142,11 +143,11 @@ def _default_form_inputs() -> dict[str, Any]:
         "symbol_downtrend_sensitivity": 1.50,
         "symbol_volatility_sensitivity": 0.75,
         "symbol_exposure_sensitivity": 1.25,
-        "symbol_assignment_base_cap": 0.95,
+        "symbol_assignment_base_cap": 0.25,
         "stock_inventory_cap_enabled": True,
-        "stock_inventory_base_cap": 0.20,
+        "stock_inventory_base_cap": 0.15,
         "stock_inventory_cap_floor": 0.50,
-        "stock_inventory_block_threshold": 0.90,
+        "stock_inventory_block_threshold": 0.75,
     }
 
 
@@ -222,17 +223,21 @@ def test_build_binbin_backtest_params_uses_qc_defaults(monkeypatch):
     assert params["stock_pool"] == ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
     assert params["initial_capital"] == 300000
     assert params["end_date"] == "2025-12-31"
-    assert params["max_positions_ceiling"] == 60
-    assert params["max_positions"] == 60
-    assert params["position_aggressiveness"] == 2.0
+    assert params["max_positions_ceiling"] == 20
+    assert params["max_positions"] == 20
+    assert params["position_aggressiveness"] == 1.0
     assert params["profit_target_pct"] == 70
-    assert params["margin_buffer_pct"] == 0.35
+    assert params["margin_buffer_pct"] == 0.50
+    assert params["target_margin_utilization"] == 0.35
+    assert params["max_risk_per_trade"] == 0.02
     assert params["ml_delta_optimization"] is True
     assert params["ml_dte_optimization"] is True
     assert params["ml_roll_optimization"] is True
     assert params["ml_position_optimization"] is True
     assert params["stop_loss_pct"] == 999999
-    assert params["symbol_assignment_base_cap"] == 0.95
+    assert params["symbol_assignment_base_cap"] == 0.25
+    assert params["stock_inventory_base_cap"] == 0.15
+    assert params["stock_inventory_block_threshold"] == 0.75
     assert "run_mode" not in params
 
 

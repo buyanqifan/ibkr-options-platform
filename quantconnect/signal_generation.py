@@ -67,10 +67,14 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
     for symbol in algo.stock_pool:
         if is_symbol_on_cooldown(algo, symbol):
             continue
+        shares_held = get_shares_held(algo, symbol)
+        if shares_held > 0:
+            algo.Log(f"SP_HELD_BLOCK:{symbol}:shares={shares_held}")
+            continue
         if getattr(algo, "stock_inventory_cap_enabled", True):
             equity = algo.equities.get(symbol)
             underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
-            stock_notional = get_shares_held(algo, symbol) * max(underlying_price, 0)
+            stock_notional = shares_held * max(underlying_price, 0)
             portfolio_value = max(algo.Portfolio.TotalPortfolioValue, 0.0)
             inventory_cap = portfolio_value * getattr(algo, "stock_inventory_base_cap", 0.20)
             inventory_block_threshold = getattr(algo, "stock_inventory_block_threshold", 0.90)

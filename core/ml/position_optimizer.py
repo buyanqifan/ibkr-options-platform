@@ -1,17 +1,8 @@
-"""ML-based position size optimizer for Wheel strategy.
+"""ML-based position size optimizer for the wheel strategy.
 
-Uses machine learning to predict optimal position size based on:
-- Market conditions (IV Rank, VIX, volatility regime)
-- Strategy phase (SP/CC/CC+SP simultaneous)
-- Portfolio state (drawdown, margin utilization)
-- Historical performance patterns
-
-binbingod策略优化: 支持CC阶段同时开SP（SP和CC不是对立的，可以同时操作）
-- strategy_phase: "SP" = 卖Put阶段
-                  "CC" = 卖Covered Call阶段
-                  "CC+SP" = 同时操作模式（在CC阶段条件允许时开SP）
-
-Output: Optimal number of contracts and risk-adjusted position multiplier.
+This module sizes positions for two runtime phases only:
+- SP: short put
+- CC: covered call
 """
 
 import numpy as np
@@ -61,7 +52,7 @@ class TrainingSample:
     portfolio_beta: float
 
     # Strategy features
-    strategy_phase: int  # 0=SP, 1=CC, 2=CC+SP (simultaneous mode)
+    strategy_phase: int
     shares_held: int
     cost_basis: float
 
@@ -116,8 +107,7 @@ class MLPositionOptimizer:
             'portfolio_concentration',  # Herfindahl index of positions
 
             # Strategy phase
-            'strategy_phase',  # 0=SP, 1=CC, 2=CC+SP (simultaneous mode)
-
+            'strategy_phase',  
             # Stock/Option features
             'strike_distance_pct',  # OTM percentage
             'dte',
@@ -217,16 +207,11 @@ class MLPositionOptimizer:
                 features['portfolio_concentration'] = 0
         else:
             features['portfolio_concentration'] = 0
-
         # === Strategy Phase ===
-        # 支持同时操作模式: CC+SP
-        # strategy_phase: 0=SP only, 1=CC only, 2=CC+SP (simultaneous)
         if strategy_phase == "SP":
             features['strategy_phase'] = 0
-        elif strategy_phase == "CC":
+        else:
             features['strategy_phase'] = 1
-        else:  # CC+SP simultaneous mode
-            features['strategy_phase'] = 2
 
         # === Option Features ===
         underlying_price = option_info.get('underlying_price', market_data.get('price', 100))
@@ -236,8 +221,7 @@ class MLPositionOptimizer:
         dte = option_info.get('dte', 30)
 
         # Strike distance (OTM percentage)
-        # 对于CC+SP模式，我们是在开SP（卖Put），所以使用SP的逻辑
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":  # Put: strike < price
+        if strategy_phase == "SP":
             features['strike_distance_pct'] = (underlying_price - strike) / underlying_price * 100
         else:  # Call: strike > price (CC only)
             features['strike_distance_pct'] = (strike - underlying_price) / underlying_price * 100
@@ -247,8 +231,7 @@ class MLPositionOptimizer:
         features['premium'] = premium
 
         # Premium yield: premium / margin required
-        # 对于CC+SP模式，开SP需要cash-secured margin
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             margin_required = strike * 100  # Cash-secured put
         else:
             margin_required = 0  # Covered call (stock is collateral)
@@ -272,12 +255,11 @@ class MLPositionOptimizer:
             strike=strike,
             dte=dte,
             iv=iv,
-            right='P' if strategy_phase in ("SP", "CC+SP") else 'C',
+            right='P' if strategy_phase == "SP" else 'C',
         )
 
         # Break-even distance using PayoffCalculator
-        # 对于CC+SP模式，我们是在开SP，使用SP的逻辑
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             # Use PayoffCalculator for accurate break-even
             try:
                 payoff_result = PayoffCalculator.calculate_single_option_payoff(
@@ -492,18 +474,11 @@ class MLPositionOptimizer:
             reasoning_parts.append(f"Moderate margin ({margin_util*100:.0f}%): -20% position")
 
         # === Strategy phase adjustment ===
-        # 支持三种模式: SP only, CC only, CC+SP simultaneous
         if strategy_phase == "SP":
-            # SP phase: more conservative (cash required)
             multiplier *= 0.9
             reasoning_parts.append("SP phase: -10% (cash reserve)")
-        elif strategy_phase == "CC":
-            # CC phase: can be slightly more aggressive (stock collateral)
+        else:
             reasoning_parts.append("CC phase: standard (stock collateral)")
-        else:  # CC+SP simultaneous mode (binbingod策略优化)
-            # 同时操作模式: 需要更谨慎，因为同时占用股票抵押和现金抵押
-            multiplier *= 0.85
-            reasoning_parts.append("CC+SP simultaneous: -15% (dual margin usage)")
 
         # === Assignment probability adjustment ===
         assign_prob = features['assignment_probability'].values[0]
@@ -558,14 +533,14 @@ class MLPositionOptimizer:
 
         # Get underlying price from strike_distance_pct
         strike_dist = features.get('strike_distance_pct', 5).values[0]
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             underlying_price = strike / (1 - strike_dist / 100)
         else:
             underlying_price = strike / (1 + strike_dist / 100)
 
         try:
             # Use PayoffCalculator for accurate expected return
-            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+            if strategy_phase == "SP":
                 payoff_result = PayoffCalculator.calculate_single_option_payoff(
                     option_type='put',
                     strike=strike,
@@ -612,14 +587,14 @@ class MLPositionOptimizer:
 
         # Get underlying price from strike_distance_pct
         strike_dist = features.get('strike_distance_pct', 5).values[0]
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             underlying_price = strike / (1 - strike_dist / 100)
         else:
             underlying_price = strike / (1 + strike_dist / 100)
 
         try:
             # Use PayoffCalculator for accurate max loss
-            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+            if strategy_phase == "SP":
                 payoff_result = PayoffCalculator.calculate_single_option_payoff(
                     option_type='put',
                     strike=strike,
@@ -701,14 +676,14 @@ class MLPositionOptimizer:
         # Get underlying price from strike_distance_pct
         # strike_distance_pct = (underlying - strike) / underlying * 100 for put
         strike_dist = features['strike_distance_pct'].values[0] if 'strike_distance_pct' in features.columns else 5
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             underlying_price = strike / (1 - strike_dist / 100)
         else:
             underlying_price = strike / (1 + strike_dist / 100)
 
         # Try using PayoffCalculator for accurate max loss
         try:
-            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+            if strategy_phase == "SP":
                 payoff_result = PayoffCalculator.calculate_single_option_payoff(
                     option_type='put',
                     strike=strike,
@@ -738,7 +713,7 @@ class MLPositionOptimizer:
         except Exception as e:
             logger.debug(f"PayoffCalculator failed, using fallback: {e}")
             # Fallback to simple calculation
-            if strategy_phase == "SP" or strategy_phase == "CC+SP":
+            if strategy_phase == "SP":
                 return (strike - premium) * 100 * num_contracts
             else:
                 return premium * 100 * num_contracts
@@ -836,13 +811,10 @@ class MLPositionOptimizer:
                 option_info = trade.get('option_info', {})
 
                 # Determine strategy phase
-                # 如果历史数据中有标记是在CC阶段开的SP，使用CC+SP模式
                 is_put = trade.get('trade_type', '').endswith('PUT')
                 is_cc_phase_sp = trade.get('cc_phase_sp', False)  # 标记是否在CC阶段开的SP
 
-                if is_put and is_cc_phase_sp:
-                    strategy_phase = "CC+SP"
-                elif is_put:
+                if is_put:
                     strategy_phase = "SP"
                 else:
                     strategy_phase = "CC"

@@ -1,6 +1,7 @@
 """Tests for BinbinGod QC parity helpers and engine mode."""
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -167,7 +168,7 @@ def test_put_quantity_qc_applies_max_risk_per_trade_cap():
     config = BinbinGodParityConfig.from_params(
         {
             "parity_mode": "qc",
-            "max_risk_per_trade": 0.01,
+            "max_risk_per_trade": 0.005,
         }
     )
     contract = build_contract_lattice(
@@ -195,8 +196,8 @@ def test_put_quantity_qc_applies_max_risk_per_trade_cap():
         shares_held=0,
         dynamic_max_positions=10,
     )
-    assert quantity == diagnostics["risk"]
-    assert quantity > 0
+    assert diagnostics["risk"] == 1
+    assert quantity == 1
     assert quantity < diagnostics["margin"]
 
 
@@ -512,7 +513,7 @@ def test_qc_parity_skips_sell_put_when_stock_inventory_exceeds_block_threshold(m
     assert signals == []
     assert recorded
     assert recorded[0][1] == "order_deferred"
-    assert recorded[0][2]["reason"] == "sp_stock_block"
+    assert recorded[0][2]["reason"] == "sp_existing_stock"
 
 
 def test_qc_parity_skips_sell_put_for_symbol_with_existing_stock_holdings(monkeypatch):
@@ -624,3 +625,34 @@ def test_engine_returns_parity_artifacts():
     assert "portfolio_snapshots" in result
     assert "parity_report" in result
     assert result["parity_report"]["status"] in {"no_baseline", "matched", "mismatch", "length_mismatch"}
+
+
+def test_binbin_god_strategy_does_not_expose_legacy_cc_sp_entrypoints():
+    strategy = BinbinGodStrategy({"symbol": "NVDA"})
+
+    assert not hasattr(strategy, "allow_sp_in_cc_phase")
+    assert not hasattr(strategy, "sp_in_cc_margin_threshold")
+    assert not hasattr(strategy, "sp_in_cc_max_positions")
+    assert not hasattr(strategy, "_generate_sp_in_cc_phase")
+
+
+def test_repo_has_no_legacy_cc_sp_markers_in_runtime_paths():
+    repo_root = Path(__file__).resolve().parents[2]
+    runtime_files = [
+        repo_root / "core" / "backtesting" / "strategies" / "binbin_god.py",
+        repo_root / "core" / "backtesting" / "strategies" / "base.py",
+        repo_root / "core" / "backtesting" / "simulator.py",
+        repo_root / "core" / "ml" / "position_optimizer.py",
+        repo_root / "core" / "ml" / "dte_optimizer.py",
+        repo_root / "core" / "ml" / "roll_optimizer.py",
+        repo_root / "core" / "ml" / "delta_strategy_integration.py",
+        repo_root / "quantconnect" / "ml_position_optimizer.py",
+        repo_root / "quantconnect" / "ml_dte_optimizer.py",
+        repo_root / "quantconnect" / "ml_integration.py",
+        repo_root / "quantconnect" / "README.md",
+    ]
+    banned_markers = ("CC+SP", "allow_sp_in_cc_phase", "sp_in_cc_")
+
+    for path in runtime_files:
+        text = path.read_text(encoding="utf-8")
+        assert not any(marker in text for marker in banned_markers), path.as_posix()

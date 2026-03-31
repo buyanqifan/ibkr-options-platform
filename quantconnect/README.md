@@ -28,12 +28,13 @@ A dynamic stock selection Wheel strategy for MAG7 stocks with ML optimization.
 {
     "initial_capital": 300000,
     "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
-    "max_positions_ceiling": 15,
-    "target_margin_utilization": 0.60,
+    "max_positions_ceiling": 20,
+    "target_margin_utilization": 0.35,
     "margin_buffer_pct": 0.50,
     "position_aggressiveness": 1.0,
     "ml_enabled": true,
-    "stop_loss_pct": 999999
+    "stop_loss_pct": 999999,
+    "max_risk_per_trade": 0.02
 }
 ```
 
@@ -48,7 +49,3 @@ A dynamic stock selection Wheel strategy for MAG7 stocks with ML optimization.
 - Sell OTM calls against held shares
 - If expires worthless: keep premium and shares
 - If assigned: sell shares, return to SP phase
-
-### CC+SP Simultaneous Mode
-- Can open SP positions during CC phase
-- Increases capital efficiency

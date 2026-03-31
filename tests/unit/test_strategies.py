@@ -947,10 +947,13 @@ class TestBinbinGodStrategy:
         strategy = BinbinGodStrategy({"symbol": "NVDA"})
 
         assert strategy.initial_capital == 300000
-        assert strategy.max_positions == 60
+        assert strategy.max_positions == 20
         assert strategy.profit_target_pct == 70
-        assert strategy.margin_buffer_pct == 0.35
-        assert strategy.symbol_assignment_base_cap == pytest.approx(0.95)
+        assert strategy.margin_buffer_pct == 0.50
+        assert strategy.symbol_assignment_base_cap == pytest.approx(0.25)
+        assert strategy.stock_inventory_base_cap == pytest.approx(0.15)
+        assert strategy.stock_inventory_block_threshold == pytest.approx(0.75)
+        assert strategy.max_risk_per_trade == pytest.approx(0.02)
         assert strategy._is_qc_parity_enabled() is True
         assert strategy.contract_universe_mode == "qc_emulated_lattice"
 

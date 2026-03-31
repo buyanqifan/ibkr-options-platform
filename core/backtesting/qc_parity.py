@@ -19,13 +19,19 @@ _QC_PARAMETER_FALLBACKS = {
     "end_date": "2024-12-31",
     "initial_capital": 100000.0,
     "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
-    "max_positions_ceiling": 15,
+    "max_positions_ceiling": 20,
     "profit_target_pct": 50.0,
     "stop_loss_pct": 999999.0,
     "margin_buffer_pct": 0.50,
     "margin_rate_per_contract": 0.25,
-    "target_margin_utilization": 0.60,
+    "target_margin_utilization": 0.35,
     "position_aggressiveness": 1.0,
+    "max_risk_per_trade": 0.02,
+    "symbol_assignment_base_cap": 0.25,
+    "stock_inventory_base_cap": 0.15,
+    "stock_inventory_block_threshold": 0.75,
+    "defensive_put_roll_loss_pct": 100.0,
+    "defensive_put_roll_itm_buffer_pct": 0.05,
     "ml_enabled": True,
     "dte_min": 21,
     "dte_max": 60,
@@ -58,6 +64,7 @@ QC_BINBIN_DEFAULTS = {
     "margin_rate_per_contract": float(QC_PARAMETER_DEFAULTS["margin_rate_per_contract"]),
     "target_margin_utilization": float(QC_PARAMETER_DEFAULTS["target_margin_utilization"]),
     "position_aggressiveness": float(QC_PARAMETER_DEFAULTS["position_aggressiveness"]),
+    "max_risk_per_trade": float(QC_PARAMETER_DEFAULTS["max_risk_per_trade"]),
     "max_leverage": 1.0,
     "ml_enabled": bool(QC_PARAMETER_DEFAULTS["ml_enabled"]),
     "ml_min_confidence": 0.40,
@@ -71,8 +78,8 @@ QC_BINBIN_DEFAULTS = {
     "repair_call_dte_max": 21,
     "repair_call_max_discount_pct": 0.08,
     "defensive_put_roll_enabled": True,
-    "defensive_put_roll_loss_pct": 200.0,
-    "defensive_put_roll_itm_buffer_pct": 0.10,
+    "defensive_put_roll_loss_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"]),
+    "defensive_put_roll_itm_buffer_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_itm_buffer_pct"]),
     "defensive_put_roll_min_dte": 7,
     "defensive_put_roll_max_dte": 14,
     "defensive_put_roll_dte_min": 21,
@@ -92,11 +99,11 @@ QC_BINBIN_DEFAULTS = {
     "symbol_downtrend_sensitivity": 1.50,
     "symbol_volatility_sensitivity": 0.75,
     "symbol_exposure_sensitivity": 1.25,
-    "symbol_assignment_base_cap": 0.25 + 0.35 * float(QC_PARAMETER_DEFAULTS["position_aggressiveness"]),
+    "symbol_assignment_base_cap": float(QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"]),
     "stock_inventory_cap_enabled": True,
-    "stock_inventory_base_cap": 0.20,
+    "stock_inventory_base_cap": float(QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"]),
     "stock_inventory_cap_floor": 0.50,
-    "stock_inventory_block_threshold": 0.90,
+    "stock_inventory_block_threshold": float(QC_PARAMETER_DEFAULTS["stock_inventory_block_threshold"]),
 }
 
 
@@ -133,6 +140,7 @@ class BinbinGodParityConfig:
     margin_rate_per_contract: float = QC_BINBIN_DEFAULTS["margin_rate_per_contract"]
     target_margin_utilization: float = QC_BINBIN_DEFAULTS["target_margin_utilization"]
     position_aggressiveness: float = QC_BINBIN_DEFAULTS["position_aggressiveness"]
+    max_risk_per_trade: float = QC_BINBIN_DEFAULTS["max_risk_per_trade"]
     max_leverage: float = QC_BINBIN_DEFAULTS["max_leverage"]
     ml_enabled: bool = bool(QC_BINBIN_DEFAULTS["ml_enabled"])
     ml_min_confidence: float = QC_BINBIN_DEFAULTS["ml_min_confidence"]
@@ -236,6 +244,7 @@ class BinbinGodParityConfig:
                 QC_BINBIN_DEFAULTS["target_margin_utilization"],
             ),
             position_aggressiveness=position_aggressiveness,
+            max_risk_per_trade=_to_float(merged.get("max_risk_per_trade", QC_BINBIN_DEFAULTS["max_risk_per_trade"]), QC_BINBIN_DEFAULTS["max_risk_per_trade"]),
             max_leverage=_to_float(merged.get("max_leverage", QC_BINBIN_DEFAULTS["max_leverage"]), QC_BINBIN_DEFAULTS["max_leverage"]),
             ml_enabled=bool(merged.get("ml_enabled", QC_BINBIN_DEFAULTS["ml_enabled"])),
             ml_min_confidence=ml_min_confidence,
@@ -300,6 +309,7 @@ class BinbinGodParityConfig:
                 "margin_rate_per_contract": self.margin_rate_per_contract,
                 "target_margin_utilization": self.target_margin_utilization,
                 "position_aggressiveness": self.position_aggressiveness,
+                "max_risk_per_trade": self.max_risk_per_trade,
                 "max_leverage": self.max_leverage,
                 "ml_enabled": self.ml_enabled,
                 "ml_min_confidence": self.ml_min_confidence,
@@ -744,6 +754,9 @@ def calculate_put_quantity_qc(
     stock_inventory_cap = calculate_stock_inventory_cap_qc(config, portfolio_value, symbol_state_multiplier)
     remaining_stock_inventory = max(0.0, stock_inventory_cap - symbol_stock_notional)
     max_by_stock_inventory = int(remaining_stock_inventory / candidate_notional) if candidate_notional > 0 else 0
+    max_by_risk = max_by_trade_cap
+    if premium > 0 and portfolio_value > 0 and config.max_risk_per_trade > 0:
+        max_by_risk = int((portfolio_value * config.max_risk_per_trade) / (premium * 100))
 
     diagnostics = {
         "margin": max_by_margin,
@@ -756,6 +769,7 @@ def calculate_put_quantity_qc(
         "symbol_notional": max_by_symbol_notional,
         "total_notional": max_by_total_notional,
         "stock_inventory": max_by_stock_inventory,
+        "risk": max_by_risk,
         "symbol_cap": symbol_cap,
         "state_multiplier": round(symbol_state_multiplier, 4),
         "vol_ratio": round(symbol_state["vol_ratio"], 4),
@@ -774,6 +788,7 @@ def calculate_put_quantity_qc(
         "symbol_notional",
         "total_notional",
         "stock_inventory",
+        "risk",
     )
     quantity = min(diagnostics[key] for key in limit_keys) if diagnostics else 0
     return max(0, quantity), diagnostics

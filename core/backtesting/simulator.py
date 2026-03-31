@@ -23,7 +23,7 @@ class OptionPosition:
     current_price: float = 0.0
     current_pnl: float = 0.0
     capital_at_entry: float = 0.0  # Total portfolio capital when opening position
-    strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
+    strategy_phase: str = "SP"  # SP or CC
     # Entry costs tracking for P&L breakdown
     entry_commission: float = 0.0  # Commission paid at entry
     entry_slippage: float = 0.0    # Slippage at entry
@@ -100,7 +100,7 @@ class TradeRecord:
     position_id: str = ""               # Unique identifier for margin tracking
     capital_at_entry: float = 0.0      # Total capital when opening position
     capital_at_exit: float = 0.0       # Total capital when closing position
-    strategy_phase: str = "SP"  # SP, CC, or CC+SP (binbingod策略优化)
+    strategy_phase: str = "SP"  # SP or CC
     pnl_breakdown: PnLBreakdown = None  # Detailed P&L breakdown for verification
 
     def to_dict(self) -> dict:
@@ -134,7 +134,7 @@ class TradeRecord:
         result = {
             "symbol": self.symbol,
             "trade_type": self.trade_type,
-            "strategy_phase": self.strategy_phase,  # SP, CC, or CC+SP
+            "strategy_phase": self.strategy_phase,  # SP or CC
             "entry_date": self.entry_date,
             "exit_date": self.exit_date,
             "expiry": self.expiry,

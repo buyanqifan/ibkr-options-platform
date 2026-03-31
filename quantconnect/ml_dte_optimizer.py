@@ -1,13 +1,8 @@
-"""
-ML DTE (Days to Expiration) Optimizer for QuantConnect
-=======================================================
+"""ML-based DTE optimizer for options strategies.
 
-Machine learning model that optimizes DTE selection using Q-learning.
-
-Supports three strategy phases:
-- "SP": Sell Put phase (standard)
-- "CC": Covered Call phase (standard)
-- "CC+SP": Simultaneous mode (binbingod策略优化)
+This module supports two runtime phases only:
+- SP: short put
+- CC: covered call
 """
 
 from AlgorithmImports import *
@@ -47,8 +42,7 @@ class DTEMarketContext:
     market_regime: str
     days_to_earnings: int
     option_liquidity: float
-    strategy_phase: str  # "SP", "CC", or "CC+SP"
-
+    strategy_phase: str  
 
 @dataclass
 class DTEOptimizationResult:
@@ -371,7 +365,7 @@ class DTEOptimizerML:
     ) -> float:
         """Optimize DTE based on strategy phase."""
         
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             # Sell Put: prefer moderate DTE
             if 25 <= dte <= 40:
                 return 1.0
@@ -452,7 +446,7 @@ class DTEOptimizerML:
         
         T = dte / 365.0
         
-        # ITM probability approximation (delta ≈ ITM probability for OTM options)
+        # ITM probability approximation (delta �?ITM probability for OTM options)
         moneyness = strike / context.current_price
         itm_prob = delta * (1 + 0.5 * (1 - moneyness) / (iv * np.sqrt(T))) if right == "P" else delta * (1 + 0.5 * (moneyness - 1) / (iv * np.sqrt(T)))
         
@@ -638,7 +632,7 @@ class DTEOptimizerML:
         T = dte / 365.0
         
         # Calculate delta
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             delta = 0.30
         else:
             delta = 0.30

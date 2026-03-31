@@ -81,7 +81,7 @@ class MLRollOptimizer:
             'market_regime',  # 0=low vol, 1=normal, 2=high vol
 
             # Phase features
-            'strategy_phase',  # 0=SP, 1=CC, 2=CC+SP (simultaneous mode)
+            'strategy_phase',  # 0=SP, 1=CC
         ]
 
         if model_path:
@@ -162,14 +162,8 @@ class MLRollOptimizer:
         else:
             market_regime = 1  # Normal
 
-        # Strategy phase - 支持CC+SP模式
         phase = position.get('strategy_phase', 'SP')
-        if phase == 'SP':
-            strategy_phase = 0
-        elif phase == 'CC':
-            strategy_phase = 1
-        else:  # CC+SP simultaneous mode
-            strategy_phase = 2
+        strategy_phase = 0 if phase == 'SP' else 1
 
         features = {
             'iv_rank': iv_rank,

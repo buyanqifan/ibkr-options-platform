@@ -66,8 +66,8 @@ def init_parameters(algo):
     # Backward compatible: support both max_positions and max_positions_ceiling
     max_pos_raw = _get_param(algo, "max_positions", None)
     if max_pos_raw is None:
-        max_pos_raw = _get_param(algo, "max_positions_ceiling", 10)
-    algo.max_positions_ceiling = _as_int(max_pos_raw, 10)
+        max_pos_raw = _get_param(algo, "max_positions_ceiling", 20)
+    algo.max_positions_ceiling = _as_int(max_pos_raw, 20)
     algo.max_positions = algo.max_positions_ceiling  # Will be recalculated dynamically
     algo.profit_target_pct = _as_float(_get_param(algo, "profit_target_pct", 50), 50.0)
     algo.stop_loss_pct = _as_float(_get_param(algo, "stop_loss_pct", 999999), 999999.0)
@@ -97,8 +97,8 @@ def init_parameters(algo):
     algo.repair_call_dte_max = _as_int(_get_param(algo, "repair_call_dte_max", 21), 21)
     algo.repair_call_max_discount_pct = _as_float(_get_param(algo, "repair_call_max_discount_pct", 0.08), 0.08)
     algo.defensive_put_roll_enabled = _as_bool(_get_param(algo, "defensive_put_roll_enabled", True), True)
-    algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 200), 200.0)
-    algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.10), 0.10)
+    algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 100), 100.0)
+    algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.05), 0.05)
     algo.defensive_put_roll_min_dte = _as_int(_get_param(algo, "defensive_put_roll_min_dte", 7), 7)
     algo.defensive_put_roll_max_dte = _as_int(_get_param(algo, "defensive_put_roll_max_dte", 14), 14)
     algo.defensive_put_roll_dte_min = _as_int(_get_param(algo, "defensive_put_roll_dte_min", 21), 21)
@@ -118,16 +118,16 @@ def init_parameters(algo):
     algo.symbol_downtrend_sensitivity = _as_float(_get_param(algo, "symbol_downtrend_sensitivity", 1.50), 1.50)
     algo.symbol_volatility_sensitivity = _as_float(_get_param(algo, "symbol_volatility_sensitivity", 0.75), 0.75)
     algo.symbol_exposure_sensitivity = _as_float(_get_param(algo, "symbol_exposure_sensitivity", 1.25), 1.25)
-    default_symbol_assignment_cap = 0.25 + 0.35 * algo.position_aggressiveness
+    default_symbol_assignment_cap = 0.25
     algo.symbol_assignment_base_cap = _clamp(
         _as_float(_get_param(algo, "symbol_assignment_base_cap", default_symbol_assignment_cap), default_symbol_assignment_cap),
         0.05,
         1.5,
     )
     algo.stock_inventory_cap_enabled = _as_bool(_get_param(algo, "stock_inventory_cap_enabled", True), True)
-    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.20), 0.20), 0.05, 1.0)
+    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.15), 0.15), 0.05, 1.0)
     algo.stock_inventory_cap_floor = _clamp(_as_float(_get_param(algo, "stock_inventory_cap_floor", 0.50), 0.50), 0.10, 1.0)
-    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.90), 0.90), 0.50, 1.20)
+    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.75), 0.75), 0.50, 1.20)
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
     algo.ml_enabled = _as_bool(_get_param(algo, "ml_enabled", True), True)
     algo.ml_exploration_rate = _as_float(_get_param(algo, "ml_exploration_rate", 0.1), 0.1)
@@ -137,7 +137,7 @@ def init_parameters(algo):
     algo.stock_pool = str(_get_param(algo, "stock_pool", ",".join(MAG7_STOCKS))).split(",")
     algo.weights = {"iv_rank": 0.35, "technical": 0.25, "momentum": 0.20, "pe_score": 0.20}
     # Target margin utilization for position sizing (60% of capital)
-    algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.60), 0.60)
+    algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.35), 0.35)
 
 
 def init_ml(algo):

@@ -5,7 +5,7 @@ from typing import Dict, Optional, Tuple
 from AlgorithmImports import OptionRight, OrderStatus, Resolution, SecurityType
 from ml_integration import StrategySignal
 from option_utils import calculate_dte, calculate_historical_vol
-from signals import calculate_pnl_metrics
+from signals import calculate_pnl_metrics, calculate_position_risk
 from option_pricing import BlackScholes
 from qc_portfolio import (
     get_option_position_count, get_shares_held, get_call_position_contracts,
@@ -436,6 +436,19 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
         max_by_total_notional,
         max_by_stock_inventory,
     )
+    max_by_risk = quantity
+    risk_message = ""
+    if quantity > 0 and premium > 0 and portfolio_value > 0:
+        risk_adjusted_quantity, risk_message = calculate_position_risk(
+            premium=premium,
+            quantity=-quantity,
+            portfolio_value=portfolio_value,
+            max_risk_per_trade=getattr(algo, "max_risk_per_trade", 0.02),
+            max_leverage=algo.max_leverage,
+            current_margin_used=total_margin_used,
+        )
+        max_by_risk = abs(risk_adjusted_quantity) if risk_adjusted_quantity < 0 else 0
+        quantity = min(quantity, max_by_risk)
     
     # Log if position is limited due to stock holdings or margin
     if stock_holding_count > 0 and quantity < (algo.max_positions - current_positions):
@@ -445,6 +458,7 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
             f"PUT_BLOCK:{symbol} margin={max_by_margin} budget={max_by_budget} lev={max_by_leverage} "
             f"symcap={max_by_symbol_contracts}/{symbol_cap} totalcap={max_by_total_contracts} "
             f"symnot={max_by_symbol_notional} totalnot={max_by_total_notional} stockcap={max_by_stock_inventory} "
+            f"risk={max_by_risk} riskmsg={risk_message or 'NA'} "
             f"slots={max_by_limit} "
             f"state={symbol_state_multiplier:.2f} vol={symbol_state['vol_ratio']:.2f} "
             f"dd={symbol_state['drawdown']:.2f} mom={symbol_state['momentum_20d']:.2f} "

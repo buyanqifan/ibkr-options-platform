@@ -174,7 +174,7 @@ class BinbinGodMLIntegration:
             current_price: Current stock price
             cost_basis: Cost basis if holding shares
             bars: Historical price bars
-            strategy_phase: "SP", "CC", or "CC+SP"
+            strategy_phase: "SP" or "CC"
             portfolio_state: Portfolio state dict
             options_data: Available options data
             fundamentals: Fundamental data
@@ -211,7 +211,7 @@ class BinbinGodMLIntegration:
                 return self._create_roll_signal(symbol, roll_rec, current_price, iv, strategy_phase)
         
         # 4. Determine action based on phase
-        if strategy_phase == "SP" or strategy_phase == "CC+SP":
+        if strategy_phase == "SP":
             action = "SELL_PUT"
             right = "P"
         else:
