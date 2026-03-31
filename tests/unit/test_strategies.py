@@ -951,6 +951,44 @@ class TestBinbinGodStrategy:
         assert strategy.profit_target_pct == 70
         assert strategy.margin_buffer_pct == 0.35
         assert strategy.symbol_assignment_base_cap == pytest.approx(0.95)
+        assert strategy._is_qc_parity_enabled() is True
+        assert strategy.contract_universe_mode == "qc_emulated_lattice"
+
+    def test_generate_signals_delegates_to_qc_parity_path(self, monkeypatch):
+        strategy = BinbinGodStrategy({"symbol": "NVDA"})
+        called = {}
+        expected = [
+            Signal(
+                symbol="NVDA",
+                trade_type="BINBIN_PUT",
+                right="P",
+                strike=100.0,
+                expiry="20240216",
+                quantity=-1,
+                iv=0.25,
+                delta=-0.30,
+                premium=2.0,
+                underlying_price=100.0,
+                margin_requirement=2500.0,
+            )
+        ]
+
+        def fake_generate_qc_parity_signals(**kwargs):
+            called["kwargs"] = kwargs
+            return expected
+
+        monkeypatch.setattr(strategy, "_generate_qc_parity_signals", fake_generate_qc_parity_signals)
+
+        signals = strategy.generate_signals(
+            current_date="2024-01-31",
+            underlying_price=131.0,
+            iv=0.25,
+            open_positions=[],
+            position_mgr=None,
+        )
+
+        assert signals == expected
+        assert called["kwargs"]["current_date"] == "2024-01-31"
     
     def test_initial_phase_is_sp(self, base_params):
         """Test that initial phase is Sell Put."""

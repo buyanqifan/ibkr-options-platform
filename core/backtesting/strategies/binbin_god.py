@@ -406,7 +406,7 @@ class BinbinGodStrategy(BaseStrategy):
             self.event_recorder.record(current_date, event_type, **payload)
 
     def _is_qc_parity_enabled(self) -> bool:
-        return self.parity_config.enabled and self.contract_universe_mode == "qc_emulated_lattice"
+        return self.contract_universe_mode == "qc_emulated_lattice"
 
     def _get_symbol_market_state(
         self,
@@ -774,194 +774,15 @@ class BinbinGodStrategy(BaseStrategy):
         open_positions: list,
         position_mgr=None,
     ) -> list[Signal]:
-        """Generate signals for backtesting (standard interface).
-        
-        This method adapts the real-time generate_signal() to the backtesting interface.
-        
-        Key logic (holdings-driven, no phase concept):
-        - Has stock -> can sell Call
-        - No stock and no Put -> can sell Put
-        - Both can happen simultaneously
-        """
-        if self._is_qc_parity_enabled():
-            return self._generate_qc_parity_signals(
-                current_date=current_date,
-                underlying_price=underlying_price,
-                iv=iv,
-                open_positions=open_positions,
-                position_mgr=position_mgr,
-            )
-
-        from datetime import datetime
+        """Generate signals for backtesting using the QC replay path."""
         self.current_time = datetime.strptime(current_date, "%Y-%m-%d")
-        
-        # Log current holdings state
-        logger.info(f"generate_signals START: date={current_date}, "
-                   f"total_shares={self.stock_holding.shares}, "
-                   f"held_symbols={self.stock_holding.get_symbols()}, "
-                   f"holdings={self.stock_holding.holdings}")
-        
-        # Check if we already have max positions
-        wheel_positions = [
-            p for p in open_positions 
-            if p.trade_type in ("BINBIN_PUT", "BINBIN_CALL")
-        ]
-        
-        if len(wheel_positions) >= self.max_positions:
-            logger.info(f"Max positions reached: {len(wheel_positions)} >= {self.max_positions}")
-            return []
-        
-        # Get current state (holdings-driven, no phase)
-        held_symbols = self.stock_holding.get_symbols()  # Symbols with stock
-        if not held_symbols and self.stock_holding.shares > 0 and self.symbol not in ("MAG7_AUTO", ""):
-            held_symbols = [self.symbol]
-        put_symbols = set()  # Symbols with open Put positions
-        for p in wheel_positions:
-            if p.trade_type == "BINBIN_PUT":
-                put_symbols.add(p.symbol)
-        
-        # Get stock pool data
-        pool_data = getattr(self, 'mag7_data', {})
-        stock_pool = getattr(self, 'stock_pool', MAG7_STOCKS)
-        stock_hv = getattr(self, 'stock_hv', {})
-        
-        all_signals = []
-        
-        # ========== Part 1: Generate Call signals for stocks we hold ==========
-        if held_symbols:
-            logger.info(f"Generating Call signals for held symbols: {held_symbols}")
-            
-            # Calculate existing Call coverage per stock
-            existing_call_coverage = {}  # {symbol: contracts}
-            for p in wheel_positions:
-                if p.trade_type == "BINBIN_CALL":
-                    sym = getattr(p, "symbol", self.symbol)
-                    existing_call_coverage[sym] = existing_call_coverage.get(sym, 0) + abs(p.quantity)
-            
-            for stock_symbol in held_symbols:
-                shares_held = self.stock_holding.get_shares(stock_symbol)
-                stock_cost_basis = self.stock_holding.holdings.get(stock_symbol, {}).get("cost_basis", 0)
-                if shares_held <= 0:
-                    continue
-                
-                # Check how many shares are already covered by existing Calls
-                covered_contracts = existing_call_coverage.get(stock_symbol, 0)
-                shares_covered = covered_contracts * 100
-                shares_available = shares_held - shares_covered
-                
-                if shares_available <= 0:
-                    logger.info(f"{stock_symbol}: All {shares_held} shares already covered by {covered_contracts} Call contracts")
-                    continue
-                
-                # Get the correct price and IV for this stock
-                actual_underlying_price = underlying_price
-                actual_iv = iv
-                
-                if stock_symbol in pool_data:
-                    bars = pool_data[stock_symbol]
-                    bar_index = -1
-                    for idx, bar in enumerate(bars):
-                        bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
-                        if bar_date_str <= current_date:
-                            actual_underlying_price = bar["close"]
-                            bar_index = idx
-                    
-                    if stock_symbol in stock_hv and bar_index >= 0:
-                        sym_hv = stock_hv[stock_symbol]
-                        if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
-                            actual_iv = sym_hv[bar_index]
-                
-                # Generate Call signal
-                signals = self._generate_backtest_call_signal(
-                    stock_symbol, current_date, actual_underlying_price, actual_iv,
-                    position_mgr, shares_available, stock_cost_basis
-                )
-                if signals:
-                    all_signals.extend(signals)
-                    logger.info(f"Generated {len(signals)} Call signal(s) for {stock_symbol}")
-        
-        # ========== Part 2: Generate Put signals ==========
-        allow_new_puts = not held_symbols
-        if held_symbols and self.allow_sp_in_cc_phase:
-            cc_sp_signals = self._generate_sp_in_cc_phase(
-                current_date=current_date,
-                underlying_price=underlying_price,
-                iv=iv,
-                wheel_positions=wheel_positions,
-                position_mgr=position_mgr,
-                held_symbols=held_symbols,
-                pool_data=pool_data,
-                stock_hv=stock_hv,
-            )
-            all_signals.extend(cc_sp_signals)
-        elif held_symbols:
-            allow_new_puts = False
-
-        available_for_put = stock_pool
-        if allow_new_puts and available_for_put and len(wheel_positions) + len(all_signals) < self.max_positions:
-            logger.info(f"Generating Put signals for available symbols: {available_for_put}")
-            
-            # Select best stock for Put
-            if "AUTO" in self.symbol:
-                # Build market_data for scoring
-                market_data = {}
-                for sym in available_for_put:
-                    bars = pool_data.get(sym, [])
-                    if bars:
-                        filtered_bars = [bar for bar in bars if str(bar.get("date", ""))[:10] <= current_date]
-                        if filtered_bars:
-                            market_data[sym] = filtered_bars
-                
-                if market_data:
-                    actual_symbol = self._select_best_stock(market_data, current_date)
-                else:
-                    actual_symbol = available_for_put[0]
-            else:
-                actual_symbol = self.symbol if self.symbol in available_for_put else available_for_put[0]
-            
-            # Get price and IV for selected symbol
-            actual_underlying_price = underlying_price
-            actual_iv = iv
-            
-            if actual_symbol in pool_data:
-                bars = pool_data[actual_symbol]
-                bar_index = -1
-                for idx, bar in enumerate(bars):
-                    bar_date_str = str(bar["date"])[:10] if bar["date"] else ""
-                    if bar_date_str <= current_date:
-                        actual_underlying_price = bar["close"]
-                        bar_index = idx
-                
-                if actual_symbol in stock_hv and bar_index >= 0:
-                    sym_hv = stock_hv[actual_symbol]
-                    if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
-                        actual_iv = sym_hv[bar_index]
-            
-            if self.is_symbol_on_cooldown(actual_symbol):
-                logger.info(f"Skipping Put signal for {actual_symbol}: cooldown active")
-                return all_signals
-
-            if self.stock_inventory_cap_enabled:
-                portfolio_value = position_mgr.net_capital if position_mgr else self.initial_capital
-                inventory_cap = portfolio_value * self.stock_inventory_base_cap
-                inventory_block = inventory_cap * self.stock_inventory_block_threshold
-                stock_notional = self.stock_holding.get_shares(actual_symbol) * max(actual_underlying_price, 0)
-                if inventory_cap > 0 and stock_notional >= inventory_block:
-                    logger.info(
-                        f"Skipping Put signal for {actual_symbol}: stock inventory "
-                        f"${stock_notional:.0f} >= block ${inventory_block:.0f}"
-                    )
-                    return all_signals
-
-            # Generate Put signal
-            signal = self._generate_backtest_put_signal(
-                actual_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
-            )
-            if signal:
-                all_signals.extend(signal)
-                logger.info(f"Generated {len(signal)} Put signal(s) for {actual_symbol}")
-        
-        return all_signals
+        return self._generate_qc_parity_signals(
+            current_date=current_date,
+            underlying_price=underlying_price,
+            iv=iv,
+            open_positions=open_positions,
+            position_mgr=position_mgr,
+        )
 
     def _generate_qc_parity_signals(
         self,
@@ -984,7 +805,11 @@ class BinbinGodStrategy(BaseStrategy):
         existing_call_coverage: Dict[str, int] = {}
         for pos in wheel_positions:
             if pos.trade_type == "BINBIN_CALL":
-                existing_call_coverage[pos.symbol] = existing_call_coverage.get(pos.symbol, 0) + abs(pos.quantity)
+                fallback_symbol = held_symbols[0] if len(held_symbols) == 1 else self.symbol
+                symbol = getattr(pos, "symbol", fallback_symbol)
+                if not symbol:
+                    continue
+                existing_call_coverage[symbol] = existing_call_coverage.get(symbol, 0) + abs(pos.quantity)
 
         for stock_symbol in held_symbols:
             shares_held = self.stock_holding.get_shares(stock_symbol)
@@ -1008,6 +833,8 @@ class BinbinGodStrategy(BaseStrategy):
 
         sp_candidates: list[Signal] = []
         for stock_symbol in stock_pool:
+            if self.is_symbol_on_cooldown(stock_symbol):
+                continue
             actual_price, actual_iv, _ = self._get_symbol_market_state(stock_symbol, current_date, underlying_price, iv)
             sp_candidates.extend(
                 self._generate_backtest_put_signal(
@@ -1202,6 +1029,8 @@ class BinbinGodStrategy(BaseStrategy):
         from core.backtesting.pricing import OptionsPricer
         
         # Default DTE values
+        dte_window_min = int(self.dte_min)
+        dte_window_max = int(self.dte_max)
         dte_days = int(self.dte_max)
         T = dte_days / 365.0
         entry = datetime.strptime(current_date, "%Y-%m-%d")
@@ -1250,6 +1079,8 @@ class BinbinGodStrategy(BaseStrategy):
                 
                 # Update DTE values based on ML recommendation
                 if ml_dte_result.confidence >= 0.4:  # Lowered from 0.6 to allow ML to work during learning
+                    dte_window_min = int(ml_dte_result.optimal_dte_min)
+                    dte_window_max = int(ml_dte_result.optimal_dte_max)
                     dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
                     T = dte_days / 365.0
                     expiry_date = entry + timedelta(days=dte_days)
@@ -1461,6 +1292,8 @@ class BinbinGodStrategy(BaseStrategy):
             return []
         
         # Default DTE values
+        dte_window_min = int(self.dte_min)
+        dte_window_max = int(self.dte_max)
         dte_days = int(self.dte_max)
         T = dte_days / 365.0
         entry = datetime.strptime(current_date, "%Y-%m-%d")
@@ -1555,6 +1388,8 @@ class BinbinGodStrategy(BaseStrategy):
             if drawdown_vs_cost >= self.repair_call_threshold_pct:
                 repair_mode = True
                 call_delta_target = max(call_delta_target, self.repair_call_delta)
+                dte_window_min = int(self.repair_call_dte_min)
+                dte_window_max = int(self.repair_call_dte_max)
                 dte_days = max(self.repair_call_dte_min, min(dte_days, self.repair_call_dte_max))
                 T = dte_days / 365.0
                 expiry_date = entry + timedelta(days=dte_days)
@@ -1592,11 +1427,23 @@ class BinbinGodStrategy(BaseStrategy):
                 iv=iv,
                 target_right="C",
                 target_delta=abs(final_delta),
-                dte_min=self.dte_min,
-                dte_max=self.dte_max,
+                dte_min=dte_window_min,
+                dte_max=dte_window_max,
                 delta_tolerance=0.05,
                 min_strike=min_strike,
             )
+            if selected_contract is None and min_strike is not None:
+                selected_contract = select_contract_from_lattice(
+                    symbol=symbol,
+                    current_date=current_date,
+                    underlying_price=underlying_price,
+                    iv=iv,
+                    target_right="C",
+                    target_delta=abs(final_delta),
+                    dte_min=dte_window_min,
+                    dte_max=dte_window_max,
+                    delta_tolerance=0.05,
+                )
             if selected_contract is None:
                 self._record_event(
                     current_date,

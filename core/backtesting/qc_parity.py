@@ -122,8 +122,8 @@ def _to_int(value: Any, default: int) -> int:
 class BinbinGodParityConfig:
     """Resolved QC-style parity configuration."""
 
-    parity_mode: str = "none"
-    contract_universe_mode: str = "legacy_theoretical"
+    parity_mode: str = "qc"
+    contract_universe_mode: str = "qc_emulated_lattice"
     ml_confidence_gate: float = 0.40
     initial_capital: float = QC_BINBIN_DEFAULTS["initial_capital"]
     max_positions_ceiling: int = QC_BINBIN_DEFAULTS["max_positions_ceiling"]
@@ -182,17 +182,16 @@ class BinbinGodParityConfig:
 
     @classmethod
     def from_params(cls, params: Dict[str, Any]) -> "BinbinGodParityConfig":
-        strategy_name = str(params.get("strategy", "") or "").lower()
-        force_qc_replay = strategy_name == "binbin_god"
-        parity_mode = str(params.get("parity_mode", "qc" if force_qc_replay else "none") or ("qc" if force_qc_replay else "none")).lower()
+        force_qc_replay = True
+        parity_mode = str(params.get("parity_mode", "qc") or "qc").lower()
         if force_qc_replay:
             parity_mode = "qc"
         contract_universe_mode = str(
             params.get(
                 "contract_universe_mode",
-                "qc_emulated_lattice" if force_qc_replay else "legacy_theoretical",
+                "qc_emulated_lattice",
             )
-            or ("qc_emulated_lattice" if force_qc_replay else "legacy_theoretical")
+            or "qc_emulated_lattice"
         ).lower()
         if force_qc_replay:
             contract_universe_mode = "qc_emulated_lattice"
