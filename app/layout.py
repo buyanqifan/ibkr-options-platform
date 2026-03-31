@@ -72,11 +72,8 @@ def create_layout():
 @callback(Output("page-content", "children"), Input("url", "pathname"))
 def display_page(pathname):
     """Route to the appropriate page based on URL pathname."""
-    if pathname in _ROUTES:
-        return _ROUTES[pathname]
-    
-    # Default to dashboard
-    return _ROUTES["/"]
+    page = _ROUTES.get(pathname, _ROUTES["/"])
+    return page() if callable(page) else page
 
 
 @callback(
