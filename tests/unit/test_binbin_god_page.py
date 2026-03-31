@@ -45,7 +45,6 @@ def _default_form_inputs() -> dict[str, Any]:
         "end_date": "2025-12-31",
         "initial_capital": 300000,
         "stock_pool_text": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
-        "run_mode": "qc",
         "max_positions_ceiling": 60,
         "max_leverage": 1.0,
         "target_margin_utilization": 0.60,
@@ -108,7 +107,6 @@ def test_layout_contains_qc_fields_and_omits_legacy_controls(monkeypatch):
     ids = _collect_ids(page.layout)
 
     expected_ids = {
-        "bbg-run-mode",
         "bbg-stock-pool-text",
         "bbg-max-positions-ceiling",
         "bbg-target-margin-utilization",
@@ -120,6 +118,7 @@ def test_layout_contains_qc_fields_and_omits_legacy_controls(monkeypatch):
         "bbg-stock-inventory-cap-enabled",
     }
     removed_ids = {
+        "bbg-run-mode",
         "bbg-use-synthetic",
         "bbg-stock-pool",
         "bbg-custom-stocks",
@@ -143,7 +142,7 @@ def test_build_binbin_backtest_params_uses_qc_defaults(monkeypatch):
 
     assert params["strategy"] == "binbin_god"
     assert params["parity_mode"] == "qc"
-    assert params["contract_universe_mode"] == "legacy_theoretical"
+    assert params["contract_universe_mode"] == "qc_emulated_lattice"
     assert params["ml_confidence_gate"] == 0.4
     assert params["symbol"] == "MAG7_AUTO"
     assert params["stock_pool"] == ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
@@ -160,16 +159,7 @@ def test_build_binbin_backtest_params_uses_qc_defaults(monkeypatch):
     assert params["ml_position_optimization"] is True
     assert params["stop_loss_pct"] == 999999
     assert params["symbol_assignment_base_cap"] == 0.95
-
-
-def test_build_binbin_backtest_params_supports_native_mode(monkeypatch):
-    page = _load_binbin_god_page(monkeypatch)
-    form_data = _default_form_inputs()
-    form_data["run_mode"] = "native"
-
-    params = page.build_binbin_backtest_params(form_data)
-
-    assert params["parity_mode"] == "none"
+    assert "run_mode" not in params
 
 
 def test_build_binbin_backtest_params_normalizes_stock_pool(monkeypatch):
