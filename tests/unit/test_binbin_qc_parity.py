@@ -50,41 +50,44 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.max_positions_ceiling == 20
     assert config.dte_min == 21
     assert config.dte_max == 60
-    assert config.position_aggressiveness == pytest.approx(1.0)
+    assert config.position_aggressiveness == pytest.approx(1.2)
     assert config.profit_target_pct == pytest.approx(70.0)
-    assert config.margin_buffer_pct == pytest.approx(0.50)
-    assert config.target_margin_utilization == pytest.approx(0.35)
-    assert config.max_risk_per_trade == pytest.approx(0.02)
+    assert config.margin_buffer_pct == pytest.approx(0.40)
+    assert config.target_margin_utilization == pytest.approx(0.45)
+    assert config.max_risk_per_trade == pytest.approx(0.03)
     assert config.ml_min_confidence == pytest.approx(0.40)
     assert config.defensive_put_roll_enabled is True
     assert config.assignment_cooldown_days == 20
     assert config.stock_inventory_cap_enabled is True
-    assert config.stock_inventory_base_cap == pytest.approx(0.15)
-    assert config.stock_inventory_block_threshold == pytest.approx(0.75)
+    assert config.stock_inventory_base_cap == pytest.approx(0.18)
+    assert config.stock_inventory_block_threshold == pytest.approx(0.85)
     assert config.defensive_put_roll_loss_pct == pytest.approx(100.0)
     assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.05)
-    assert config.symbol_assignment_base_cap == pytest.approx(0.25)
+    assert config.symbol_assignment_base_cap == pytest.approx(0.30)
+    assert config.max_new_puts_per_day == 3
 
 
 def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
     defaults = _extract_strategy_init_parameter_defaults()
 
     assert defaults["max_positions_ceiling"] == 20
-    assert defaults["margin_buffer_pct"] == pytest.approx(0.50)
-    assert defaults["target_margin_utilization"] == pytest.approx(0.35)
-    assert defaults["max_risk_per_trade"] == pytest.approx(0.02)
+    assert defaults["margin_buffer_pct"] == pytest.approx(0.40)
+    assert defaults["target_margin_utilization"] == pytest.approx(0.45)
+    assert defaults["max_risk_per_trade"] == pytest.approx(0.03)
     assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(100.0)
     assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.05)
-    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.25)
-    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.15)
-    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.75)
+    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.30)
+    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.18)
+    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.85)
+    assert defaults["max_new_puts_per_day"] == 3
 
 
 def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["initial_capital"] == 300000.0
     assert QC_PARAMETER_DEFAULTS["profit_target_pct"] == pytest.approx(70.0)
-    assert QC_PARAMETER_DEFAULTS["max_risk_per_trade"] == pytest.approx(0.02)
-    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.15)
+    assert QC_PARAMETER_DEFAULTS["max_risk_per_trade"] == pytest.approx(0.03)
+    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.18)
+    assert QC_PARAMETER_DEFAULTS["max_new_puts_per_day"] == 3
 
 
 def test_binbin_god_strategy_forces_qc_replay_defaults():
@@ -587,6 +590,51 @@ def test_qc_parity_skips_sell_put_for_symbol_with_existing_stock_holdings(monkey
     assert recorded[0][1] == "order_deferred"
     assert recorded[0][2]["symbol"] == "NVDA"
     assert recorded[0][2]["reason"] == "sp_existing_stock"
+
+
+def test_qc_parity_returns_multiple_sp_signals_when_slots_available(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA", "AAPL", "MSFT"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": False,
+            "max_new_puts_per_day": 3,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars, "AAPL": bars, "MSFT": bars}
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 0.0,
+            "stock_holding_count": 0,
+            "price_by_symbol": {"NVDA": 100.0, "AAPL": 100.0, "MSFT": 100.0},
+            "dynamic_max_positions": 10,
+        }
+    )
+
+    monkeypatch.setattr(strategy, "_generate_backtest_call_signal", lambda *args, **kwargs: [])
+
+    def fake_put_signal(symbol, *args, **kwargs):
+        confidence_by_symbol = {"NVDA": 0.95, "AAPL": 0.90, "MSFT": 0.85}
+        return [SimpleNamespace(symbol=symbol, right="P", quantity=-1, confidence=confidence_by_symbol[symbol], strategy_phase="SP")]
+
+    monkeypatch.setattr(strategy, "_generate_backtest_put_signal", fake_put_signal)
+
+    signals = strategy._generate_qc_parity_signals(
+        current_date=bars[-1]["date"],
+        underlying_price=100.0,
+        iv=0.25,
+        open_positions=[],
+        position_mgr=None,
+    )
+
+    assert [signal.symbol for signal in signals] == ["NVDA", "AAPL", "MSFT"]
 
 
 def test_symbol_state_risk_multiplier_matches_qc_penalty_shape():

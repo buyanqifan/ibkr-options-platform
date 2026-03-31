@@ -32,6 +32,7 @@ _QC_PARAMETER_FALLBACKS = {
     "symbol_assignment_base_cap": 0.25,
     "stock_inventory_base_cap": 0.15,
     "stock_inventory_block_threshold": 0.75,
+    "max_new_puts_per_day": 3,
     "defensive_put_roll_loss_pct": 100.0,
     "defensive_put_roll_itm_buffer_pct": 0.05,
     "ml_enabled": True,
@@ -188,6 +189,7 @@ QC_BINBIN_DEFAULTS = {
     "stock_inventory_base_cap": float(QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"]),
     "stock_inventory_cap_floor": float(QC_PARAMETER_DEFAULTS["stock_inventory_cap_floor"]),
     "stock_inventory_block_threshold": float(QC_PARAMETER_DEFAULTS["stock_inventory_block_threshold"]),
+    "max_new_puts_per_day": int(QC_PARAMETER_DEFAULTS["max_new_puts_per_day"]),
 }
 
 
@@ -267,6 +269,7 @@ class BinbinGodParityConfig:
     stock_inventory_base_cap: float = QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]
     stock_inventory_cap_floor: float = QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]
     stock_inventory_block_threshold: float = QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]
+    max_new_puts_per_day: int = QC_BINBIN_DEFAULTS["max_new_puts_per_day"]
 
     @property
     def enabled(self) -> bool:
@@ -375,6 +378,7 @@ class BinbinGodParityConfig:
             stock_inventory_base_cap=_clamp(_to_float(merged.get("stock_inventory_base_cap", QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]), QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]), 0.05, 1.0),
             stock_inventory_cap_floor=_clamp(_to_float(merged.get("stock_inventory_cap_floor", QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]), QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]), 0.10, 1.0),
             stock_inventory_block_threshold=_clamp(_to_float(merged.get("stock_inventory_block_threshold", QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]), QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]), 0.50, 1.20),
+            max_new_puts_per_day=max(1, _to_int(merged.get("max_new_puts_per_day", QC_BINBIN_DEFAULTS["max_new_puts_per_day"]), QC_BINBIN_DEFAULTS["max_new_puts_per_day"])),
         )
 
     def apply_to_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -433,6 +437,7 @@ class BinbinGodParityConfig:
                 "stock_inventory_base_cap": self.stock_inventory_base_cap,
                 "stock_inventory_cap_floor": self.stock_inventory_cap_floor,
                 "stock_inventory_block_threshold": self.stock_inventory_block_threshold,
+                "max_new_puts_per_day": self.max_new_puts_per_day,
                 "max_positions": self.max_positions_ceiling if self.enabled else params.get("max_positions", self.max_positions_ceiling),
             }
         )

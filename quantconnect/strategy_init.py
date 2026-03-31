@@ -71,14 +71,14 @@ def init_parameters(algo):
     algo.max_positions = algo.max_positions_ceiling  # Will be recalculated dynamically
     algo.profit_target_pct = _as_float(_get_param(algo, "profit_target_pct", 50), 50.0)
     algo.stop_loss_pct = _as_float(_get_param(algo, "stop_loss_pct", 999999), 999999.0)
-    algo.max_risk_per_trade = _as_float(_get_param(algo, "max_risk_per_trade", 0.02), 0.02)
+    algo.max_risk_per_trade = _as_float(_get_param(algo, "max_risk_per_trade", 0.03), 0.03)
     algo.max_leverage = _as_float(_get_param(algo, "max_leverage", 1.0), 1.0)
     algo._profit_target_disabled = algo.profit_target_pct >= 999999
     algo._stop_loss_disabled = algo.stop_loss_pct >= 999999
-    algo.margin_buffer_pct = _as_float(_get_param(algo, "margin_buffer_pct", 0.50), 0.50)
+    algo.margin_buffer_pct = _as_float(_get_param(algo, "margin_buffer_pct", 0.40), 0.40)
     algo.margin_rate_per_contract = _as_float(_get_param(algo, "margin_rate_per_contract", 0.25), 0.25)
     # Position aggressiveness (0.3 conservative -> 1.0 baseline -> 2.0 aggressive)
-    algo.position_aggressiveness = _clamp(_as_float(_get_param(algo, "position_aggressiveness", 1.0), 1.0), 0.3, 2.0)
+    algo.position_aggressiveness = _clamp(_as_float(_get_param(algo, "position_aggressiveness", 1.2), 1.2), 0.3, 2.0)
 
     # Dynamic caps derived from aggressiveness (no hard-coded contract counts)
     symbol_cap_factor = 0.30 + 0.30 * algo.position_aggressiveness
@@ -118,16 +118,17 @@ def init_parameters(algo):
     algo.symbol_downtrend_sensitivity = _as_float(_get_param(algo, "symbol_downtrend_sensitivity", 1.50), 1.50)
     algo.symbol_volatility_sensitivity = _as_float(_get_param(algo, "symbol_volatility_sensitivity", 0.75), 0.75)
     algo.symbol_exposure_sensitivity = _as_float(_get_param(algo, "symbol_exposure_sensitivity", 1.25), 1.25)
-    default_symbol_assignment_cap = 0.25
+    default_symbol_assignment_cap = 0.30
     algo.symbol_assignment_base_cap = _clamp(
         _as_float(_get_param(algo, "symbol_assignment_base_cap", default_symbol_assignment_cap), default_symbol_assignment_cap),
         0.05,
         1.5,
     )
     algo.stock_inventory_cap_enabled = _as_bool(_get_param(algo, "stock_inventory_cap_enabled", True), True)
-    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.15), 0.15), 0.05, 1.0)
+    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.18), 0.18), 0.05, 1.0)
     algo.stock_inventory_cap_floor = _clamp(_as_float(_get_param(algo, "stock_inventory_cap_floor", 0.50), 0.50), 0.10, 1.0)
-    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.75), 0.75), 0.50, 1.20)
+    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.85), 0.85), 0.50, 1.20)
+    algo.max_new_puts_per_day = max(1, _as_int(_get_param(algo, "max_new_puts_per_day", 3), 3))
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
     algo.ml_enabled = _as_bool(_get_param(algo, "ml_enabled", True), True)
     algo.ml_exploration_rate = _as_float(_get_param(algo, "ml_exploration_rate", 0.1), 0.1)
@@ -137,7 +138,7 @@ def init_parameters(algo):
     algo.stock_pool = str(_get_param(algo, "stock_pool", ",".join(MAG7_STOCKS))).split(",")
     algo.weights = {"iv_rank": 0.35, "technical": 0.25, "momentum": 0.20, "pe_score": 0.20}
     # Target margin utilization for position sizing (60% of capital)
-    algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.35), 0.35)
+    algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.45), 0.45)
 
 
 def init_ml(algo):
@@ -201,6 +202,7 @@ def log_effective_parameters(algo):
         f"stock_inventory_cap_enabled={algo.stock_inventory_cap_enabled}, "
         f"stock_inventory_base_cap={algo.stock_inventory_base_cap}, "
         f"stock_inventory_block_threshold={algo.stock_inventory_block_threshold}, "
+        f"max_new_puts_per_day={algo.max_new_puts_per_day}, "
         f"repair_call_delta={algo.repair_call_delta}, "
         f"stop_loss_pct={algo.stop_loss_pct}, "
         f"ml_enabled={algo.ml_enabled}, "

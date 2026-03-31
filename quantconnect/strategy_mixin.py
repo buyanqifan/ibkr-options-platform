@@ -9,6 +9,38 @@ from option_selector import find_option_by_greeks
 from qc_portfolio import get_option_position_count, get_symbols_with_holdings
 
 
+def _select_sp_candidates_for_execution(algo, sp_signals, available_slots: int):
+    """Select up to N distinct SP signals, preserving memory bias for the first pick."""
+    if not sp_signals or available_slots <= 0:
+        return []
+
+    selected = []
+    remaining = list(sp_signals)
+    max_new_puts = max(1, min(getattr(algo, "max_new_puts_per_day", 1), available_slots))
+
+    best_sp, algo._last_selected_stock, algo._selection_count, algo._last_stock_scores = select_best_signal_with_memory(
+        remaining,
+        algo._last_selected_stock,
+        algo._selection_count,
+        algo._min_hold_cycles,
+        algo._last_stock_scores,
+    )
+    if not best_sp or best_sp.confidence < algo.ml_min_confidence:
+        return []
+
+    selected.append(best_sp)
+    remaining = [signal for signal in remaining if signal.symbol != best_sp.symbol]
+
+    while remaining and len(selected) < max_new_puts:
+        candidate = max(remaining, key=lambda x: x.confidence)
+        if candidate.confidence < algo.ml_min_confidence:
+            break
+        selected.append(candidate)
+        remaining = [signal for signal in remaining if signal.symbol != candidate.symbol]
+
+    return selected
+
+
 def rebalance(algo):
     if algo.IsWarmingUp:
         return
@@ -36,14 +68,15 @@ def rebalance(algo):
             execute_signal(algo, best_cc, find_option_by_greeks)
             open_count = get_option_position_count(algo)
     
-    # Execute best SP signal (with memory to avoid frequent switching)
+    # Execute top SP signals, preserving memory for the first pick
     if sp_signals and open_count < algo.max_positions:
-        best_sp, algo._last_selected_stock, algo._selection_count, algo._last_stock_scores = \
-            select_best_signal_with_memory(sp_signals, algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores)
-        if best_sp:
-            algo.Log(f"SP_SIGNAL: {best_sp.symbol} delta={best_sp.delta:.2f}")
-            if best_sp.confidence >= algo.ml_min_confidence:
-                execute_signal(algo, best_sp, find_option_by_greeks)
+        available_slots = max(0, algo.max_positions - open_count)
+        for sp_signal in _select_sp_candidates_for_execution(algo, sp_signals, available_slots):
+            algo.Log(f"SP_SIGNAL: {sp_signal.symbol} delta={sp_signal.delta:.2f}")
+            execute_signal(algo, sp_signal, find_option_by_greeks)
+            open_count = get_option_position_count(algo)
+            if open_count >= algo.max_positions:
+                break
 
 
 def on_end_of_algorithm(algo):

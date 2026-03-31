@@ -30,3 +30,4 @@ Thumbs.db
 
 # Backtest results
 backtest_*.json
+data/*last_result*.json

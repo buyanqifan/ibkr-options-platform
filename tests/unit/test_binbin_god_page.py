@@ -96,13 +96,13 @@ def _default_form_inputs() -> dict[str, Any]:
         "stock_pool_text": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
         "max_positions_ceiling": 20,
         "max_leverage": 1.0,
-        "target_margin_utilization": 0.35,
-        "position_aggressiveness": 1.0,
+        "target_margin_utilization": 0.45,
+        "position_aggressiveness": 1.2,
         "profit_target_pct": 70,
         "stop_loss_pct": 999999,
-        "margin_buffer_pct": 0.50,
+        "margin_buffer_pct": 0.40,
         "margin_rate_per_contract": 0.25,
-        "max_risk_per_trade": 0.02,
+        "max_risk_per_trade": 0.03,
         "dte_min": 21,
         "dte_max": 60,
         "put_delta": 0.30,
@@ -143,11 +143,11 @@ def _default_form_inputs() -> dict[str, Any]:
         "symbol_downtrend_sensitivity": 1.50,
         "symbol_volatility_sensitivity": 0.75,
         "symbol_exposure_sensitivity": 1.25,
-        "symbol_assignment_base_cap": 0.25,
+        "symbol_assignment_base_cap": 0.30,
         "stock_inventory_cap_enabled": True,
-        "stock_inventory_base_cap": 0.15,
+        "stock_inventory_base_cap": 0.18,
         "stock_inventory_cap_floor": 0.50,
-        "stock_inventory_block_threshold": 0.75,
+        "stock_inventory_block_threshold": 0.85,
     }
 
 
@@ -225,19 +225,19 @@ def test_build_binbin_backtest_params_uses_qc_defaults(monkeypatch):
     assert params["end_date"] == "2025-12-31"
     assert params["max_positions_ceiling"] == 20
     assert params["max_positions"] == 20
-    assert params["position_aggressiveness"] == 1.0
+    assert params["position_aggressiveness"] == 1.2
     assert params["profit_target_pct"] == 70
-    assert params["margin_buffer_pct"] == 0.50
-    assert params["target_margin_utilization"] == 0.35
-    assert params["max_risk_per_trade"] == 0.02
+    assert params["margin_buffer_pct"] == 0.40
+    assert params["target_margin_utilization"] == 0.45
+    assert params["max_risk_per_trade"] == 0.03
     assert params["ml_delta_optimization"] is True
     assert params["ml_dte_optimization"] is True
     assert params["ml_roll_optimization"] is True
     assert params["ml_position_optimization"] is True
     assert params["stop_loss_pct"] == 999999
-    assert params["symbol_assignment_base_cap"] == 0.25
-    assert params["stock_inventory_base_cap"] == 0.15
-    assert params["stock_inventory_block_threshold"] == 0.75
+    assert params["symbol_assignment_base_cap"] == 0.30
+    assert params["stock_inventory_base_cap"] == 0.18
+    assert params["stock_inventory_block_threshold"] == 0.85
     assert "run_mode" not in params
 
 

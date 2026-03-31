@@ -215,6 +215,7 @@ class BinbinGodStrategy(BaseStrategy):
         self.stock_inventory_base_cap = resolved_config.get("stock_inventory_base_cap", QC_BINBIN_DEFAULTS["stock_inventory_base_cap"])
         self.stock_inventory_cap_floor = resolved_config.get("stock_inventory_cap_floor", 0.50)
         self.stock_inventory_block_threshold = resolved_config.get("stock_inventory_block_threshold", QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"])
+        self.max_new_puts_per_day = resolved_config.get("max_new_puts_per_day", QC_BINBIN_DEFAULTS["max_new_puts_per_day"])
         # Margin management parameters
         self.margin_buffer_pct = resolved_config.get("margin_buffer_pct", QC_BINBIN_DEFAULTS["margin_buffer_pct"])  # % of margin to reserve as buffer
         self.margin_rate_per_contract = resolved_config.get("margin_rate_per_contract", QC_BINBIN_DEFAULTS["margin_rate_per_contract"])  # margin rate per contract
@@ -862,16 +863,27 @@ class BinbinGodStrategy(BaseStrategy):
             best_cc = max(cc_candidates, key=lambda item: item.confidence)
             selected.append(best_cc)
 
-        if sp_candidates and len(wheel_positions) < self.max_positions:
+        available_slots = max(0, self.max_positions - len(wheel_positions) - len(selected))
+        if sp_candidates and available_slots > 0:
+            max_new_puts = max(1, min(self.max_new_puts_per_day, available_slots))
+            remaining = list(sp_candidates)
             best_sp, self._last_selected_stock, self._selection_count, self._last_stock_scores = select_best_signal_with_memory(
-                sp_candidates,
+                remaining,
                 self._last_selected_stock,
                 self._selection_count,
                 self._min_hold_cycles,
                 getattr(self, "_last_stock_scores", {}),
             )
-            if best_sp:
+            if best_sp and best_sp.confidence >= self.ml_min_confidence:
                 selected.append(best_sp)
+                remaining = [signal for signal in remaining if signal.symbol != best_sp.symbol]
+
+            while remaining and len([signal for signal in selected if signal.right == "P"]) < max_new_puts:
+                candidate = max(remaining, key=lambda item: item.confidence)
+                if candidate.confidence < self.ml_min_confidence:
+                    break
+                selected.append(candidate)
+                remaining = [signal for signal in remaining if signal.symbol != candidate.symbol]
 
         for signal in selected:
             self._record_event(
