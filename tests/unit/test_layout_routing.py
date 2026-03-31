@@ -32,3 +32,12 @@ def test_display_page_calls_callable_layout(monkeypatch):
 
     assert not callable(page)
     assert page.children == "binbin-god"
+
+
+def test_display_page_returns_404_for_unknown_route(monkeypatch):
+    layout_module = _load_layout_module(monkeypatch)
+
+    page = layout_module.display_page("/does-not-exist")
+
+    assert not callable(page)
+    assert "404" in str(page.children)

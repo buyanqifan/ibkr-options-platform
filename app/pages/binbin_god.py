@@ -714,7 +714,6 @@ def _build_binbin_results_view(result, params):
             trade_timeline,
             html.H5("Trade Log", className="mt-4 mb-3"),
             trades_table,
-            mag7_section,
         ]
     )
 

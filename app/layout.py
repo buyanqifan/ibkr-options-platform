@@ -72,8 +72,15 @@ def create_layout():
 @callback(Output("page-content", "children"), Input("url", "pathname"))
 def display_page(pathname):
     """Route to the appropriate page based on URL pathname."""
-    page = _ROUTES.get(pathname, _ROUTES["/"])
-    return page() if callable(page) else page
+    if pathname in _ROUTES:
+        page = _ROUTES[pathname]
+        return page() if callable(page) else page
+
+    return html.Div([
+        html.H3("404 - Page Not Found", className="text-danger"),
+        html.P(f"The path '{pathname}' does not exist."),
+        dbc.Button("Go to Dashboard", href="/", color="primary"),
+    ], className="text-center mt-5")
 
 
 @callback(
@@ -84,10 +91,3 @@ def display_page(pathname):
 def update_language(selected_lang):
     """Update language store when user selects a language."""
     return selected_lang if selected_lang else "en"
-
-    # 404 fallback
-    return html.Div([
-        html.H3("404 - Page Not Found", className="text-danger"),
-        html.P(f"The path '{pathname}' does not exist."),
-        dbc.Button("Go to Dashboard", href="/", color="primary"),
-    ], className="text-center mt-5")

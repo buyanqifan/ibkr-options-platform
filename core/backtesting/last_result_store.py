@@ -9,7 +9,7 @@ from pathlib import Path
 from utils.logger import setup_logger
 
 logger = setup_logger("last_result_store")
-_LAST_RESULT_PATH = Path("data/binbin_god_last_result.json")
+_LAST_RESULT_PATH = Path(__file__).resolve().parents[2] / "data" / "binbin_god_last_result.json"
 
 
 def save_last_binbin_god_result(params: dict, result: dict) -> None:

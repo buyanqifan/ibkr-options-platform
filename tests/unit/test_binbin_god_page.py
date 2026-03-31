@@ -60,6 +60,29 @@ def _find_component(node: Any, target_id: str):
     return None
 
 
+def _count_text(node: Any, needle: str) -> int:
+    count = 0
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        if isinstance(current, (list, tuple)):
+            stack.extend(current)
+            continue
+        if isinstance(current, str):
+            count += current.count(needle)
+            continue
+        if isinstance(current, (int, float, bool)):
+            continue
+        children = getattr(current, "children", None)
+        if isinstance(children, (list, tuple)):
+            stack.extend(children)
+        elif children is not None:
+            stack.append(children)
+    return count
+
+
 def _get_layout(page):
     layout = page.layout
     return layout() if callable(layout) else layout
@@ -296,3 +319,20 @@ def test_layout_uses_last_result_as_initial_state(monkeypatch):
     assert params_store.data == params
     assert export_container.className == "d-block mt-2"
     assert start_input.value == params["start_date"]
+
+
+def test_results_view_does_not_duplicate_mag7_analysis(monkeypatch):
+    page = _load_binbin_god_page(monkeypatch)
+    params = page.build_binbin_backtest_params(_default_form_inputs())
+    result = StubEngine().run(params)
+    result["mag7_analysis"] = {
+        "best_pick": {"symbol": "NVDA", "total_score": 9.5},
+        "ranked_stocks": [
+            {"symbol": "NVDA", "total_score": 9.5, "momentum": 1.0, "stability": 2.0},
+        ],
+    }
+
+    mag7_section, content, _, _ = page._build_binbin_results_view(result, params)
+
+    assert _count_text(mag7_section, "MAG7 Stock Analysis") == 1
+    assert _count_text(content, "MAG7 Stock Analysis") == 0

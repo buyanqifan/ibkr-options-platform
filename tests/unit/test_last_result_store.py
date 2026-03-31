@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 
 def test_save_and_load_last_binbin_god_result(tmp_path, monkeypatch):
     from core.backtesting import last_result_store
@@ -36,3 +38,12 @@ def test_load_last_binbin_god_result_returns_none_for_invalid_json(tmp_path, mon
     monkeypatch.setattr(last_result_store, "_LAST_RESULT_PATH", path)
 
     assert last_result_store.load_last_binbin_god_result() is None
+
+
+def test_last_result_path_is_repo_absolute():
+    from core.backtesting import last_result_store
+
+    assert last_result_store._LAST_RESULT_PATH.is_absolute()
+    assert last_result_store._LAST_RESULT_PATH == (
+        Path(last_result_store.__file__).resolve().parents[2] / "data" / "binbin_god_last_result.json"
+    )
