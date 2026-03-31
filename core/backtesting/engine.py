@@ -566,8 +566,7 @@ class BacktestEngine:
         parity_config = None
         if strategy_name == "binbin_god":
             parity_config = BinbinGodParityConfig.from_params(params)
-            if parity_config.enabled:
-                params = parity_config.apply_to_params(params)
+            params = parity_config.apply_to_params(params)
         symbol = params["symbol"]
         start_date = params["start_date"]
         end_date = params["end_date"]
@@ -642,7 +641,7 @@ class BacktestEngine:
             strategy.stock_hv = stock_hv
             logger.info(f"BinbinGod: Calculated HV for {list(stock_hv.keys())}")
 
-        if strategy_name == "binbin_god" and parity_config and parity_config.enabled:
+        if strategy_name == "binbin_god" and parity_config:
             return self._run_binbin_god_qc_parity(
                 strategy=strategy,
                 params=params,

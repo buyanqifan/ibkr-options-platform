@@ -182,10 +182,20 @@ class BinbinGodParityConfig:
 
     @classmethod
     def from_params(cls, params: Dict[str, Any]) -> "BinbinGodParityConfig":
-        parity_mode = str(params.get("parity_mode", "none") or "none").lower()
+        strategy_name = str(params.get("strategy", "") or "").lower()
+        force_qc_replay = strategy_name == "binbin_god"
+        parity_mode = str(params.get("parity_mode", "qc" if force_qc_replay else "none") or ("qc" if force_qc_replay else "none")).lower()
+        if force_qc_replay:
+            parity_mode = "qc"
         contract_universe_mode = str(
-            params.get("contract_universe_mode", "legacy_theoretical") or "legacy_theoretical"
+            params.get(
+                "contract_universe_mode",
+                "qc_emulated_lattice" if force_qc_replay else "legacy_theoretical",
+            )
+            or ("qc_emulated_lattice" if force_qc_replay else "legacy_theoretical")
         ).lower()
+        if force_qc_replay:
+            contract_universe_mode = "qc_emulated_lattice"
         defaults = dict(QC_BINBIN_DEFAULTS if parity_mode == "qc" else {})
         merged = {**defaults, **params}
 
