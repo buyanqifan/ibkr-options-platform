@@ -1188,3 +1188,28 @@ class TestBinbinGodStrategy:
         )
 
         assert "NVDA" in strategy.symbol_cooldowns
+
+    def test_generate_signals_returns_flat_put_signal_list_in_native_mode(self, base_params):
+        """Native-mode put generation should return Signal objects, not nested lists."""
+        params = base_params.copy()
+        params["symbol"] = "NVDA"
+        params["stock_pool"] = ["NVDA"]
+        strategy = BinbinGodStrategy(params)
+        strategy.mag7_data = {
+            "NVDA": [{"date": f"2024-01-{day:02d}", "close": 100 + day, "volume": 1_000_000} for day in range(1, 40)]
+        }
+        strategy.stock_hv = {"NVDA": [0.25] * 39}
+        position_mgr = PositionManager(initial_capital=100000)
+
+        signals = strategy.generate_signals(
+            current_date="2024-01-31",
+            underlying_price=131.0,
+            iv=0.25,
+            open_positions=[],
+            position_mgr=position_mgr,
+        )
+
+        assert len(signals) == 1
+        assert isinstance(signals[0], Signal)
+        assert signals[0].trade_type == "BINBIN_PUT"
+        assert signals[0].margin_requirement is not None
