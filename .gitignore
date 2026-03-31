@@ -19,6 +19,7 @@ data/*.db
 .vscode/
 *.swp
 *.swo
+.worktrees/
 
 # OS
 .DS_Store
