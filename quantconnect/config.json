@@ -1,17 +1,17 @@
 {
     "parameters": {
         "start_date": "2024-01-01",
-        "end_date": "2024-12-31",
-        "initial_capital": 100000,
+        "end_date": "2025-12-31",
+        "initial_capital": 300000,
         "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
-        "max_positions_ceiling": 15,
-        "profit_target_pct": 50,
+        "max_positions_ceiling": 60,
+        "profit_target_pct": 70,
         "stop_loss_pct": 999999,
         
-        "margin_buffer_pct": 0.50,
+        "margin_buffer_pct": 0.35,
         "margin_rate_per_contract": 0.25,
         "target_margin_utilization": 0.60,
-        "position_aggressiveness": 1.0,
+        "position_aggressiveness": 2.0,
         
         "ml_enabled": true,
         "ml_exploration_rate": 0.1,

@@ -941,6 +941,16 @@ class TestBinbinGodStrategy:
         params['symbol'] = 'MAG7_AUTO'
         strategy = BinbinGodStrategy(params)
         assert strategy.name == 'binbin_god'
+
+    def test_native_defaults_follow_qc_default_config(self):
+        """Native fallback defaults should stay aligned with QC config defaults."""
+        strategy = BinbinGodStrategy({"symbol": "NVDA"})
+
+        assert strategy.initial_capital == 300000
+        assert strategy.max_positions == 60
+        assert strategy.profit_target_pct == 70
+        assert strategy.margin_buffer_pct == 0.35
+        assert strategy.symbol_assignment_base_cap == pytest.approx(0.95)
     
     def test_initial_phase_is_sp(self, base_params):
         """Test that initial phase is Sell Put."""

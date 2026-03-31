@@ -38,16 +38,19 @@ def _make_bars(start_price: float = 100.0, days: int = 80):
 def test_qc_parity_config_uses_qc_defaults():
     config = BinbinGodParityConfig.from_params({"parity_mode": "qc"})
     assert config.enabled is True
-    assert config.initial_capital == 100000.0
-    assert config.max_positions_ceiling == 15
+    assert config.initial_capital == 300000.0
+    assert config.max_positions_ceiling == 60
     assert config.dte_min == 21
     assert config.dte_max == 60
+    assert config.position_aggressiveness == pytest.approx(2.0)
+    assert config.profit_target_pct == pytest.approx(70.0)
+    assert config.margin_buffer_pct == pytest.approx(0.35)
     assert config.ml_min_confidence == pytest.approx(0.40)
     assert config.defensive_put_roll_enabled is True
     assert config.assignment_cooldown_days == 20
     assert config.stock_inventory_cap_enabled is True
     assert config.stock_inventory_base_cap == pytest.approx(0.20)
-    assert config.symbol_assignment_base_cap > 0
+    assert config.symbol_assignment_base_cap == pytest.approx(0.95)
 
 
 def test_contract_lattice_respects_min_strike():

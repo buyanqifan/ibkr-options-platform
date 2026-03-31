@@ -42,17 +42,17 @@ def _collect_ids(node: Any) -> set[str]:
 def _default_form_inputs() -> dict[str, Any]:
     return {
         "start_date": "2024-01-01",
-        "end_date": "2024-12-31",
-        "initial_capital": 100000,
+        "end_date": "2025-12-31",
+        "initial_capital": 300000,
         "stock_pool_text": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
         "run_mode": "qc",
-        "max_positions_ceiling": 15,
+        "max_positions_ceiling": 60,
         "max_leverage": 1.0,
         "target_margin_utilization": 0.60,
-        "position_aggressiveness": 1.0,
-        "profit_target_pct": 50,
+        "position_aggressiveness": 2.0,
+        "profit_target_pct": 70,
         "stop_loss_pct": 999999,
-        "margin_buffer_pct": 0.50,
+        "margin_buffer_pct": 0.35,
         "margin_rate_per_contract": 0.25,
         "dte_min": 21,
         "dte_max": 60,
@@ -94,7 +94,7 @@ def _default_form_inputs() -> dict[str, Any]:
         "symbol_downtrend_sensitivity": 1.50,
         "symbol_volatility_sensitivity": 0.75,
         "symbol_exposure_sensitivity": 1.25,
-        "symbol_assignment_base_cap": 0.60,
+        "symbol_assignment_base_cap": 0.95,
         "stock_inventory_cap_enabled": True,
         "stock_inventory_base_cap": 0.20,
         "stock_inventory_cap_floor": 0.50,
@@ -147,14 +147,19 @@ def test_build_binbin_backtest_params_uses_qc_defaults(monkeypatch):
     assert params["ml_confidence_gate"] == 0.4
     assert params["symbol"] == "MAG7_AUTO"
     assert params["stock_pool"] == ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
-    assert params["max_positions_ceiling"] == 15
-    assert params["max_positions"] == 15
+    assert params["initial_capital"] == 300000
+    assert params["end_date"] == "2025-12-31"
+    assert params["max_positions_ceiling"] == 60
+    assert params["max_positions"] == 60
+    assert params["position_aggressiveness"] == 2.0
+    assert params["profit_target_pct"] == 70
+    assert params["margin_buffer_pct"] == 0.35
     assert params["ml_delta_optimization"] is True
     assert params["ml_dte_optimization"] is True
     assert params["ml_roll_optimization"] is True
     assert params["ml_position_optimization"] is True
     assert params["stop_loss_pct"] == 999999
-    assert params["symbol_assignment_base_cap"] == 0.60
+    assert params["symbol_assignment_base_cap"] == 0.95
 
 
 def test_build_binbin_backtest_params_supports_native_mode(monkeypatch):

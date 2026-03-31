@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from core.backtesting.pricing import OptionsPricer
 
 
-QC_BINBIN_DEFAULTS = {
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_QC_CONFIG_PATH = _REPO_ROOT / "quantconnect" / "config.json"
+
+_QC_PARAMETER_FALLBACKS = {
+    "start_date": "2024-01-01",
+    "end_date": "2024-12-31",
     "initial_capital": 100000.0,
+    "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
     "max_positions_ceiling": 15,
     "profit_target_pct": 50.0,
     "stop_loss_pct": 999999.0,
@@ -18,13 +26,45 @@ QC_BINBIN_DEFAULTS = {
     "margin_rate_per_contract": 0.25,
     "target_margin_utilization": 0.60,
     "position_aggressiveness": 1.0,
-    "max_leverage": 1.0,
     "ml_enabled": True,
-    "ml_min_confidence": 0.40,
     "dte_min": 21,
     "dte_max": 60,
     "put_delta": 0.30,
     "call_delta": 0.30,
+}
+
+
+def _load_quantconnect_parameter_defaults() -> Dict[str, Any]:
+    defaults = dict(_QC_PARAMETER_FALLBACKS)
+    try:
+        raw = json.loads(_QC_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return defaults
+
+    parameters = raw.get("parameters", {})
+    if isinstance(parameters, dict):
+        defaults.update(parameters)
+    return defaults
+
+
+QC_PARAMETER_DEFAULTS = _load_quantconnect_parameter_defaults()
+
+QC_BINBIN_DEFAULTS = {
+    "initial_capital": float(QC_PARAMETER_DEFAULTS["initial_capital"]),
+    "max_positions_ceiling": int(QC_PARAMETER_DEFAULTS["max_positions_ceiling"]),
+    "profit_target_pct": float(QC_PARAMETER_DEFAULTS["profit_target_pct"]),
+    "stop_loss_pct": 999999.0,
+    "margin_buffer_pct": float(QC_PARAMETER_DEFAULTS["margin_buffer_pct"]),
+    "margin_rate_per_contract": float(QC_PARAMETER_DEFAULTS["margin_rate_per_contract"]),
+    "target_margin_utilization": float(QC_PARAMETER_DEFAULTS["target_margin_utilization"]),
+    "position_aggressiveness": float(QC_PARAMETER_DEFAULTS["position_aggressiveness"]),
+    "max_leverage": 1.0,
+    "ml_enabled": bool(QC_PARAMETER_DEFAULTS["ml_enabled"]),
+    "ml_min_confidence": 0.40,
+    "dte_min": int(QC_PARAMETER_DEFAULTS["dte_min"]),
+    "dte_max": int(QC_PARAMETER_DEFAULTS["dte_max"]),
+    "put_delta": float(QC_PARAMETER_DEFAULTS["put_delta"]),
+    "call_delta": float(QC_PARAMETER_DEFAULTS["call_delta"]),
     "repair_call_threshold_pct": 0.08,
     "repair_call_delta": 0.35,
     "repair_call_dte_min": 7,
@@ -52,6 +92,7 @@ QC_BINBIN_DEFAULTS = {
     "symbol_downtrend_sensitivity": 1.50,
     "symbol_volatility_sensitivity": 0.75,
     "symbol_exposure_sensitivity": 1.25,
+    "symbol_assignment_base_cap": 0.25 + 0.35 * float(QC_PARAMETER_DEFAULTS["position_aggressiveness"]),
     "stock_inventory_cap_enabled": True,
     "stock_inventory_base_cap": 0.20,
     "stock_inventory_cap_floor": 0.50,
@@ -129,7 +170,7 @@ class BinbinGodParityConfig:
     symbol_downtrend_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_downtrend_sensitivity"]
     symbol_volatility_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_volatility_sensitivity"]
     symbol_exposure_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_exposure_sensitivity"]
-    symbol_assignment_base_cap: float = 0.0
+    symbol_assignment_base_cap: float = QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"]
     stock_inventory_cap_enabled: bool = bool(QC_BINBIN_DEFAULTS["stock_inventory_cap_enabled"])
     stock_inventory_base_cap: float = QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]
     stock_inventory_cap_floor: float = QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]

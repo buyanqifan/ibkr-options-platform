@@ -32,6 +32,7 @@ from core.backtesting.strategies.base import BaseStrategy, Signal
 from core.backtesting.pricing import OptionsPricer
 from core.backtesting.qc_parity import (
     BinbinGodParityConfig,
+    QC_BINBIN_DEFAULTS,
     calculate_dynamic_max_positions_from_prices,
     calculate_put_quantity_qc,
     select_contract_from_lattice,
@@ -171,25 +172,28 @@ class BinbinGodStrategy(BaseStrategy):
         self.parity_config = parity_config
         self.parity_mode = parity_config.parity_mode
         self.contract_universe_mode = parity_config.contract_universe_mode
-        self.dte_min = resolved_config.get("dte_min", 30)
-        self.dte_max = resolved_config.get("dte_max", 45)
-        self.delta_target = resolved_config.get("delta_target", 0.30)
-        self.profit_target_pct = resolved_config.get("profit_target_pct", 50)
-        self.stop_loss_pct = resolved_config.get("stop_loss_pct", 999999)  # Disabled by default - Wheel strategy doesn't use traditional stop loss
-        self.initial_capital = resolved_config.get("initial_capital", 100000)
+        self.dte_min = resolved_config.get("dte_min", QC_BINBIN_DEFAULTS["dte_min"])
+        self.dte_max = resolved_config.get("dte_max", QC_BINBIN_DEFAULTS["dte_max"])
+        self.delta_target = resolved_config.get("delta_target", QC_BINBIN_DEFAULTS["put_delta"])
+        self.profit_target_pct = resolved_config.get("profit_target_pct", QC_BINBIN_DEFAULTS["profit_target_pct"])
+        self.stop_loss_pct = resolved_config.get("stop_loss_pct", QC_BINBIN_DEFAULTS["stop_loss_pct"])  # Disabled by default - Wheel strategy doesn't use traditional stop loss
+        self.initial_capital = resolved_config.get("initial_capital", QC_BINBIN_DEFAULTS["initial_capital"])
         self.max_risk_per_trade = resolved_config.get("max_risk_per_trade", 0.02)
-        self.max_leverage = resolved_config.get("max_leverage", 1.0)
-        self.ml_enabled = resolved_config.get("ml_enabled", False)
-        self.ml_min_confidence = resolved_config.get("ml_confidence_gate", resolved_config.get("ml_min_confidence", 0.4))
+        self.max_leverage = resolved_config.get("max_leverage", QC_BINBIN_DEFAULTS["max_leverage"])
+        self.ml_enabled = resolved_config.get("ml_enabled", QC_BINBIN_DEFAULTS["ml_enabled"])
+        self.ml_min_confidence = resolved_config.get("ml_confidence_gate", resolved_config.get("ml_min_confidence", QC_BINBIN_DEFAULTS["ml_min_confidence"]))
 
         self.config = resolved_config
         self.symbol = resolved_config.get("symbol", "MAG7_AUTO")
-        self.max_positions = resolved_config.get("max_positions", 10)
+        self.max_positions = resolved_config.get(
+            "max_positions",
+            resolved_config.get("max_positions_ceiling", QC_BINBIN_DEFAULTS["max_positions_ceiling"]),
+        )
         self.use_synthetic_data = resolved_config.get("use_synthetic_data", False)
         
         # Wheel-specific parameters
-        self.put_delta = resolved_config.get("put_delta", 0.30)
-        self.call_delta = resolved_config.get("call_delta", 0.30)
+        self.put_delta = resolved_config.get("put_delta", QC_BINBIN_DEFAULTS["put_delta"])
+        self.call_delta = resolved_config.get("call_delta", QC_BINBIN_DEFAULTS["call_delta"])
         
         # CC optimization parameters
         self.cc_optimization_enabled = resolved_config.get("cc_optimization_enabled", True)
@@ -225,7 +229,7 @@ class BinbinGodStrategy(BaseStrategy):
         self.symbol_exposure_sensitivity = resolved_config.get("symbol_exposure_sensitivity", 1.25)
         self.symbol_assignment_base_cap = resolved_config.get(
             "symbol_assignment_base_cap",
-            0.25 + 0.35 * resolved_config.get("position_aggressiveness", 1.0),
+            0.25 + 0.35 * resolved_config.get("position_aggressiveness", QC_BINBIN_DEFAULTS["position_aggressiveness"]),
         )
         self.stock_inventory_cap_enabled = resolved_config.get("stock_inventory_cap_enabled", True)
         self.stock_inventory_base_cap = resolved_config.get("stock_inventory_base_cap", 0.20)
@@ -238,8 +242,8 @@ class BinbinGodStrategy(BaseStrategy):
         self.sp_in_cc_max_positions = resolved_config.get("sp_in_cc_max_positions", 3)  # CC阶段最多开几个SP仓位
         
         # Margin management parameters
-        self.margin_buffer_pct = resolved_config.get("margin_buffer_pct", 0.50)  # % of margin to reserve as buffer
-        self.margin_rate_per_contract = resolved_config.get("margin_rate_per_contract", 0.25)  # margin rate per contract
+        self.margin_buffer_pct = resolved_config.get("margin_buffer_pct", QC_BINBIN_DEFAULTS["margin_buffer_pct"])  # % of margin to reserve as buffer
+        self.margin_rate_per_contract = resolved_config.get("margin_rate_per_contract", QC_BINBIN_DEFAULTS["margin_rate_per_contract"])  # margin rate per contract
         
         # ML delta optimization parameters - use BaseStrategy's implementation
         self.ml_delta_optimization = resolved_config.get("ml_delta_optimization", False)

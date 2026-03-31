@@ -20,30 +20,44 @@ from app.components.monitoring import (
 )
 from app.components.tables import create_data_table, metric_card
 from app.services import get_services
+from core.backtesting.qc_parity import QC_BINBIN_DEFAULTS, QC_PARAMETER_DEFAULTS
 
 _services = None
 
-DEFAULT_STOCK_POOL = ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
+
+def _parse_default_stock_pool(raw_value) -> list[str]:
+    if isinstance(raw_value, str):
+        symbols = [symbol.strip().upper() for symbol in raw_value.split(",") if symbol.strip()]
+        if symbols:
+            return symbols
+    if isinstance(raw_value, (list, tuple)):
+        symbols = [str(symbol).strip().upper() for symbol in raw_value if str(symbol).strip()]
+        if symbols:
+            return symbols
+    return ["MSFT", "AAPL", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
+
+
+DEFAULT_STOCK_POOL = _parse_default_stock_pool(QC_PARAMETER_DEFAULTS.get("stock_pool"))
 
 QC_UI_DEFAULTS = {
-    "start_date": "2024-01-01",
-    "end_date": "2024-12-31",
-    "initial_capital": 100000,
+    "start_date": str(QC_PARAMETER_DEFAULTS.get("start_date", "2024-01-01")),
+    "end_date": str(QC_PARAMETER_DEFAULTS.get("end_date", "2024-12-31")),
+    "initial_capital": QC_BINBIN_DEFAULTS["initial_capital"],
     "stock_pool_text": ",".join(DEFAULT_STOCK_POOL),
     "run_mode": "qc",
-    "max_positions_ceiling": 15,
+    "max_positions_ceiling": QC_BINBIN_DEFAULTS["max_positions_ceiling"],
     "max_leverage": 1.0,
-    "target_margin_utilization": 0.60,
-    "position_aggressiveness": 1.0,
-    "profit_target_pct": 50,
-    "stop_loss_pct": 999999,
-    "margin_buffer_pct": 0.50,
-    "margin_rate_per_contract": 0.25,
-    "dte_min": 21,
-    "dte_max": 60,
-    "put_delta": 0.30,
-    "call_delta": 0.30,
-    "ml_enabled": True,
+    "target_margin_utilization": QC_BINBIN_DEFAULTS["target_margin_utilization"],
+    "position_aggressiveness": QC_BINBIN_DEFAULTS["position_aggressiveness"],
+    "profit_target_pct": QC_BINBIN_DEFAULTS["profit_target_pct"],
+    "stop_loss_pct": QC_BINBIN_DEFAULTS["stop_loss_pct"],
+    "margin_buffer_pct": QC_BINBIN_DEFAULTS["margin_buffer_pct"],
+    "margin_rate_per_contract": QC_BINBIN_DEFAULTS["margin_rate_per_contract"],
+    "dte_min": QC_BINBIN_DEFAULTS["dte_min"],
+    "dte_max": QC_BINBIN_DEFAULTS["dte_max"],
+    "put_delta": QC_BINBIN_DEFAULTS["put_delta"],
+    "call_delta": QC_BINBIN_DEFAULTS["call_delta"],
+    "ml_enabled": QC_BINBIN_DEFAULTS["ml_enabled"],
     "ml_adoption_rate": 0.5,
     "ml_min_confidence": 0.4,
     "ml_exploration_rate": 0.1,
@@ -79,7 +93,7 @@ QC_UI_DEFAULTS = {
     "symbol_downtrend_sensitivity": 1.50,
     "symbol_volatility_sensitivity": 0.75,
     "symbol_exposure_sensitivity": 1.25,
-    "symbol_assignment_base_cap": 0.60,
+    "symbol_assignment_base_cap": QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"],
     "stock_inventory_cap_enabled": True,
     "stock_inventory_base_cap": 0.20,
     "stock_inventory_cap_floor": 0.50,
