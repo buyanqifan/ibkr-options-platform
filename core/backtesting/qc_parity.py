@@ -25,6 +25,37 @@ QC_BINBIN_DEFAULTS = {
     "dte_max": 60,
     "put_delta": 0.30,
     "call_delta": 0.30,
+    "repair_call_threshold_pct": 0.08,
+    "repair_call_delta": 0.35,
+    "repair_call_dte_min": 7,
+    "repair_call_dte_max": 21,
+    "repair_call_max_discount_pct": 0.08,
+    "defensive_put_roll_enabled": True,
+    "defensive_put_roll_loss_pct": 200.0,
+    "defensive_put_roll_itm_buffer_pct": 0.10,
+    "defensive_put_roll_min_dte": 7,
+    "defensive_put_roll_max_dte": 14,
+    "defensive_put_roll_dte_min": 21,
+    "defensive_put_roll_dte_max": 60,
+    "defensive_put_roll_delta": 0.20,
+    "assignment_cooldown_days": 20,
+    "large_loss_cooldown_days": 15,
+    "large_loss_cooldown_pct": 100.0,
+    "volatility_cap_floor": 0.35,
+    "volatility_cap_ceiling": 1.0,
+    "volatility_lookback": 20,
+    "dynamic_symbol_risk_enabled": True,
+    "symbol_state_cap_floor": 0.20,
+    "symbol_state_cap_ceiling": 1.0,
+    "symbol_drawdown_lookback": 60,
+    "symbol_drawdown_sensitivity": 1.20,
+    "symbol_downtrend_sensitivity": 1.50,
+    "symbol_volatility_sensitivity": 0.75,
+    "symbol_exposure_sensitivity": 1.25,
+    "stock_inventory_cap_enabled": True,
+    "stock_inventory_base_cap": 0.20,
+    "stock_inventory_cap_floor": 0.50,
+    "stock_inventory_block_threshold": 0.90,
 }
 
 
@@ -71,6 +102,38 @@ class BinbinGodParityConfig:
     max_put_contracts_per_symbol: int = 1
     max_put_contracts_total: int = 2
     max_contracts_per_trade: int = 1
+    repair_call_threshold_pct: float = QC_BINBIN_DEFAULTS["repair_call_threshold_pct"]
+    repair_call_delta: float = QC_BINBIN_DEFAULTS["repair_call_delta"]
+    repair_call_dte_min: int = QC_BINBIN_DEFAULTS["repair_call_dte_min"]
+    repair_call_dte_max: int = QC_BINBIN_DEFAULTS["repair_call_dte_max"]
+    repair_call_max_discount_pct: float = QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]
+    defensive_put_roll_enabled: bool = bool(QC_BINBIN_DEFAULTS["defensive_put_roll_enabled"])
+    defensive_put_roll_loss_pct: float = QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]
+    defensive_put_roll_itm_buffer_pct: float = QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]
+    defensive_put_roll_min_dte: int = QC_BINBIN_DEFAULTS["defensive_put_roll_min_dte"]
+    defensive_put_roll_max_dte: int = QC_BINBIN_DEFAULTS["defensive_put_roll_max_dte"]
+    defensive_put_roll_dte_min: int = QC_BINBIN_DEFAULTS["defensive_put_roll_dte_min"]
+    defensive_put_roll_dte_max: int = QC_BINBIN_DEFAULTS["defensive_put_roll_dte_max"]
+    defensive_put_roll_delta: float = QC_BINBIN_DEFAULTS["defensive_put_roll_delta"]
+    assignment_cooldown_days: int = QC_BINBIN_DEFAULTS["assignment_cooldown_days"]
+    large_loss_cooldown_days: int = QC_BINBIN_DEFAULTS["large_loss_cooldown_days"]
+    large_loss_cooldown_pct: float = QC_BINBIN_DEFAULTS["large_loss_cooldown_pct"]
+    volatility_cap_floor: float = QC_BINBIN_DEFAULTS["volatility_cap_floor"]
+    volatility_cap_ceiling: float = QC_BINBIN_DEFAULTS["volatility_cap_ceiling"]
+    volatility_lookback: int = QC_BINBIN_DEFAULTS["volatility_lookback"]
+    dynamic_symbol_risk_enabled: bool = bool(QC_BINBIN_DEFAULTS["dynamic_symbol_risk_enabled"])
+    symbol_state_cap_floor: float = QC_BINBIN_DEFAULTS["symbol_state_cap_floor"]
+    symbol_state_cap_ceiling: float = QC_BINBIN_DEFAULTS["symbol_state_cap_ceiling"]
+    symbol_drawdown_lookback: int = QC_BINBIN_DEFAULTS["symbol_drawdown_lookback"]
+    symbol_drawdown_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_drawdown_sensitivity"]
+    symbol_downtrend_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_downtrend_sensitivity"]
+    symbol_volatility_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_volatility_sensitivity"]
+    symbol_exposure_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_exposure_sensitivity"]
+    symbol_assignment_base_cap: float = 0.0
+    stock_inventory_cap_enabled: bool = bool(QC_BINBIN_DEFAULTS["stock_inventory_cap_enabled"])
+    stock_inventory_base_cap: float = QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]
+    stock_inventory_cap_floor: float = QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]
+    stock_inventory_block_threshold: float = QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]
 
     @property
     def enabled(self) -> bool:
@@ -133,6 +196,42 @@ class BinbinGodParityConfig:
             max_put_contracts_per_symbol=max(1, int(max_positions_ceiling * symbol_cap_factor)),
             max_put_contracts_total=max(2, int(max_positions_ceiling * total_cap_factor)),
             max_contracts_per_trade=max(1, int(max(1, int(max_positions_ceiling * symbol_cap_factor)) * trade_cap_factor)),
+            repair_call_threshold_pct=_to_float(merged.get("repair_call_threshold_pct", QC_BINBIN_DEFAULTS["repair_call_threshold_pct"]), QC_BINBIN_DEFAULTS["repair_call_threshold_pct"]),
+            repair_call_delta=_clamp(_to_float(merged.get("repair_call_delta", QC_BINBIN_DEFAULTS["repair_call_delta"]), QC_BINBIN_DEFAULTS["repair_call_delta"]), 0.20, 0.60),
+            repair_call_dte_min=_to_int(merged.get("repair_call_dte_min", QC_BINBIN_DEFAULTS["repair_call_dte_min"]), QC_BINBIN_DEFAULTS["repair_call_dte_min"]),
+            repair_call_dte_max=_to_int(merged.get("repair_call_dte_max", QC_BINBIN_DEFAULTS["repair_call_dte_max"]), QC_BINBIN_DEFAULTS["repair_call_dte_max"]),
+            repair_call_max_discount_pct=_to_float(merged.get("repair_call_max_discount_pct", QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]), QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]),
+            defensive_put_roll_enabled=bool(merged.get("defensive_put_roll_enabled", QC_BINBIN_DEFAULTS["defensive_put_roll_enabled"])),
+            defensive_put_roll_loss_pct=_to_float(merged.get("defensive_put_roll_loss_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]), QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]),
+            defensive_put_roll_itm_buffer_pct=_to_float(merged.get("defensive_put_roll_itm_buffer_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]), QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]),
+            defensive_put_roll_min_dte=_to_int(merged.get("defensive_put_roll_min_dte", QC_BINBIN_DEFAULTS["defensive_put_roll_min_dte"]), QC_BINBIN_DEFAULTS["defensive_put_roll_min_dte"]),
+            defensive_put_roll_max_dte=_to_int(merged.get("defensive_put_roll_max_dte", QC_BINBIN_DEFAULTS["defensive_put_roll_max_dte"]), QC_BINBIN_DEFAULTS["defensive_put_roll_max_dte"]),
+            defensive_put_roll_dte_min=_to_int(merged.get("defensive_put_roll_dte_min", QC_BINBIN_DEFAULTS["defensive_put_roll_dte_min"]), QC_BINBIN_DEFAULTS["defensive_put_roll_dte_min"]),
+            defensive_put_roll_dte_max=_to_int(merged.get("defensive_put_roll_dte_max", QC_BINBIN_DEFAULTS["defensive_put_roll_dte_max"]), QC_BINBIN_DEFAULTS["defensive_put_roll_dte_max"]),
+            defensive_put_roll_delta=_clamp(_to_float(merged.get("defensive_put_roll_delta", QC_BINBIN_DEFAULTS["defensive_put_roll_delta"]), QC_BINBIN_DEFAULTS["defensive_put_roll_delta"]), 0.10, 0.40),
+            assignment_cooldown_days=_to_int(merged.get("assignment_cooldown_days", QC_BINBIN_DEFAULTS["assignment_cooldown_days"]), QC_BINBIN_DEFAULTS["assignment_cooldown_days"]),
+            large_loss_cooldown_days=_to_int(merged.get("large_loss_cooldown_days", QC_BINBIN_DEFAULTS["large_loss_cooldown_days"]), QC_BINBIN_DEFAULTS["large_loss_cooldown_days"]),
+            large_loss_cooldown_pct=_to_float(merged.get("large_loss_cooldown_pct", QC_BINBIN_DEFAULTS["large_loss_cooldown_pct"]), QC_BINBIN_DEFAULTS["large_loss_cooldown_pct"]),
+            volatility_cap_floor=_clamp(_to_float(merged.get("volatility_cap_floor", QC_BINBIN_DEFAULTS["volatility_cap_floor"]), QC_BINBIN_DEFAULTS["volatility_cap_floor"]), 0.10, 1.0),
+            volatility_cap_ceiling=_clamp(_to_float(merged.get("volatility_cap_ceiling", QC_BINBIN_DEFAULTS["volatility_cap_ceiling"]), QC_BINBIN_DEFAULTS["volatility_cap_ceiling"]), 1.0, 3.0),
+            volatility_lookback=_to_int(merged.get("volatility_lookback", QC_BINBIN_DEFAULTS["volatility_lookback"]), QC_BINBIN_DEFAULTS["volatility_lookback"]),
+            dynamic_symbol_risk_enabled=bool(merged.get("dynamic_symbol_risk_enabled", QC_BINBIN_DEFAULTS["dynamic_symbol_risk_enabled"])),
+            symbol_state_cap_floor=_clamp(_to_float(merged.get("symbol_state_cap_floor", QC_BINBIN_DEFAULTS["symbol_state_cap_floor"]), QC_BINBIN_DEFAULTS["symbol_state_cap_floor"]), 0.05, 1.0),
+            symbol_state_cap_ceiling=_clamp(_to_float(merged.get("symbol_state_cap_ceiling", QC_BINBIN_DEFAULTS["symbol_state_cap_ceiling"]), QC_BINBIN_DEFAULTS["symbol_state_cap_ceiling"]), 0.50, 1.0),
+            symbol_drawdown_lookback=_to_int(merged.get("symbol_drawdown_lookback", QC_BINBIN_DEFAULTS["symbol_drawdown_lookback"]), QC_BINBIN_DEFAULTS["symbol_drawdown_lookback"]),
+            symbol_drawdown_sensitivity=_to_float(merged.get("symbol_drawdown_sensitivity", QC_BINBIN_DEFAULTS["symbol_drawdown_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_drawdown_sensitivity"]),
+            symbol_downtrend_sensitivity=_to_float(merged.get("symbol_downtrend_sensitivity", QC_BINBIN_DEFAULTS["symbol_downtrend_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_downtrend_sensitivity"]),
+            symbol_volatility_sensitivity=_to_float(merged.get("symbol_volatility_sensitivity", QC_BINBIN_DEFAULTS["symbol_volatility_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_volatility_sensitivity"]),
+            symbol_exposure_sensitivity=_to_float(merged.get("symbol_exposure_sensitivity", QC_BINBIN_DEFAULTS["symbol_exposure_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_exposure_sensitivity"]),
+            symbol_assignment_base_cap=_clamp(
+                _to_float(merged.get("symbol_assignment_base_cap", 0.25 + 0.35 * position_aggressiveness), 0.25 + 0.35 * position_aggressiveness),
+                0.05,
+                1.5,
+            ),
+            stock_inventory_cap_enabled=bool(merged.get("stock_inventory_cap_enabled", QC_BINBIN_DEFAULTS["stock_inventory_cap_enabled"])),
+            stock_inventory_base_cap=_clamp(_to_float(merged.get("stock_inventory_base_cap", QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]), QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]), 0.05, 1.0),
+            stock_inventory_cap_floor=_clamp(_to_float(merged.get("stock_inventory_cap_floor", QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]), QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]), 0.10, 1.0),
+            stock_inventory_block_threshold=_clamp(_to_float(merged.get("stock_inventory_block_threshold", QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]), QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]), 0.50, 1.20),
         )
 
     def apply_to_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -158,6 +257,38 @@ class BinbinGodParityConfig:
                 "dte_max": self.dte_max,
                 "put_delta": self.put_delta,
                 "call_delta": self.call_delta,
+                "repair_call_threshold_pct": self.repair_call_threshold_pct,
+                "repair_call_delta": self.repair_call_delta,
+                "repair_call_dte_min": self.repair_call_dte_min,
+                "repair_call_dte_max": self.repair_call_dte_max,
+                "repair_call_max_discount_pct": self.repair_call_max_discount_pct,
+                "defensive_put_roll_enabled": self.defensive_put_roll_enabled,
+                "defensive_put_roll_loss_pct": self.defensive_put_roll_loss_pct,
+                "defensive_put_roll_itm_buffer_pct": self.defensive_put_roll_itm_buffer_pct,
+                "defensive_put_roll_min_dte": self.defensive_put_roll_min_dte,
+                "defensive_put_roll_max_dte": self.defensive_put_roll_max_dte,
+                "defensive_put_roll_dte_min": self.defensive_put_roll_dte_min,
+                "defensive_put_roll_dte_max": self.defensive_put_roll_dte_max,
+                "defensive_put_roll_delta": self.defensive_put_roll_delta,
+                "assignment_cooldown_days": self.assignment_cooldown_days,
+                "large_loss_cooldown_days": self.large_loss_cooldown_days,
+                "large_loss_cooldown_pct": self.large_loss_cooldown_pct,
+                "volatility_cap_floor": self.volatility_cap_floor,
+                "volatility_cap_ceiling": self.volatility_cap_ceiling,
+                "volatility_lookback": self.volatility_lookback,
+                "dynamic_symbol_risk_enabled": self.dynamic_symbol_risk_enabled,
+                "symbol_state_cap_floor": self.symbol_state_cap_floor,
+                "symbol_state_cap_ceiling": self.symbol_state_cap_ceiling,
+                "symbol_drawdown_lookback": self.symbol_drawdown_lookback,
+                "symbol_drawdown_sensitivity": self.symbol_drawdown_sensitivity,
+                "symbol_downtrend_sensitivity": self.symbol_downtrend_sensitivity,
+                "symbol_volatility_sensitivity": self.symbol_volatility_sensitivity,
+                "symbol_exposure_sensitivity": self.symbol_exposure_sensitivity,
+                "symbol_assignment_base_cap": self.symbol_assignment_base_cap,
+                "stock_inventory_cap_enabled": self.stock_inventory_cap_enabled,
+                "stock_inventory_base_cap": self.stock_inventory_base_cap,
+                "stock_inventory_cap_floor": self.stock_inventory_cap_floor,
+                "stock_inventory_block_threshold": self.stock_inventory_block_threshold,
                 "max_positions": self.max_positions_ceiling if self.enabled else params.get("max_positions", self.max_positions_ceiling),
             }
         )
@@ -424,6 +555,11 @@ def calculate_put_quantity_qc(
     max_by_symbol_notional = int(remaining_symbol_notional / candidate_notional) if candidate_notional > 0 else 0
     max_by_total_notional = int(remaining_total_notional / candidate_notional) if candidate_notional > 0 else 0
 
+    stock_inventory_cap = portfolio_value * config.stock_inventory_base_cap if config.stock_inventory_cap_enabled else portfolio_value
+    stock_inventory_cap *= max(config.stock_inventory_cap_floor, 1.0)
+    remaining_stock_inventory = max(0.0, stock_inventory_cap - symbol_stock_notional)
+    max_by_stock_inventory = int(remaining_stock_inventory / candidate_notional) if candidate_notional > 0 else 0
+
     diagnostics = {
         "margin": max_by_margin,
         "slots": max_by_limit,
@@ -434,6 +570,7 @@ def calculate_put_quantity_qc(
         "trade_cap": max_by_trade_cap,
         "symbol_notional": max_by_symbol_notional,
         "total_notional": max_by_total_notional,
+        "stock_inventory": max_by_stock_inventory,
     }
     quantity = min(diagnostics.values()) if diagnostics else 0
     return max(0, quantity), diagnostics

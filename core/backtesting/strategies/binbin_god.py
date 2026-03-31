@@ -126,10 +126,14 @@ class StockHolding:
         """Get shares for a specific symbol."""
         if symbol in self.holdings:
             return self.holdings[symbol]["shares"]
+        if not self.holdings and self.shares > 0 and (not self.symbol or self.symbol == symbol):
+            return self.shares
         return 0
     
     def get_symbols(self) -> list:
         """Get list of symbols with holdings."""
+        if not self.holdings and self.shares > 0 and self.symbol:
+            return [self.symbol]
         return list(self.holdings.keys())
     
     def _update_legacy_fields(self):
@@ -192,6 +196,41 @@ class BinbinGodStrategy(BaseStrategy):
         self.cc_min_delta_cost = resolved_config.get("cc_min_delta_cost", 0.15)  # Min delta when cost > price
         self.cc_cost_basis_threshold = resolved_config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
         self.cc_min_strike_premium = resolved_config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
+        self.repair_call_threshold_pct = resolved_config.get("repair_call_threshold_pct", 0.08)
+        self.repair_call_delta = resolved_config.get("repair_call_delta", 0.35)
+        self.repair_call_dte_min = resolved_config.get("repair_call_dte_min", 7)
+        self.repair_call_dte_max = resolved_config.get("repair_call_dte_max", 21)
+        self.repair_call_max_discount_pct = resolved_config.get("repair_call_max_discount_pct", 0.08)
+        self.defensive_put_roll_enabled = resolved_config.get("defensive_put_roll_enabled", True)
+        self.defensive_put_roll_loss_pct = resolved_config.get("defensive_put_roll_loss_pct", 200.0)
+        self.defensive_put_roll_itm_buffer_pct = resolved_config.get("defensive_put_roll_itm_buffer_pct", 0.10)
+        self.defensive_put_roll_min_dte = resolved_config.get("defensive_put_roll_min_dte", 7)
+        self.defensive_put_roll_max_dte = resolved_config.get("defensive_put_roll_max_dte", 14)
+        self.defensive_put_roll_dte_min = resolved_config.get("defensive_put_roll_dte_min", 21)
+        self.defensive_put_roll_dte_max = resolved_config.get("defensive_put_roll_dte_max", 60)
+        self.defensive_put_roll_delta = resolved_config.get("defensive_put_roll_delta", 0.20)
+        self.assignment_cooldown_days = resolved_config.get("assignment_cooldown_days", 20)
+        self.large_loss_cooldown_days = resolved_config.get("large_loss_cooldown_days", 15)
+        self.large_loss_cooldown_pct = resolved_config.get("large_loss_cooldown_pct", 100.0)
+        self.volatility_cap_floor = resolved_config.get("volatility_cap_floor", 0.35)
+        self.volatility_cap_ceiling = resolved_config.get("volatility_cap_ceiling", 1.0)
+        self.volatility_lookback = resolved_config.get("volatility_lookback", 20)
+        self.dynamic_symbol_risk_enabled = resolved_config.get("dynamic_symbol_risk_enabled", True)
+        self.symbol_state_cap_floor = resolved_config.get("symbol_state_cap_floor", 0.20)
+        self.symbol_state_cap_ceiling = resolved_config.get("symbol_state_cap_ceiling", 1.0)
+        self.symbol_drawdown_lookback = resolved_config.get("symbol_drawdown_lookback", 60)
+        self.symbol_drawdown_sensitivity = resolved_config.get("symbol_drawdown_sensitivity", 1.20)
+        self.symbol_downtrend_sensitivity = resolved_config.get("symbol_downtrend_sensitivity", 1.50)
+        self.symbol_volatility_sensitivity = resolved_config.get("symbol_volatility_sensitivity", 0.75)
+        self.symbol_exposure_sensitivity = resolved_config.get("symbol_exposure_sensitivity", 1.25)
+        self.symbol_assignment_base_cap = resolved_config.get(
+            "symbol_assignment_base_cap",
+            0.25 + 0.35 * resolved_config.get("position_aggressiveness", 1.0),
+        )
+        self.stock_inventory_cap_enabled = resolved_config.get("stock_inventory_cap_enabled", True)
+        self.stock_inventory_base_cap = resolved_config.get("stock_inventory_base_cap", 0.20)
+        self.stock_inventory_cap_floor = resolved_config.get("stock_inventory_cap_floor", 0.50)
+        self.stock_inventory_block_threshold = resolved_config.get("stock_inventory_block_threshold", 0.90)
 
         # SP in CC phase parameters (binbingod策略优化：CC阶段可同时开SP)
         self.allow_sp_in_cc_phase = resolved_config.get("allow_sp_in_cc_phase", True)  # 允许CC阶段开SP
@@ -305,6 +344,8 @@ class BinbinGodStrategy(BaseStrategy):
         # No stock -> can sell Put
         # Both can happen simultaneously
         self.stock_holding = StockHolding()
+        self.symbol_cooldowns: Dict[str, datetime] = {}
+        self._phase_override: Optional[str] = "SP"
         
         # Stock pool for selection (default: MAG7)
         self.stock_pool = resolved_config.get("stock_pool", MAG7_STOCKS.copy())
@@ -318,6 +359,35 @@ class BinbinGodStrategy(BaseStrategy):
         # Check if profit target/stop loss are disabled
         self._profit_target_disabled = self.profit_target_pct >= 999999
         self._stop_loss_disabled = self.stop_loss_pct >= 999999
+
+    @property
+    def phase(self) -> str:
+        if self._phase_override in ("SP", "CC"):
+            return self._phase_override
+        return "CC" if self.stock_holding.shares > 0 else "SP"
+
+    @phase.setter
+    def phase(self, value: str):
+        self._phase_override = value
+
+    def _now(self) -> datetime:
+        return getattr(self, "current_time", datetime.now())
+
+    def set_symbol_cooldown(self, symbol: str, days: int, reason: str = ""):
+        if days <= 0:
+            return
+        current_end = self.symbol_cooldowns.get(symbol)
+        new_end = self._now() + timedelta(days=days)
+        if current_end is None or new_end > current_end:
+            self.symbol_cooldowns[symbol] = new_end
+            msg = f"COOLDOWN_SET:{symbol}:{days}d"
+            if reason:
+                msg += f":{reason}"
+            logger.info(msg)
+
+    def is_symbol_on_cooldown(self, symbol: str) -> bool:
+        expiry = self.symbol_cooldowns.get(symbol)
+        return bool(expiry and expiry > self._now())
 
     def set_event_recorder(self, recorder):
         """Attach parity event recorder."""
@@ -719,6 +789,7 @@ class BinbinGodStrategy(BaseStrategy):
             )
 
         from datetime import datetime
+        self.current_time = datetime.strptime(current_date, "%Y-%m-%d")
         
         # Log current holdings state
         logger.info(f"generate_signals START: date={current_date}, "
@@ -738,6 +809,8 @@ class BinbinGodStrategy(BaseStrategy):
         
         # Get current state (holdings-driven, no phase)
         held_symbols = self.stock_holding.get_symbols()  # Symbols with stock
+        if not held_symbols and self.stock_holding.shares > 0 and self.symbol not in ("MAG7_AUTO", ""):
+            held_symbols = [self.symbol]
         put_symbols = set()  # Symbols with open Put positions
         for p in wheel_positions:
             if p.trade_type == "BINBIN_PUT":
@@ -758,7 +831,7 @@ class BinbinGodStrategy(BaseStrategy):
             existing_call_coverage = {}  # {symbol: contracts}
             for p in wheel_positions:
                 if p.trade_type == "BINBIN_CALL":
-                    sym = p.symbol
+                    sym = getattr(p, "symbol", self.symbol)
                     existing_call_coverage[sym] = existing_call_coverage.get(sym, 0) + abs(p.quantity)
             
             for stock_symbol in held_symbols:
@@ -803,11 +876,25 @@ class BinbinGodStrategy(BaseStrategy):
                     all_signals.extend(signals)
                     logger.info(f"Generated {len(signals)} Call signal(s) for {stock_symbol}")
         
-        # ========== Part 2: Generate Put signals for stocks we don't hold ==========
-        # Put signals allowed for ALL symbols in pool (no restrictions)
+        # ========== Part 2: Generate Put signals ==========
+        allow_new_puts = not held_symbols
+        if held_symbols and self.allow_sp_in_cc_phase:
+            cc_sp_signals = self._generate_sp_in_cc_phase(
+                current_date=current_date,
+                underlying_price=underlying_price,
+                iv=iv,
+                wheel_positions=wheel_positions,
+                position_mgr=position_mgr,
+                held_symbols=held_symbols,
+                pool_data=pool_data,
+                stock_hv=stock_hv,
+            )
+            all_signals.extend(cc_sp_signals)
+        elif held_symbols:
+            allow_new_puts = False
+
         available_for_put = stock_pool
-        
-        if available_for_put and len(wheel_positions) + len(all_signals) < self.max_positions:
+        if allow_new_puts and available_for_put and len(wheel_positions) + len(all_signals) < self.max_positions:
             logger.info(f"Generating Put signals for available symbols: {available_for_put}")
             
             # Select best stock for Put
@@ -846,6 +933,22 @@ class BinbinGodStrategy(BaseStrategy):
                     if bar_index < len(sym_hv) and sym_hv[bar_index] > 0.01:
                         actual_iv = sym_hv[bar_index]
             
+            if self.is_symbol_on_cooldown(actual_symbol):
+                logger.info(f"Skipping Put signal for {actual_symbol}: cooldown active")
+                return all_signals
+
+            if self.stock_inventory_cap_enabled:
+                portfolio_value = position_mgr.net_capital if position_mgr else self.initial_capital
+                inventory_cap = portfolio_value * self.stock_inventory_base_cap
+                inventory_block = inventory_cap * self.stock_inventory_block_threshold
+                stock_notional = self.stock_holding.get_shares(actual_symbol) * max(actual_underlying_price, 0)
+                if inventory_cap > 0 and stock_notional >= inventory_block:
+                    logger.info(
+                        f"Skipping Put signal for {actual_symbol}: stock inventory "
+                        f"${stock_notional:.0f} >= block ${inventory_block:.0f}"
+                    )
+                    return all_signals
+
             # Generate Put signal
             signal = self._generate_backtest_put_signal(
                 actual_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
@@ -1370,6 +1473,7 @@ class BinbinGodStrategy(BaseStrategy):
         # Check if we need CC optimization
         call_delta_target = self.call_delta
         additional_constraints = {}
+        repair_mode = False
         
         # ML DTE optimization for Covered Calls
         ml_dte_result = None
@@ -1442,6 +1546,23 @@ class BinbinGodStrategy(BaseStrategy):
                 min_strike_desired = cost_basis * (1 - self.cc_min_strike_premium)
                 additional_constraints["min_strike"] = min_strike_desired
                 logger.info(f"CC optimization: Setting minimum strike target to ${min_strike_desired:.2f}")
+
+            drawdown_vs_cost = (cost_basis - underlying_price) / cost_basis if cost_basis > 0 else 0.0
+            if drawdown_vs_cost >= self.repair_call_threshold_pct:
+                repair_mode = True
+                call_delta_target = max(call_delta_target, self.repair_call_delta)
+                dte_days = max(self.repair_call_dte_min, min(dte_days, self.repair_call_dte_max))
+                T = dte_days / 365.0
+                expiry_date = entry + timedelta(days=dte_days)
+                expiry_str = expiry_date.strftime("%Y%m%d")
+                repair_min_strike = max(underlying_price * 1.01, cost_basis * (1 - self.repair_call_max_discount_pct))
+                if "min_strike" in additional_constraints:
+                    additional_constraints["min_strike"] = max(
+                        underlying_price * 1.01,
+                        min(additional_constraints["min_strike"], repair_min_strike),
+                    )
+                else:
+                    additional_constraints["min_strike"] = repair_min_strike
         
         # Apply ML adaptive strategy if available
         if self.ml_delta_optimization and self.ml_integration and ml_result:
@@ -1453,6 +1574,9 @@ class BinbinGodStrategy(BaseStrategy):
             logger.info(f"Adaptive final delta: {final_delta:.3f}")
         else:
             final_delta = call_delta_target
+
+        if repair_mode:
+            final_delta = max(final_delta, self.repair_call_delta)
         
         contract_metadata = None
         if self._is_qc_parity_enabled():
@@ -1857,6 +1981,35 @@ class BinbinGodStrategy(BaseStrategy):
         premium_captured_pct = abs(pnl) / abs(entry_price) * 100 if entry_price else 0
 
         # ML-based roll optimization
+        option_right = position.get("right", "")
+        expiry = position.get("expiry")
+        if expiry:
+            if isinstance(expiry, str):
+                try:
+                    expiry_date = datetime.strptime(expiry, '%Y%m%d')
+                except (ValueError, TypeError):
+                    expiry_date = current_dt
+            else:
+                expiry_date = expiry
+            dte = (expiry_date - current_dt).days if isinstance(current_dt, datetime) else 0
+        else:
+            dte = 0
+
+        pnl_pct = ((entry_price - current_price) / abs(entry_price) * 100) if entry_price else 0.0
+        underlying_from_market = (market_data or {}).get("price", 0.0) if market_data else 0.0
+        if option_right == "P" and self.defensive_put_roll_enabled:
+            strike = position.get("strike", 0.0)
+            itm_pct = max(0.0, (strike - underlying_from_market) / strike) if strike and underlying_from_market > 0 else 0.0
+            if (
+                dte >= self.defensive_put_roll_min_dte
+                and (self.defensive_put_roll_max_dte <= 0 or dte <= self.defensive_put_roll_max_dte)
+                and (
+                    itm_pct >= self.defensive_put_roll_itm_buffer_pct
+                    or pnl_pct <= -self.defensive_put_roll_loss_pct
+                )
+            ):
+                return True, "DEFENSIVE_PUT_ROLL"
+
         if self.ml_roll_optimization and self.ml_roll_optimizer and market_data:
             try:
                 current_date = current_dt.strftime('%Y-%m-%d') if isinstance(current_dt, datetime) else str(current_dt)[:10]
@@ -1904,18 +2057,7 @@ class BinbinGodStrategy(BaseStrategy):
         # For Wheel strategy, we only close early in specific cases
 
         # Expiry check
-        expiry = position.get("expiry")
         if expiry:
-            if isinstance(expiry, str):
-                try:
-                    expiry_date = datetime.strptime(expiry, '%Y%m%d')
-                except (ValueError, TypeError):
-                    expiry_date = current_dt
-            else:
-                expiry_date = expiry
-
-            dte = (expiry_date - current_dt).days if isinstance(current_dt, datetime) else 0
-
             # Roll Forward: High premium capture with time remaining
             if premium_captured_pct >= 80 and dte > 7:
                 return True, "ROLL_FORWARD"
@@ -2233,6 +2375,7 @@ class BinbinGodStrategy(BaseStrategy):
                 
                 logger.info(f"Put assigned: Bought {shares_acquired} shares @ ${strike} of {symbol}")
                 logger.info(f"Current holdings: {self.stock_holding.holdings}")
+                self.set_symbol_cooldown(symbol, self.assignment_cooldown_days, "put_assignment")
             
             elif right == "C":
                 # Call assignment: we sold shares
@@ -2289,6 +2432,9 @@ class BinbinGodStrategy(BaseStrategy):
                 # Log remaining holdings if any
                 if self.stock_holding.shares > 0:
                     logger.info(f"Remaining holdings: {self.stock_holding.holdings}")
+
+        if trade.get("right") == "P" and trade.get("pnl", 0) <= -(abs(trade.get("entry_price", 0)) * self.large_loss_cooldown_pct / 100):
+            self.set_symbol_cooldown(trade.get("symbol", ""), self.large_loss_cooldown_days, "put_loss_close")
         
         # Return additional stock P&L for engine to add to cumulative_pnl
         return additional_stock_pnl
@@ -2445,7 +2591,7 @@ class BinbinGodStrategy(BaseStrategy):
     def get_performance_report(self) -> Dict[str, Any]:
         """Generate comprehensive performance report with selection history."""
         # Determine phase from holdings (for backward compatibility)
-        current_phase = "CC" if self.stock_holding.shares > 0 else "SP"
+        current_phase = self.phase
         
         # Debug logging
         self.logger.info(f"BinbinGod Performance Report: shares={self.stock_holding.shares}, holdings={self.stock_holding.holdings}")

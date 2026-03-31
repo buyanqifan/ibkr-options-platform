@@ -289,6 +289,28 @@ class TestBinbinGodRollSignal:
         # Call strike should be above underlying
         assert signal.strike > 145.0, f"Call strike {signal.strike} should be above underlying"
 
+    def test_defensive_put_roll_triggers_on_deep_itm_short_put(self, strategy):
+        """Short puts should trigger defensive roll before legacy SP hold behavior."""
+        current_dt = datetime(2024, 2, 1)
+        expiry_dt = current_dt + timedelta(days=10)
+        should_close, reason = strategy.should_exit_position(
+            position={
+                "symbol": "NVDA",
+                "right": "P",
+                "strike": 100.0,
+                "expiry": expiry_dt,
+                "quantity": -1,
+                "strategy_phase": "SP",
+            },
+            current_price=8.0,
+            entry_price=2.0,
+            current_dt=current_dt,
+            market_data={"price": 85.0},
+        )
+
+        assert should_close is True
+        assert reason == "DEFENSIVE_PUT_ROLL"
+
 
 class TestRollLogicIntegration:
     """Test roll logic integration with engine."""

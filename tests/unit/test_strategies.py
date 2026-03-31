@@ -1120,3 +1120,71 @@ class TestBinbinGodStrategy:
         # Should only calculate PnL for 100 shares (actual held)
         # Stock PnL = (160 - 150) * 100 = +1000
         assert result == 1000.0
+
+    def test_sp_signal_blocked_by_symbol_cooldown(self, base_params):
+        """QC sync: symbol cooldown should block new short-put entries."""
+        params = base_params.copy()
+        params["symbol"] = "NVDA"
+        params["stock_pool"] = ["NVDA"]
+        strategy = BinbinGodStrategy(params)
+        strategy.mag7_data = {"NVDA": [{"date": f"2024-01-{day:02d}", "close": 100 + day, "volume": 1_000_000} for day in range(1, 40)]}
+        strategy.stock_hv = {"NVDA": [0.25] * 39}
+        strategy.symbol_cooldowns = {"NVDA": datetime(2024, 2, 20)}
+
+        signals = strategy.generate_signals(
+            current_date="2024-01-31",
+            underlying_price=131.0,
+            iv=0.25,
+            open_positions=[],
+        )
+
+        assert signals == []
+
+    def test_repair_call_uses_shorter_dte_window(self, base_params):
+        """QC sync: repair call mode should compress DTE when stock is deeply below cost basis."""
+        params = base_params.copy()
+        params["symbol"] = "NVDA"
+        params["repair_call_threshold_pct"] = 0.08
+        params["repair_call_delta"] = 0.35
+        params["repair_call_dte_min"] = 7
+        params["repair_call_dte_max"] = 21
+        strategy = BinbinGodStrategy(params)
+        strategy.stock_holding.add_shares("NVDA", 100, 150.0)
+
+        signals = strategy._generate_backtest_call_signal(
+            symbol="NVDA",
+            current_date="2024-01-15",
+            underlying_price=120.0,
+            iv=0.25,
+            position_mgr=None,
+            shares_available=100,
+            cost_basis=150.0,
+        )
+
+        assert len(signals) == 1
+        entry_date = datetime.strptime("2024-01-15", "%Y-%m-%d")
+        expiry_date = datetime.strptime(signals[0].expiry, "%Y%m%d")
+        dte = (expiry_date - entry_date).days
+        assert 7 <= dte <= 21
+
+    def test_put_assignment_sets_symbol_cooldown(self, base_params):
+        """QC sync: put assignment should add a symbol cooldown."""
+        params = base_params.copy()
+        params["symbol"] = "NVDA"
+        params["assignment_cooldown_days"] = 20
+        strategy = BinbinGodStrategy(params)
+        strategy.current_time = datetime(2024, 1, 15)
+
+        strategy.on_trade_closed(
+            {
+                "exit_reason": "ASSIGNMENT",
+                "right": "P",
+                "trade_type": "BINBIN_PUT",
+                "symbol": "NVDA",
+                "strike": 100.0,
+                "quantity": -1,
+                "entry_price": 2.0,
+            }
+        )
+
+        assert "NVDA" in strategy.symbol_cooldowns

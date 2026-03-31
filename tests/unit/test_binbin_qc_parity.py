@@ -43,6 +43,11 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.dte_min == 21
     assert config.dte_max == 60
     assert config.ml_min_confidence == pytest.approx(0.40)
+    assert config.defensive_put_roll_enabled is True
+    assert config.assignment_cooldown_days == 20
+    assert config.stock_inventory_cap_enabled is True
+    assert config.stock_inventory_base_cap == pytest.approx(0.20)
+    assert config.symbol_assignment_base_cap > 0
 
 
 def test_contract_lattice_respects_min_strike():
@@ -97,6 +102,44 @@ def test_put_quantity_qc_applies_caps():
     )
     assert quantity >= 0
     assert set(diagnostics) >= {"margin", "slots", "budget", "leverage"}
+
+
+def test_put_quantity_qc_blocks_when_stock_inventory_is_full():
+    config = BinbinGodParityConfig.from_params(
+        {
+            "parity_mode": "qc",
+            "stock_inventory_cap_enabled": True,
+            "stock_inventory_base_cap": 0.20,
+            "stock_inventory_cap_floor": 0.50,
+        }
+    )
+    contract = build_contract_lattice(
+        symbol="NVDA",
+        current_date="2024-03-01",
+        underlying_price=100.0,
+        iv=0.25,
+        target_right="P",
+        target_delta=-0.12,
+        dte_min=21,
+        dte_max=45,
+    )[0]
+    quantity, diagnostics = calculate_put_quantity_qc(
+        config=config,
+        selected_contract=contract,
+        current_positions=0,
+        underlying_price=100.0,
+        symbol="NVDA",
+        portfolio_value=100000.0,
+        margin_remaining=100000.0,
+        total_margin_used=0.0,
+        stock_holdings_value=18000.0,
+        stock_holding_count=1,
+        open_option_positions=[],
+        shares_held=180,
+        dynamic_max_positions=10,
+    )
+    assert quantity == 0
+    assert "stock_inventory" in diagnostics
 
 
 def test_generate_immediate_cc_signal_in_parity_mode():
