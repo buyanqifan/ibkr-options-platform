@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
@@ -13,6 +14,7 @@ from core.backtesting.pricing import OptionsPricer
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _QC_CONFIG_PATH = _REPO_ROOT / "quantconnect" / "config.json"
+_QC_STRATEGY_INIT_PATH = _REPO_ROOT / "quantconnect" / "strategy_init.py"
 
 _QC_PARAMETER_FALLBACKS = {
     "start_date": "2024-01-01",
@@ -40,8 +42,90 @@ _QC_PARAMETER_FALLBACKS = {
 }
 
 
+def _evaluate_qc_default_expr(node: ast.AST, env: Dict[str, Any]) -> Any:
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        return env[node.id]
+    if isinstance(node, ast.List):
+        return [_evaluate_qc_default_expr(elt, env) for elt in node.elts]
+    if isinstance(node, ast.Tuple):
+        return tuple(_evaluate_qc_default_expr(elt, env) for elt in node.elts)
+    if isinstance(node, ast.Dict):
+        return {
+            _evaluate_qc_default_expr(key, env): _evaluate_qc_default_expr(value, env)
+            for key, value in zip(node.keys, node.values)
+        }
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return -_evaluate_qc_default_expr(node.operand, env)
+    if isinstance(node, ast.BinOp):
+        left = _evaluate_qc_default_expr(node.left, env)
+        right = _evaluate_qc_default_expr(node.right, env)
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Div):
+            return left / right
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "join"
+        and isinstance(node.func.value, ast.Constant)
+        and isinstance(node.func.value.value, str)
+        and len(node.args) == 1
+    ):
+        return node.func.value.value.join(_evaluate_qc_default_expr(node.args[0], env))
+    raise ValueError(f"Unsupported QC default expression: {ast.dump(node)}")
+
+
+def _extract_strategy_init_parameter_defaults() -> Dict[str, Any]:
+    try:
+        module = ast.parse(_QC_STRATEGY_INIT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    env: Dict[str, Any] = {}
+    defaults: Dict[str, Any] = {}
+    for node in module.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            try:
+                env[node.targets[0].id] = _evaluate_qc_default_expr(node.value, env)
+            except Exception:
+                continue
+
+    for node in module.body:
+        if not isinstance(node, ast.FunctionDef) or node.name != "init_parameters":
+            continue
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+                try:
+                    env[stmt.targets[0].id] = _evaluate_qc_default_expr(stmt.value, env)
+                except Exception:
+                    pass
+            for child in ast.walk(stmt):
+                if not isinstance(child, ast.Call):
+                    continue
+                if not isinstance(child.func, ast.Name) or child.func.id != "_get_param":
+                    continue
+                if len(child.args) < 3:
+                    continue
+                try:
+                    param_name = _evaluate_qc_default_expr(child.args[1], env)
+                    param_default = _evaluate_qc_default_expr(child.args[2], env)
+                except Exception:
+                    continue
+                defaults[str(param_name)] = param_default
+        break
+
+    return defaults
+
+
 def _load_quantconnect_parameter_defaults() -> Dict[str, Any]:
     defaults = dict(_QC_PARAMETER_FALLBACKS)
+    defaults.update(_extract_strategy_init_parameter_defaults())
     try:
         raw = json.loads(_QC_CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
@@ -72,37 +156,37 @@ QC_BINBIN_DEFAULTS = {
     "dte_max": int(QC_PARAMETER_DEFAULTS["dte_max"]),
     "put_delta": float(QC_PARAMETER_DEFAULTS["put_delta"]),
     "call_delta": float(QC_PARAMETER_DEFAULTS["call_delta"]),
-    "repair_call_threshold_pct": 0.08,
-    "repair_call_delta": 0.35,
-    "repair_call_dte_min": 7,
-    "repair_call_dte_max": 21,
-    "repair_call_max_discount_pct": 0.08,
-    "defensive_put_roll_enabled": True,
+    "repair_call_threshold_pct": float(QC_PARAMETER_DEFAULTS["repair_call_threshold_pct"]),
+    "repair_call_delta": float(QC_PARAMETER_DEFAULTS["repair_call_delta"]),
+    "repair_call_dte_min": int(QC_PARAMETER_DEFAULTS["repair_call_dte_min"]),
+    "repair_call_dte_max": int(QC_PARAMETER_DEFAULTS["repair_call_dte_max"]),
+    "repair_call_max_discount_pct": float(QC_PARAMETER_DEFAULTS["repair_call_max_discount_pct"]),
+    "defensive_put_roll_enabled": bool(QC_PARAMETER_DEFAULTS["defensive_put_roll_enabled"]),
     "defensive_put_roll_loss_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"]),
     "defensive_put_roll_itm_buffer_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_itm_buffer_pct"]),
-    "defensive_put_roll_min_dte": 7,
-    "defensive_put_roll_max_dte": 14,
-    "defensive_put_roll_dte_min": 21,
-    "defensive_put_roll_dte_max": 60,
-    "defensive_put_roll_delta": 0.20,
-    "assignment_cooldown_days": 20,
-    "large_loss_cooldown_days": 15,
-    "large_loss_cooldown_pct": 100.0,
-    "volatility_cap_floor": 0.35,
-    "volatility_cap_ceiling": 1.0,
-    "volatility_lookback": 20,
-    "dynamic_symbol_risk_enabled": True,
-    "symbol_state_cap_floor": 0.20,
-    "symbol_state_cap_ceiling": 1.0,
-    "symbol_drawdown_lookback": 60,
-    "symbol_drawdown_sensitivity": 1.20,
-    "symbol_downtrend_sensitivity": 1.50,
-    "symbol_volatility_sensitivity": 0.75,
-    "symbol_exposure_sensitivity": 1.25,
+    "defensive_put_roll_min_dte": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_min_dte"]),
+    "defensive_put_roll_max_dte": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_max_dte"]),
+    "defensive_put_roll_dte_min": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_dte_min"]),
+    "defensive_put_roll_dte_max": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_dte_max"]),
+    "defensive_put_roll_delta": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_delta"]),
+    "assignment_cooldown_days": int(QC_PARAMETER_DEFAULTS["assignment_cooldown_days"]),
+    "large_loss_cooldown_days": int(QC_PARAMETER_DEFAULTS["large_loss_cooldown_days"]),
+    "large_loss_cooldown_pct": float(QC_PARAMETER_DEFAULTS["large_loss_cooldown_pct"]),
+    "volatility_cap_floor": float(QC_PARAMETER_DEFAULTS["volatility_cap_floor"]),
+    "volatility_cap_ceiling": float(QC_PARAMETER_DEFAULTS["volatility_cap_ceiling"]),
+    "volatility_lookback": int(QC_PARAMETER_DEFAULTS["volatility_lookback"]),
+    "dynamic_symbol_risk_enabled": bool(QC_PARAMETER_DEFAULTS["dynamic_symbol_risk_enabled"]),
+    "symbol_state_cap_floor": float(QC_PARAMETER_DEFAULTS["symbol_state_cap_floor"]),
+    "symbol_state_cap_ceiling": float(QC_PARAMETER_DEFAULTS["symbol_state_cap_ceiling"]),
+    "symbol_drawdown_lookback": int(QC_PARAMETER_DEFAULTS["symbol_drawdown_lookback"]),
+    "symbol_drawdown_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_drawdown_sensitivity"]),
+    "symbol_downtrend_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_downtrend_sensitivity"]),
+    "symbol_volatility_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_volatility_sensitivity"]),
+    "symbol_exposure_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_exposure_sensitivity"]),
     "symbol_assignment_base_cap": float(QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"]),
-    "stock_inventory_cap_enabled": True,
+    "stock_inventory_cap_enabled": bool(QC_PARAMETER_DEFAULTS["stock_inventory_cap_enabled"]),
     "stock_inventory_base_cap": float(QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"]),
-    "stock_inventory_cap_floor": 0.50,
+    "stock_inventory_cap_floor": float(QC_PARAMETER_DEFAULTS["stock_inventory_cap_floor"]),
     "stock_inventory_block_threshold": float(QC_PARAMETER_DEFAULTS["stock_inventory_block_threshold"]),
 }
 

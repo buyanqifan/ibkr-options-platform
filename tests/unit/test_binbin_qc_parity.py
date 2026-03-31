@@ -13,6 +13,8 @@ from core.backtesting.engine import BacktestEngine
 from core.backtesting.position_manager import PositionManager
 from core.backtesting.qc_parity import (
     BinbinGodParityConfig,
+    QC_PARAMETER_DEFAULTS,
+    _extract_strategy_init_parameter_defaults,
     build_contract_lattice,
     calculate_symbol_state_risk_multiplier_qc,
     calculate_dynamic_max_positions_from_prices,
@@ -62,6 +64,27 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.defensive_put_roll_loss_pct == pytest.approx(100.0)
     assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.05)
     assert config.symbol_assignment_base_cap == pytest.approx(0.25)
+
+
+def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
+    defaults = _extract_strategy_init_parameter_defaults()
+
+    assert defaults["max_positions_ceiling"] == 20
+    assert defaults["margin_buffer_pct"] == pytest.approx(0.50)
+    assert defaults["target_margin_utilization"] == pytest.approx(0.35)
+    assert defaults["max_risk_per_trade"] == pytest.approx(0.02)
+    assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(100.0)
+    assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.05)
+    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.25)
+    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.15)
+    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.75)
+
+
+def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
+    assert QC_PARAMETER_DEFAULTS["initial_capital"] == 300000.0
+    assert QC_PARAMETER_DEFAULTS["profit_target_pct"] == pytest.approx(70.0)
+    assert QC_PARAMETER_DEFAULTS["max_risk_per_trade"] == pytest.approx(0.02)
+    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.15)
 
 
 def test_binbin_god_strategy_forces_qc_replay_defaults():
