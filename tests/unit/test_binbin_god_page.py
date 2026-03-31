@@ -101,6 +101,31 @@ def _default_form_inputs() -> dict[str, Any]:
     }
 
 
+class StubEngine:
+    def run(self, params):
+        return {
+            "metrics": {
+                "total_return_pct": 1.0,
+                "annualized_return_pct": 1.0,
+                "win_rate": 50.0,
+                "sharpe_ratio": 1.0,
+                "max_drawdown_pct": -5.0,
+                "total_trades": 1,
+                "avg_profit": 100.0,
+                "avg_loss": -50.0,
+                "profit_factor": 2.0,
+                "sortino_ratio": 1.5,
+                "monthly_returns": {},
+            },
+            "trades": [],
+            "daily_pnl": [],
+            "benchmark_data": {},
+            "underlying_prices": [],
+            "multi_stock_prices": {},
+            "strategy_performance": {},
+        }
+
+
 def test_layout_contains_qc_fields_and_omits_legacy_controls(monkeypatch):
     page = _load_binbin_god_page(monkeypatch)
 
@@ -183,35 +208,16 @@ def test_run_binbin_backtest_submits_qc_payload_and_returns_results(monkeypatch)
 
     captured = {}
 
-    class StubEngine:
+    class CapturingEngine(StubEngine):
         def run(self, params):
             captured["params"] = params
-            return {
-                "metrics": {
-                    "total_return_pct": 1.0,
-                    "annualized_return_pct": 1.0,
-                    "win_rate": 50.0,
-                    "sharpe_ratio": 1.0,
-                    "max_drawdown_pct": -5.0,
-                    "total_trades": 1,
-                    "avg_profit": 100.0,
-                    "avg_loss": -50.0,
-                    "profit_factor": 2.0,
-                    "sortino_ratio": 1.5,
-                    "monthly_returns": {},
-                },
-                "trades": [],
-                "daily_pnl": [],
-                "benchmark_data": {},
-                "underlying_prices": [],
-                "multi_stock_prices": {},
-                "strategy_performance": {},
-            }
+            return super().run(params)
 
-    monkeypatch.setattr(page, "get_services_cached", lambda: {"backtest_engine": StubEngine()})
+    monkeypatch.setattr(page, "get_services_cached", lambda: {"backtest_engine": CapturingEngine()})
 
     result, params, _, content, loading_style, export_class = page.run_binbin_backtest(
         n_clicks=1,
+        pathname="/binbin-god",
         **_default_form_inputs(),
     )
 
@@ -221,3 +227,63 @@ def test_run_binbin_backtest_submits_qc_payload_and_returns_results(monkeypatch)
     assert content is not no_update
     assert loading_style == {"display": "none"}
     assert export_class == "d-block mt-2"
+
+
+def test_run_binbin_backtest_saves_last_result(monkeypatch):
+    page = _load_binbin_god_page(monkeypatch)
+    saved = {}
+
+    monkeypatch.setattr(
+        page,
+        "save_last_binbin_god_result",
+        lambda params, result: saved.update({"params": params, "result": result}),
+    )
+    monkeypatch.setattr(page, "get_services_cached", lambda: {"backtest_engine": StubEngine()})
+
+    result, params, _, _, _, _ = page.run_binbin_backtest(
+        n_clicks=1,
+        pathname="/binbin-god",
+        **_default_form_inputs(),
+    )
+
+    assert saved["params"] == params
+    assert saved["result"] == result
+    assert saved["params"]["strategy"] == "binbin_god"
+
+
+def test_restore_binbin_backtest_restores_saved_result(monkeypatch):
+    page = _load_binbin_god_page(monkeypatch)
+    params = page.build_binbin_backtest_params(_default_form_inputs())
+    result = StubEngine().run(params)
+
+    monkeypatch.setattr(
+        page,
+        "load_last_binbin_god_result",
+        lambda: {"params": params, "result": result},
+    )
+
+    restored = page.restore_binbin_backtest_on_load("/binbin-god")
+
+    assert restored[0]["metrics"]["total_return_pct"] == 1.0
+    assert restored[1] == params
+    assert restored[3] is not no_update
+    assert restored[5] == "d-block mt-2"
+
+
+def test_restore_binbin_backtest_restores_form_values(monkeypatch):
+    page = _load_binbin_god_page(monkeypatch)
+    params = page.build_binbin_backtest_params(_default_form_inputs())
+
+    monkeypatch.setattr(
+        page,
+        "load_last_binbin_god_result",
+        lambda: {"params": params, "result": StubEngine().run(params)},
+    )
+
+    restored = page.restore_binbin_backtest_form("/binbin-god")
+
+    assert restored[0] == params["start_date"]
+    assert restored[1] == params["end_date"]
+    assert restored[2] == params["initial_capital"]
+    assert restored[3] == ",".join(params["stock_pool"])
+    assert restored[4] == params["max_positions_ceiling"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import Input, Output, State, callback, dcc, html, no_update
+from dash import Input, Output, State, callback, ctx, dcc, html, no_update
 
 from app.components.charts import (
     create_monthly_heatmap,
@@ -20,6 +20,10 @@ from app.components.monitoring import (
 )
 from app.components.tables import create_data_table, metric_card
 from app.services import get_services
+from core.backtesting.last_result_store import (
+    load_last_binbin_god_result,
+    save_last_binbin_god_result,
+)
 from core.backtesting.qc_parity import QC_BINBIN_DEFAULTS, QC_PARAMETER_DEFAULTS
 
 _services = None
@@ -281,6 +285,15 @@ SYMBOL_RISK_FIELDS = [
     {"id": "bbg-stock-inventory-block-threshold", "label": "Stock Inventory Block Threshold", "type": "number", "default": "stock_inventory_block_threshold", "step": 0.01, "min": 0},
 ]
 
+ALL_FORM_FIELDS = (
+    RUN_SETUP_FIELDS
+    + CORE_WHEEL_FIELDS
+    + ML_FIELDS
+    + CC_REPAIR_FIELDS
+    + DEFENSIVE_FIELDS
+    + SYMBOL_RISK_FIELDS
+)
+
 
 def get_services_cached():
     """Get services with caching to avoid repeated initialization."""
@@ -320,6 +333,25 @@ def _derive_symbol(stock_pool: list[str]) -> str:
     if stock_pool == DEFAULT_STOCK_POOL:
         return "MAG7_AUTO"
     return f"CUSTOM_{'_'.join(stock_pool[:3])}" if stock_pool else "MAG7_AUTO"
+
+
+def _no_update_result_response():
+    return no_update, no_update, no_update, no_update, no_update, no_update
+
+
+def _no_update_form_response():
+    return tuple(no_update for _ in ALL_FORM_FIELDS)
+
+
+def _form_values_from_params(params: dict | None):
+    if not params:
+        return _no_update_form_response()
+
+    merged = dict(QC_UI_DEFAULTS)
+    merged.update(params)
+    stock_pool = params.get("stock_pool") if isinstance(params, dict) else None
+    merged["stock_pool_text"] = ",".join(stock_pool) if stock_pool else QC_UI_DEFAULTS["stock_pool_text"]
+    return tuple(merged.get(field["default"], QC_UI_DEFAULTS[field["default"]]) for field in ALL_FORM_FIELDS)
 
 
 def _control_from_field(field):
@@ -529,329 +561,7 @@ def build_binbin_backtest_params(form_data):
     return params
 
 
-def _build_configuration_panel():
-    return html.Div(
-        [
-            create_strategy_info_card(),
-            _section_card("Run Setup", _build_rows(RUN_SETUP_FIELDS), color="success"),
-            _section_card("Core Wheel", _build_rows(CORE_WHEEL_FIELDS), color="secondary"),
-            _section_card("ML", _build_rows(ML_FIELDS), color="primary"),
-            _section_card("Covered Call / Repair", _build_rows(CC_REPAIR_FIELDS), color="warning"),
-            _section_card("Defensive Put / Cooldown", _build_rows(DEFENSIVE_FIELDS), color="danger"),
-            _section_card("Symbol Risk / Inventory", _build_rows(SYMBOL_RISK_FIELDS), color="dark"),
-            dbc.Button(
-                [html.I(className="bi bi-play-fill me-2"), "Run Backtest"],
-                id="bbg-run-btn",
-                color="primary",
-                className="w-100",
-                size="lg",
-            ),
-            html.Div(
-                id="bbg-export-container",
-                className="d-none",
-                children=[
-                    dbc.Button("📤 Export for AI Analysis", id="bbg-export-btn", color="info", className="w-100 mt-2", n_clicks=0),
-                ],
-            ),
-            dcc.Download(id="bbg-download"),
-        ]
-    )
-
-
-layout = dbc.Container(
-    [
-        html.Div(
-            [
-                html.H1([html.I(className="bi bi-robot me-2"), "Binbin God Strategy Backtester"], className="mb-2"),
-                html.P("QC-aligned Binbin God configuration with parity-aware backtesting controls", className="lead text-muted"),
-            ],
-            className="mb-4",
-        ),
-        dbc.Row(
-            [
-                dbc.Col(_build_configuration_panel(), md=4),
-                dbc.Col(
-                    [
-                        create_mag7_analysis_placeholder(),
-                        html.Div(
-                            id="bbg-loading-indicator",
-                            style={"display": "none"},
-                            className="mb-3",
-                            children=[
-                                dbc.Card(
-                                    [
-                                        dbc.CardBody(
-                                            [
-                                                html.Div(
-                                                    [
-                                                        html.I(className="bi bi-hourglass-split me-2", style={"fontSize": "2rem"}),
-                                                        html.H4("Running Binbin God Backtest...", className="mt-2"),
-                                                        html.P("Generating results with the selected QC-style configuration", className="text-muted"),
-                                                        dbc.Progress(value=100, striped=True, animated=True, className="mt-3"),
-                                                    ],
-                                                    className="text-center py-4",
-                                                )
-                                            ]
-                                        )
-                                    ],
-                                    className="bg-dark border-success",
-                                )
-                            ],
-                        ),
-                        dcc.Loading(
-                            id="binbin-loading",
-                            type="circle",
-                            children=html.Div(
-                                id="binbin-results-container",
-                                children=[
-                                    dbc.Card(
-                                        [
-                                            dbc.CardBody(
-                                                [
-                                                    html.Div(
-                                                        [html.I(className="bi bi-graph-up me-2"), "Run a backtest to see results"],
-                                                        className="text-center text-muted py-5",
-                                                    )
-                                                ]
-                                            )
-                                        ]
-                                    )
-                                ],
-                            ),
-                            overlay_style={"visibility": "visible", "opacity": 0.9, "backgroundColor": "#1a1a2e"},
-                        ),
-                        dcc.Store(id="binbin-results-store", data={}),
-                        dcc.Store(id="binbin-params-store", data={}),
-                    ],
-                    md=8,
-                ),
-            ]
-        ),
-        dcc.Markdown(
-            """
-<style>
-.dash-loading {
-    background-color: #1a1a2e !important;
-}
-.dash-spinner circle {
-    stroke: #4CAF50 !important;
-    stroke-width: 4;
-}
-</style>
-            """,
-            dangerously_allow_html=True,
-        ),
-    ],
-    fluid=True,
-)
-
-
-@callback(
-    Output("binbin-results-store", "data"),
-    Output("binbin-params-store", "data"),
-    Output("binbin-mag7-analysis", "children"),
-    Output("binbin-results-container", "children"),
-    Output("bbg-loading-indicator", "style"),
-    Output("bbg-export-container", "className"),
-    Input("bbg-run-btn", "n_clicks"),
-    State("bbg-start", "value"),
-    State("bbg-end", "value"),
-    State("bbg-initial-capital", "value"),
-    State("bbg-stock-pool-text", "value"),
-    State("bbg-max-positions-ceiling", "value"),
-    State("bbg-max-leverage", "value"),
-    State("bbg-target-margin-utilization", "value"),
-    State("bbg-position-aggressiveness", "value"),
-    State("bbg-profit-target-pct", "value"),
-    State("bbg-stop-loss-pct", "value"),
-    State("bbg-margin-buffer-pct", "value"),
-    State("bbg-margin-rate-per-contract", "value"),
-    State("bbg-dte-min", "value"),
-    State("bbg-dte-max", "value"),
-    State("bbg-put-delta", "value"),
-    State("bbg-call-delta", "value"),
-    State("bbg-ml-enabled", "value"),
-    State("bbg-ml-adoption-rate", "value"),
-    State("bbg-ml-min-confidence", "value"),
-    State("bbg-ml-exploration-rate", "value"),
-    State("bbg-ml-learning-rate", "value"),
-    State("bbg-cc-optimization-enabled", "value"),
-    State("bbg-cc-min-delta-cost", "value"),
-    State("bbg-cc-cost-basis-threshold", "value"),
-    State("bbg-cc-min-strike-premium", "value"),
-    State("bbg-repair-call-threshold-pct", "value"),
-    State("bbg-repair-call-delta", "value"),
-    State("bbg-repair-call-dte-min", "value"),
-    State("bbg-repair-call-dte-max", "value"),
-    State("bbg-repair-call-max-discount-pct", "value"),
-    State("bbg-defensive-put-roll-enabled", "value"),
-    State("bbg-defensive-put-roll-loss-pct", "value"),
-    State("bbg-defensive-put-roll-itm-buffer-pct", "value"),
-    State("bbg-defensive-put-roll-min-dte", "value"),
-    State("bbg-defensive-put-roll-max-dte", "value"),
-    State("bbg-defensive-put-roll-dte-min", "value"),
-    State("bbg-defensive-put-roll-dte-max", "value"),
-    State("bbg-defensive-put-roll-delta", "value"),
-    State("bbg-assignment-cooldown-days", "value"),
-    State("bbg-large-loss-cooldown-days", "value"),
-    State("bbg-large-loss-cooldown-pct", "value"),
-    State("bbg-volatility-cap-floor", "value"),
-    State("bbg-volatility-cap-ceiling", "value"),
-    State("bbg-volatility-lookback", "value"),
-    State("bbg-dynamic-symbol-risk-enabled", "value"),
-    State("bbg-symbol-state-cap-floor", "value"),
-    State("bbg-symbol-state-cap-ceiling", "value"),
-    State("bbg-symbol-drawdown-lookback", "value"),
-    State("bbg-symbol-drawdown-sensitivity", "value"),
-    State("bbg-symbol-downtrend-sensitivity", "value"),
-    State("bbg-symbol-volatility-sensitivity", "value"),
-    State("bbg-symbol-exposure-sensitivity", "value"),
-    State("bbg-symbol-assignment-base-cap", "value"),
-    State("bbg-stock-inventory-cap-enabled", "value"),
-    State("bbg-stock-inventory-base-cap", "value"),
-    State("bbg-stock-inventory-cap-floor", "value"),
-    State("bbg-stock-inventory-block-threshold", "value"),
-    prevent_initial_call=True,
-)
-def run_binbin_backtest(
-    n_clicks,
-    start_date,
-    end_date,
-    initial_capital,
-    stock_pool_text,
-    max_positions_ceiling,
-    max_leverage,
-    target_margin_utilization,
-    position_aggressiveness,
-    profit_target_pct,
-    stop_loss_pct,
-    margin_buffer_pct,
-    margin_rate_per_contract,
-    dte_min,
-    dte_max,
-    put_delta,
-    call_delta,
-    ml_enabled,
-    ml_adoption_rate,
-    ml_min_confidence,
-    ml_exploration_rate,
-    ml_learning_rate,
-    cc_optimization_enabled,
-    cc_min_delta_cost,
-    cc_cost_basis_threshold,
-    cc_min_strike_premium,
-    repair_call_threshold_pct,
-    repair_call_delta,
-    repair_call_dte_min,
-    repair_call_dte_max,
-    repair_call_max_discount_pct,
-    defensive_put_roll_enabled,
-    defensive_put_roll_loss_pct,
-    defensive_put_roll_itm_buffer_pct,
-    defensive_put_roll_min_dte,
-    defensive_put_roll_max_dte,
-    defensive_put_roll_dte_min,
-    defensive_put_roll_dte_max,
-    defensive_put_roll_delta,
-    assignment_cooldown_days,
-    large_loss_cooldown_days,
-    large_loss_cooldown_pct,
-    volatility_cap_floor,
-    volatility_cap_ceiling,
-    volatility_lookback,
-    dynamic_symbol_risk_enabled,
-    symbol_state_cap_floor,
-    symbol_state_cap_ceiling,
-    symbol_drawdown_lookback,
-    symbol_drawdown_sensitivity,
-    symbol_downtrend_sensitivity,
-    symbol_volatility_sensitivity,
-    symbol_exposure_sensitivity,
-    symbol_assignment_base_cap,
-    stock_inventory_cap_enabled,
-    stock_inventory_base_cap,
-    stock_inventory_cap_floor,
-    stock_inventory_block_threshold,
-):
-    """Run the Binbin God backtest using QC-aligned parameters."""
-    if not n_clicks or not start_date or not end_date:
-        return no_update, no_update, no_update, no_update, no_update, no_update
-
-    params = build_binbin_backtest_params(
-        {
-            "start_date": start_date,
-            "end_date": end_date,
-            "initial_capital": initial_capital,
-            "stock_pool_text": stock_pool_text,
-            "max_positions_ceiling": max_positions_ceiling,
-            "max_leverage": max_leverage,
-            "target_margin_utilization": target_margin_utilization,
-            "position_aggressiveness": position_aggressiveness,
-            "profit_target_pct": profit_target_pct,
-            "stop_loss_pct": stop_loss_pct,
-            "margin_buffer_pct": margin_buffer_pct,
-            "margin_rate_per_contract": margin_rate_per_contract,
-            "dte_min": dte_min,
-            "dte_max": dte_max,
-            "put_delta": put_delta,
-            "call_delta": call_delta,
-            "ml_enabled": ml_enabled,
-            "ml_adoption_rate": ml_adoption_rate,
-            "ml_min_confidence": ml_min_confidence,
-            "ml_exploration_rate": ml_exploration_rate,
-            "ml_learning_rate": ml_learning_rate,
-            "cc_optimization_enabled": cc_optimization_enabled,
-            "cc_min_delta_cost": cc_min_delta_cost,
-            "cc_cost_basis_threshold": cc_cost_basis_threshold,
-            "cc_min_strike_premium": cc_min_strike_premium,
-            "repair_call_threshold_pct": repair_call_threshold_pct,
-            "repair_call_delta": repair_call_delta,
-            "repair_call_dte_min": repair_call_dte_min,
-            "repair_call_dte_max": repair_call_dte_max,
-            "repair_call_max_discount_pct": repair_call_max_discount_pct,
-            "defensive_put_roll_enabled": defensive_put_roll_enabled,
-            "defensive_put_roll_loss_pct": defensive_put_roll_loss_pct,
-            "defensive_put_roll_itm_buffer_pct": defensive_put_roll_itm_buffer_pct,
-            "defensive_put_roll_min_dte": defensive_put_roll_min_dte,
-            "defensive_put_roll_max_dte": defensive_put_roll_max_dte,
-            "defensive_put_roll_dte_min": defensive_put_roll_dte_min,
-            "defensive_put_roll_dte_max": defensive_put_roll_dte_max,
-            "defensive_put_roll_delta": defensive_put_roll_delta,
-            "assignment_cooldown_days": assignment_cooldown_days,
-            "large_loss_cooldown_days": large_loss_cooldown_days,
-            "large_loss_cooldown_pct": large_loss_cooldown_pct,
-            "volatility_cap_floor": volatility_cap_floor,
-            "volatility_cap_ceiling": volatility_cap_ceiling,
-            "volatility_lookback": volatility_lookback,
-            "dynamic_symbol_risk_enabled": dynamic_symbol_risk_enabled,
-            "symbol_state_cap_floor": symbol_state_cap_floor,
-            "symbol_state_cap_ceiling": symbol_state_cap_ceiling,
-            "symbol_drawdown_lookback": symbol_drawdown_lookback,
-            "symbol_drawdown_sensitivity": symbol_drawdown_sensitivity,
-            "symbol_downtrend_sensitivity": symbol_downtrend_sensitivity,
-            "symbol_volatility_sensitivity": symbol_volatility_sensitivity,
-            "symbol_exposure_sensitivity": symbol_exposure_sensitivity,
-            "symbol_assignment_base_cap": symbol_assignment_base_cap,
-            "stock_inventory_cap_enabled": stock_inventory_cap_enabled,
-            "stock_inventory_base_cap": stock_inventory_base_cap,
-            "stock_inventory_cap_floor": stock_inventory_cap_floor,
-            "stock_inventory_block_threshold": stock_inventory_block_threshold,
-        }
-    )
-
-    services = get_services_cached()
-    if not services:
-        return {}, params, html.Div(), html.P("Services not initialized", className="text-warning"), {"display": "none"}, "d-none"
-
-    engine = services["backtest_engine"]
-    try:
-        result = engine.run(params)
-    except Exception as exc:
-        return {}, params, html.Div(), html.P(f"Backtest error: {exc}", className="text-danger"), {"display": "none"}, "d-none"
-
-    if not result:
-        return {}, params, html.Div(), html.P("No results generated", className="text-muted"), {"display": "none"}, "d-none"
-
+def _build_binbin_results_view(result, params):
     metrics = result.get("metrics", {})
     trades = result.get("trades", [])
     daily_pnl = result.get("daily_pnl", [])
@@ -1027,7 +737,385 @@ def run_binbin_backtest(
                 html.Div([html.H5("Phase Transition Log", className="mt-4 mb-3"), create_phase_transition_log(phase_history)])
             )
 
-    return result, params, mag7_section, content, {"display": "none"}, "d-block mt-2"
+    return mag7_section, content, {"display": "none"}, "d-block mt-2"
+
+
+def restore_binbin_backtest_on_load(pathname):
+    """Restore the last persisted Binbin God result when the page loads."""
+    if pathname != "/binbin-god":
+        return _no_update_result_response()
+
+    payload = load_last_binbin_god_result()
+    if not payload:
+        return _no_update_result_response()
+
+    params = payload.get("params")
+    result = payload.get("result")
+    if not params or not result:
+        return _no_update_result_response()
+
+    mag7_section, content, loading_style, export_class = _build_binbin_results_view(result, params)
+    return result, params, mag7_section, content, loading_style, export_class
+
+
+def restore_binbin_backtest_form(pathname):
+    """Restore form inputs from the last persisted Binbin God params."""
+    if pathname != "/binbin-god":
+        return _no_update_form_response()
+
+    payload = load_last_binbin_god_result()
+    if not payload:
+        return _no_update_form_response()
+
+    return _form_values_from_params(payload.get("params"))
+
+
+def _build_configuration_panel():
+    return html.Div(
+        [
+            create_strategy_info_card(),
+            _section_card("Run Setup", _build_rows(RUN_SETUP_FIELDS), color="success"),
+            _section_card("Core Wheel", _build_rows(CORE_WHEEL_FIELDS), color="secondary"),
+            _section_card("ML", _build_rows(ML_FIELDS), color="primary"),
+            _section_card("Covered Call / Repair", _build_rows(CC_REPAIR_FIELDS), color="warning"),
+            _section_card("Defensive Put / Cooldown", _build_rows(DEFENSIVE_FIELDS), color="danger"),
+            _section_card("Symbol Risk / Inventory", _build_rows(SYMBOL_RISK_FIELDS), color="dark"),
+            dbc.Button(
+                [html.I(className="bi bi-play-fill me-2"), "Run Backtest"],
+                id="bbg-run-btn",
+                color="primary",
+                className="w-100",
+                size="lg",
+            ),
+            html.Div(
+                id="bbg-export-container",
+                className="d-none",
+                children=[
+                    dbc.Button("📤 Export for AI Analysis", id="bbg-export-btn", color="info", className="w-100 mt-2", n_clicks=0),
+                ],
+            ),
+            dcc.Download(id="bbg-download"),
+        ]
+    )
+
+
+layout = dbc.Container(
+    [
+        dcc.Location(id="bbg-page-url", refresh=False),
+        html.Div(
+            [
+                html.H1([html.I(className="bi bi-robot me-2"), "Binbin God Strategy Backtester"], className="mb-2"),
+                html.P("QC-aligned Binbin God configuration with parity-aware backtesting controls", className="lead text-muted"),
+            ],
+            className="mb-4",
+        ),
+        dbc.Row(
+            [
+                dbc.Col(_build_configuration_panel(), md=4),
+                dbc.Col(
+                    [
+                        create_mag7_analysis_placeholder(),
+                        html.Div(
+                            id="bbg-loading-indicator",
+                            style={"display": "none"},
+                            className="mb-3",
+                            children=[
+                                dbc.Card(
+                                    [
+                                        dbc.CardBody(
+                                            [
+                                                html.Div(
+                                                    [
+                                                        html.I(className="bi bi-hourglass-split me-2", style={"fontSize": "2rem"}),
+                                                        html.H4("Running Binbin God Backtest...", className="mt-2"),
+                                                        html.P("Generating results with the selected QC-style configuration", className="text-muted"),
+                                                        dbc.Progress(value=100, striped=True, animated=True, className="mt-3"),
+                                                    ],
+                                                    className="text-center py-4",
+                                                )
+                                            ]
+                                        )
+                                    ],
+                                    className="bg-dark border-success",
+                                )
+                            ],
+                        ),
+                        dcc.Loading(
+                            id="binbin-loading",
+                            type="circle",
+                            children=html.Div(
+                                id="binbin-results-container",
+                                children=[
+                                    dbc.Card(
+                                        [
+                                            dbc.CardBody(
+                                                [
+                                                    html.Div(
+                                                        [html.I(className="bi bi-graph-up me-2"), "Run a backtest to see results"],
+                                                        className="text-center text-muted py-5",
+                                                    )
+                                                ]
+                                            )
+                                        ]
+                                    )
+                                ],
+                            ),
+                            overlay_style={"visibility": "visible", "opacity": 0.9, "backgroundColor": "#1a1a2e"},
+                        ),
+                        dcc.Store(id="binbin-results-store", data={}),
+                        dcc.Store(id="binbin-params-store", data={}),
+                    ],
+                    md=8,
+                ),
+            ]
+        ),
+        dcc.Markdown(
+            """
+<style>
+.dash-loading {
+    background-color: #1a1a2e !important;
+}
+.dash-spinner circle {
+    stroke: #4CAF50 !important;
+    stroke-width: 4;
+}
+</style>
+            """,
+            dangerously_allow_html=True,
+        ),
+    ],
+    fluid=True,
+)
+
+
+@callback(
+    Output("binbin-results-store", "data"),
+    Output("binbin-params-store", "data"),
+    Output("binbin-mag7-analysis", "children"),
+    Output("binbin-results-container", "children"),
+    Output("bbg-loading-indicator", "style"),
+    Output("bbg-export-container", "className"),
+    Input("bbg-run-btn", "n_clicks"),
+    Input("bbg-page-url", "pathname"),
+    State("bbg-start", "value"),
+    State("bbg-end", "value"),
+    State("bbg-initial-capital", "value"),
+    State("bbg-stock-pool-text", "value"),
+    State("bbg-max-positions-ceiling", "value"),
+    State("bbg-max-leverage", "value"),
+    State("bbg-target-margin-utilization", "value"),
+    State("bbg-position-aggressiveness", "value"),
+    State("bbg-profit-target-pct", "value"),
+    State("bbg-stop-loss-pct", "value"),
+    State("bbg-margin-buffer-pct", "value"),
+    State("bbg-margin-rate-per-contract", "value"),
+    State("bbg-dte-min", "value"),
+    State("bbg-dte-max", "value"),
+    State("bbg-put-delta", "value"),
+    State("bbg-call-delta", "value"),
+    State("bbg-ml-enabled", "value"),
+    State("bbg-ml-adoption-rate", "value"),
+    State("bbg-ml-min-confidence", "value"),
+    State("bbg-ml-exploration-rate", "value"),
+    State("bbg-ml-learning-rate", "value"),
+    State("bbg-cc-optimization-enabled", "value"),
+    State("bbg-cc-min-delta-cost", "value"),
+    State("bbg-cc-cost-basis-threshold", "value"),
+    State("bbg-cc-min-strike-premium", "value"),
+    State("bbg-repair-call-threshold-pct", "value"),
+    State("bbg-repair-call-delta", "value"),
+    State("bbg-repair-call-dte-min", "value"),
+    State("bbg-repair-call-dte-max", "value"),
+    State("bbg-repair-call-max-discount-pct", "value"),
+    State("bbg-defensive-put-roll-enabled", "value"),
+    State("bbg-defensive-put-roll-loss-pct", "value"),
+    State("bbg-defensive-put-roll-itm-buffer-pct", "value"),
+    State("bbg-defensive-put-roll-min-dte", "value"),
+    State("bbg-defensive-put-roll-max-dte", "value"),
+    State("bbg-defensive-put-roll-dte-min", "value"),
+    State("bbg-defensive-put-roll-dte-max", "value"),
+    State("bbg-defensive-put-roll-delta", "value"),
+    State("bbg-assignment-cooldown-days", "value"),
+    State("bbg-large-loss-cooldown-days", "value"),
+    State("bbg-large-loss-cooldown-pct", "value"),
+    State("bbg-volatility-cap-floor", "value"),
+    State("bbg-volatility-cap-ceiling", "value"),
+    State("bbg-volatility-lookback", "value"),
+    State("bbg-dynamic-symbol-risk-enabled", "value"),
+    State("bbg-symbol-state-cap-floor", "value"),
+    State("bbg-symbol-state-cap-ceiling", "value"),
+    State("bbg-symbol-drawdown-lookback", "value"),
+    State("bbg-symbol-drawdown-sensitivity", "value"),
+    State("bbg-symbol-downtrend-sensitivity", "value"),
+    State("bbg-symbol-volatility-sensitivity", "value"),
+    State("bbg-symbol-exposure-sensitivity", "value"),
+    State("bbg-symbol-assignment-base-cap", "value"),
+    State("bbg-stock-inventory-cap-enabled", "value"),
+    State("bbg-stock-inventory-base-cap", "value"),
+    State("bbg-stock-inventory-cap-floor", "value"),
+    State("bbg-stock-inventory-block-threshold", "value"),
+    prevent_initial_call=False,
+)
+def run_binbin_backtest(
+    n_clicks,
+    pathname,
+    start_date,
+    end_date,
+    initial_capital,
+    stock_pool_text,
+    max_positions_ceiling,
+    max_leverage,
+    target_margin_utilization,
+    position_aggressiveness,
+    profit_target_pct,
+    stop_loss_pct,
+    margin_buffer_pct,
+    margin_rate_per_contract,
+    dte_min,
+    dte_max,
+    put_delta,
+    call_delta,
+    ml_enabled,
+    ml_adoption_rate,
+    ml_min_confidence,
+    ml_exploration_rate,
+    ml_learning_rate,
+    cc_optimization_enabled,
+    cc_min_delta_cost,
+    cc_cost_basis_threshold,
+    cc_min_strike_premium,
+    repair_call_threshold_pct,
+    repair_call_delta,
+    repair_call_dte_min,
+    repair_call_dte_max,
+    repair_call_max_discount_pct,
+    defensive_put_roll_enabled,
+    defensive_put_roll_loss_pct,
+    defensive_put_roll_itm_buffer_pct,
+    defensive_put_roll_min_dte,
+    defensive_put_roll_max_dte,
+    defensive_put_roll_dte_min,
+    defensive_put_roll_dte_max,
+    defensive_put_roll_delta,
+    assignment_cooldown_days,
+    large_loss_cooldown_days,
+    large_loss_cooldown_pct,
+    volatility_cap_floor,
+    volatility_cap_ceiling,
+    volatility_lookback,
+    dynamic_symbol_risk_enabled,
+    symbol_state_cap_floor,
+    symbol_state_cap_ceiling,
+    symbol_drawdown_lookback,
+    symbol_drawdown_sensitivity,
+    symbol_downtrend_sensitivity,
+    symbol_volatility_sensitivity,
+    symbol_exposure_sensitivity,
+    symbol_assignment_base_cap,
+    stock_inventory_cap_enabled,
+    stock_inventory_base_cap,
+    stock_inventory_cap_floor,
+    stock_inventory_block_threshold,
+):
+    """Run the Binbin God backtest using QC-aligned parameters."""
+    try:
+        triggered_id = ctx.triggered_id
+    except Exception:
+        triggered_id = "bbg-run-btn" if n_clicks else "bbg-page-url"
+
+    if triggered_id == "bbg-page-url" or (triggered_id is None and not n_clicks):
+        return restore_binbin_backtest_on_load(pathname)
+
+    if not n_clicks or not start_date or not end_date:
+        return _no_update_result_response()
+
+    params = build_binbin_backtest_params(
+        {
+            "start_date": start_date,
+            "end_date": end_date,
+            "initial_capital": initial_capital,
+            "stock_pool_text": stock_pool_text,
+            "max_positions_ceiling": max_positions_ceiling,
+            "max_leverage": max_leverage,
+            "target_margin_utilization": target_margin_utilization,
+            "position_aggressiveness": position_aggressiveness,
+            "profit_target_pct": profit_target_pct,
+            "stop_loss_pct": stop_loss_pct,
+            "margin_buffer_pct": margin_buffer_pct,
+            "margin_rate_per_contract": margin_rate_per_contract,
+            "dte_min": dte_min,
+            "dte_max": dte_max,
+            "put_delta": put_delta,
+            "call_delta": call_delta,
+            "ml_enabled": ml_enabled,
+            "ml_adoption_rate": ml_adoption_rate,
+            "ml_min_confidence": ml_min_confidence,
+            "ml_exploration_rate": ml_exploration_rate,
+            "ml_learning_rate": ml_learning_rate,
+            "cc_optimization_enabled": cc_optimization_enabled,
+            "cc_min_delta_cost": cc_min_delta_cost,
+            "cc_cost_basis_threshold": cc_cost_basis_threshold,
+            "cc_min_strike_premium": cc_min_strike_premium,
+            "repair_call_threshold_pct": repair_call_threshold_pct,
+            "repair_call_delta": repair_call_delta,
+            "repair_call_dte_min": repair_call_dte_min,
+            "repair_call_dte_max": repair_call_dte_max,
+            "repair_call_max_discount_pct": repair_call_max_discount_pct,
+            "defensive_put_roll_enabled": defensive_put_roll_enabled,
+            "defensive_put_roll_loss_pct": defensive_put_roll_loss_pct,
+            "defensive_put_roll_itm_buffer_pct": defensive_put_roll_itm_buffer_pct,
+            "defensive_put_roll_min_dte": defensive_put_roll_min_dte,
+            "defensive_put_roll_max_dte": defensive_put_roll_max_dte,
+            "defensive_put_roll_dte_min": defensive_put_roll_dte_min,
+            "defensive_put_roll_dte_max": defensive_put_roll_dte_max,
+            "defensive_put_roll_delta": defensive_put_roll_delta,
+            "assignment_cooldown_days": assignment_cooldown_days,
+            "large_loss_cooldown_days": large_loss_cooldown_days,
+            "large_loss_cooldown_pct": large_loss_cooldown_pct,
+            "volatility_cap_floor": volatility_cap_floor,
+            "volatility_cap_ceiling": volatility_cap_ceiling,
+            "volatility_lookback": volatility_lookback,
+            "dynamic_symbol_risk_enabled": dynamic_symbol_risk_enabled,
+            "symbol_state_cap_floor": symbol_state_cap_floor,
+            "symbol_state_cap_ceiling": symbol_state_cap_ceiling,
+            "symbol_drawdown_lookback": symbol_drawdown_lookback,
+            "symbol_drawdown_sensitivity": symbol_drawdown_sensitivity,
+            "symbol_downtrend_sensitivity": symbol_downtrend_sensitivity,
+            "symbol_volatility_sensitivity": symbol_volatility_sensitivity,
+            "symbol_exposure_sensitivity": symbol_exposure_sensitivity,
+            "symbol_assignment_base_cap": symbol_assignment_base_cap,
+            "stock_inventory_cap_enabled": stock_inventory_cap_enabled,
+            "stock_inventory_base_cap": stock_inventory_base_cap,
+            "stock_inventory_cap_floor": stock_inventory_cap_floor,
+            "stock_inventory_block_threshold": stock_inventory_block_threshold,
+        }
+    )
+
+    services = get_services_cached()
+    if not services:
+        return {}, params, html.Div(), html.P("Services not initialized", className="text-warning"), {"display": "none"}, "d-none"
+
+    engine = services["backtest_engine"]
+    try:
+        result = engine.run(params)
+    except Exception as exc:
+        return {}, params, html.Div(), html.P(f"Backtest error: {exc}", className="text-danger"), {"display": "none"}, "d-none"
+
+    if not result:
+        return {}, params, html.Div(), html.P("No results generated", className="text-muted"), {"display": "none"}, "d-none"
+    save_last_binbin_god_result(params, result)
+    mag7_section, content, loading_style, export_class = _build_binbin_results_view(result, params)
+    return result, params, mag7_section, content, loading_style, export_class
+
+
+@callback(
+    [Output(field["id"], "value") for field in ALL_FORM_FIELDS],
+    Input("bbg-page-url", "pathname"),
+    prevent_initial_call=False,
+)
+def restore_binbin_backtest_form_values(pathname):
+    """Dash callback wrapper for restoring form values on page load."""
+    return restore_binbin_backtest_form(pathname)
 
 
 @callback(
