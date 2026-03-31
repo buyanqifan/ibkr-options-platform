@@ -954,8 +954,8 @@ class BinbinGodStrategy(BaseStrategy):
                 actual_symbol, current_date, actual_underlying_price, actual_iv, position_mgr
             )
             if signal:
-                all_signals.append(signal)
-                logger.info(f"Generated Put signal for {actual_symbol}")
+                all_signals.extend(signal)
+                logger.info(f"Generated {len(signal)} Put signal(s) for {actual_symbol}")
         
         return all_signals
 
