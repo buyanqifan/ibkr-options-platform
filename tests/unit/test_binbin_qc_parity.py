@@ -55,6 +55,7 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.margin_buffer_pct == pytest.approx(0.40)
     assert config.target_margin_utilization == pytest.approx(0.45)
     assert config.max_risk_per_trade == pytest.approx(0.03)
+    assert config.max_assignment_risk_per_trade == pytest.approx(0.20)
     assert config.ml_min_confidence == pytest.approx(0.40)
     assert config.defensive_put_roll_enabled is True
     assert config.assignment_cooldown_days == 20
@@ -74,6 +75,7 @@ def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
     assert defaults["margin_buffer_pct"] == pytest.approx(0.40)
     assert defaults["target_margin_utilization"] == pytest.approx(0.45)
     assert defaults["max_risk_per_trade"] == pytest.approx(0.03)
+    assert defaults["max_assignment_risk_per_trade"] == pytest.approx(0.20)
     assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(100.0)
     assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.05)
     assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.30)
@@ -86,6 +88,7 @@ def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["initial_capital"] == 300000.0
     assert QC_PARAMETER_DEFAULTS["profit_target_pct"] == pytest.approx(70.0)
     assert QC_PARAMETER_DEFAULTS["max_risk_per_trade"] == pytest.approx(0.03)
+    assert QC_PARAMETER_DEFAULTS["max_assignment_risk_per_trade"] == pytest.approx(0.20)
     assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.18)
     assert QC_PARAMETER_DEFAULTS["max_new_puts_per_day"] == 3
 
@@ -225,6 +228,42 @@ def test_put_quantity_qc_applies_max_risk_per_trade_cap():
     assert diagnostics["risk"] == 1
     assert quantity == 1
     assert quantity < diagnostics["margin"]
+
+
+def test_put_quantity_qc_caps_high_notional_single_trade_assignment_risk():
+    config = BinbinGodParityConfig.from_params(
+        {
+            "parity_mode": "qc",
+            "max_assignment_risk_per_trade": 0.20,
+        }
+    )
+    contract = build_contract_lattice(
+        symbol="NVDA",
+        current_date="2024-03-01",
+        underlying_price=900.0,
+        iv=0.25,
+        target_right="P",
+        target_delta=-0.12,
+        dte_min=21,
+        dte_max=45,
+    )[0]
+    quantity, diagnostics = calculate_put_quantity_qc(
+        config=config,
+        selected_contract=contract,
+        current_positions=0,
+        underlying_price=900.0,
+        symbol="NVDA",
+        portfolio_value=300000.0,
+        margin_remaining=300000.0,
+        total_margin_used=0.0,
+        stock_holdings_value=0.0,
+        stock_holding_count=0,
+        open_option_positions=[],
+        shares_held=0,
+        dynamic_max_positions=10,
+    )
+    assert diagnostics["assignment_trade"] == 0
+    assert quantity == 0
 
 
 def test_generate_immediate_cc_signal_in_parity_mode():

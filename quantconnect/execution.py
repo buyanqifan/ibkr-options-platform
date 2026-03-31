@@ -420,9 +420,11 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     remaining_symbol_notional = max(0.0, per_symbol_notional_cap - (symbol_put_notional + symbol_stock_notional))
     remaining_total_notional = max(0.0, total_notional_cap - (total_put_notional + stock_value))
     remaining_stock_inventory = max(0.0, stock_inventory_cap - symbol_stock_notional)
+    assignment_trade_cap = portfolio_value * getattr(algo, "max_assignment_risk_per_trade", 0.20)
     max_by_symbol_notional = int(remaining_symbol_notional / candidate_notional) if candidate_notional > 0 else 0
     max_by_total_notional = int(remaining_total_notional / candidate_notional) if candidate_notional > 0 else 0
     max_by_stock_inventory = int(remaining_stock_inventory / candidate_notional) if candidate_notional > 0 else 0
+    max_by_assignment_trade = int(assignment_trade_cap / candidate_notional) if candidate_notional > 0 else 0
     
     quantity = min(
         max_by_margin,
@@ -435,6 +437,7 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
         max_by_symbol_notional,
         max_by_total_notional,
         max_by_stock_inventory,
+        max_by_assignment_trade,
     )
     max_by_risk = quantity
     risk_message = ""
@@ -458,6 +461,7 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
             f"PUT_BLOCK:{symbol} margin={max_by_margin} budget={max_by_budget} lev={max_by_leverage} "
             f"symcap={max_by_symbol_contracts}/{symbol_cap} totalcap={max_by_total_contracts} "
             f"symnot={max_by_symbol_notional} totalnot={max_by_total_notional} stockcap={max_by_stock_inventory} "
+            f"assigntrade={max_by_assignment_trade} "
             f"risk={max_by_risk} riskmsg={risk_message or 'NA'} "
             f"slots={max_by_limit} "
             f"state={symbol_state_multiplier:.2f} vol={symbol_state['vol_ratio']:.2f} "

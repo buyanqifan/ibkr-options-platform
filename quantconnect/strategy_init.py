@@ -72,6 +72,7 @@ def init_parameters(algo):
     algo.profit_target_pct = _as_float(_get_param(algo, "profit_target_pct", 50), 50.0)
     algo.stop_loss_pct = _as_float(_get_param(algo, "stop_loss_pct", 999999), 999999.0)
     algo.max_risk_per_trade = _as_float(_get_param(algo, "max_risk_per_trade", 0.03), 0.03)
+    algo.max_assignment_risk_per_trade = _as_float(_get_param(algo, "max_assignment_risk_per_trade", 0.20), 0.20)
     algo.max_leverage = _as_float(_get_param(algo, "max_leverage", 1.0), 1.0)
     algo._profit_target_disabled = algo.profit_target_pct >= 999999
     algo._stop_loss_disabled = algo.stop_loss_pct >= 999999
@@ -186,6 +187,7 @@ def log_effective_parameters(algo):
         f"target_margin_utilization={algo.target_margin_utilization}, "
         f"margin_buffer_pct={algo.margin_buffer_pct}, "
         f"max_leverage={algo.max_leverage}, "
+        f"max_assignment_risk_per_trade={algo.max_assignment_risk_per_trade}, "
         f"max_put_contracts_per_symbol={algo.max_put_contracts_per_symbol}, "
         f"max_put_contracts_total={algo.max_put_contracts_total}, "
         f"max_contracts_per_trade={algo.max_contracts_per_trade}, "

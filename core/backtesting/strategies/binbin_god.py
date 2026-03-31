@@ -159,6 +159,7 @@ class BinbinGodStrategy(BaseStrategy):
         self.stop_loss_pct = resolved_config.get("stop_loss_pct", QC_BINBIN_DEFAULTS["stop_loss_pct"])  # Disabled by default - Wheel strategy doesn't use traditional stop loss
         self.initial_capital = resolved_config.get("initial_capital", QC_BINBIN_DEFAULTS["initial_capital"])
         self.max_risk_per_trade = resolved_config.get("max_risk_per_trade", 0.02)
+        self.max_assignment_risk_per_trade = resolved_config.get("max_assignment_risk_per_trade", QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"])
         self.max_leverage = resolved_config.get("max_leverage", QC_BINBIN_DEFAULTS["max_leverage"])
         self.ml_enabled = resolved_config.get("ml_enabled", QC_BINBIN_DEFAULTS["ml_enabled"])
         self.ml_min_confidence = resolved_config.get("ml_confidence_gate", resolved_config.get("ml_min_confidence", QC_BINBIN_DEFAULTS["ml_min_confidence"]))

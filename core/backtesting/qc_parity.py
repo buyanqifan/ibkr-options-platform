@@ -29,6 +29,7 @@ _QC_PARAMETER_FALLBACKS = {
     "target_margin_utilization": 0.35,
     "position_aggressiveness": 1.0,
     "max_risk_per_trade": 0.02,
+    "max_assignment_risk_per_trade": 0.20,
     "symbol_assignment_base_cap": 0.25,
     "stock_inventory_base_cap": 0.15,
     "stock_inventory_block_threshold": 0.75,
@@ -150,6 +151,7 @@ QC_BINBIN_DEFAULTS = {
     "target_margin_utilization": float(QC_PARAMETER_DEFAULTS["target_margin_utilization"]),
     "position_aggressiveness": float(QC_PARAMETER_DEFAULTS["position_aggressiveness"]),
     "max_risk_per_trade": float(QC_PARAMETER_DEFAULTS["max_risk_per_trade"]),
+    "max_assignment_risk_per_trade": float(QC_PARAMETER_DEFAULTS["max_assignment_risk_per_trade"]),
     "max_leverage": 1.0,
     "ml_enabled": bool(QC_PARAMETER_DEFAULTS["ml_enabled"]),
     "ml_min_confidence": 0.40,
@@ -227,6 +229,7 @@ class BinbinGodParityConfig:
     target_margin_utilization: float = QC_BINBIN_DEFAULTS["target_margin_utilization"]
     position_aggressiveness: float = QC_BINBIN_DEFAULTS["position_aggressiveness"]
     max_risk_per_trade: float = QC_BINBIN_DEFAULTS["max_risk_per_trade"]
+    max_assignment_risk_per_trade: float = QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"]
     max_leverage: float = QC_BINBIN_DEFAULTS["max_leverage"]
     ml_enabled: bool = bool(QC_BINBIN_DEFAULTS["ml_enabled"])
     ml_min_confidence: float = QC_BINBIN_DEFAULTS["ml_min_confidence"]
@@ -332,6 +335,7 @@ class BinbinGodParityConfig:
             ),
             position_aggressiveness=position_aggressiveness,
             max_risk_per_trade=_to_float(merged.get("max_risk_per_trade", QC_BINBIN_DEFAULTS["max_risk_per_trade"]), QC_BINBIN_DEFAULTS["max_risk_per_trade"]),
+            max_assignment_risk_per_trade=_to_float(merged.get("max_assignment_risk_per_trade", QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"]), QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"]),
             max_leverage=_to_float(merged.get("max_leverage", QC_BINBIN_DEFAULTS["max_leverage"]), QC_BINBIN_DEFAULTS["max_leverage"]),
             ml_enabled=bool(merged.get("ml_enabled", QC_BINBIN_DEFAULTS["ml_enabled"])),
             ml_min_confidence=ml_min_confidence,
@@ -398,6 +402,7 @@ class BinbinGodParityConfig:
                 "target_margin_utilization": self.target_margin_utilization,
                 "position_aggressiveness": self.position_aggressiveness,
                 "max_risk_per_trade": self.max_risk_per_trade,
+                "max_assignment_risk_per_trade": self.max_assignment_risk_per_trade,
                 "max_leverage": self.max_leverage,
                 "ml_enabled": self.ml_enabled,
                 "ml_min_confidence": self.ml_min_confidence,
@@ -843,6 +848,8 @@ def calculate_put_quantity_qc(
     stock_inventory_cap = calculate_stock_inventory_cap_qc(config, portfolio_value, symbol_state_multiplier)
     remaining_stock_inventory = max(0.0, stock_inventory_cap - symbol_stock_notional)
     max_by_stock_inventory = int(remaining_stock_inventory / candidate_notional) if candidate_notional > 0 else 0
+    assignment_trade_cap = portfolio_value * config.max_assignment_risk_per_trade
+    max_by_assignment_trade = int(assignment_trade_cap / candidate_notional) if candidate_notional > 0 else 0
     max_by_risk = max_by_trade_cap
     if premium > 0 and portfolio_value > 0 and config.max_risk_per_trade > 0:
         max_by_risk = int((portfolio_value * config.max_risk_per_trade) / (premium * 100))
@@ -858,6 +865,7 @@ def calculate_put_quantity_qc(
         "symbol_notional": max_by_symbol_notional,
         "total_notional": max_by_total_notional,
         "stock_inventory": max_by_stock_inventory,
+        "assignment_trade": max_by_assignment_trade,
         "risk": max_by_risk,
         "symbol_cap": symbol_cap,
         "state_multiplier": round(symbol_state_multiplier, 4),
@@ -877,6 +885,7 @@ def calculate_put_quantity_qc(
         "symbol_notional",
         "total_notional",
         "stock_inventory",
+        "assignment_trade",
         "risk",
     )
     quantity = min(diagnostics[key] for key in limit_keys) if diagnostics else 0

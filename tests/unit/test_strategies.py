@@ -954,6 +954,7 @@ class TestBinbinGodStrategy:
         assert strategy.stock_inventory_base_cap == pytest.approx(0.18)
         assert strategy.stock_inventory_block_threshold == pytest.approx(0.85)
         assert strategy.max_risk_per_trade == pytest.approx(0.03)
+        assert strategy.max_assignment_risk_per_trade == pytest.approx(0.20)
         assert strategy.max_new_puts_per_day == 3
         assert strategy._is_qc_parity_enabled() is True
         assert strategy.contract_universe_mode == "qc_emulated_lattice"
