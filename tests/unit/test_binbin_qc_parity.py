@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import types
 
 import pytest
 
@@ -14,6 +15,21 @@ ROOT = Path(__file__).resolve().parents[2]
 QC_DIR = ROOT / "quantconnect"
 if str(QC_DIR) not in sys.path:
     sys.path.insert(0, str(QC_DIR))
+
+if "AlgorithmImports" not in sys.modules:
+    algorithm_imports = types.ModuleType("AlgorithmImports")
+
+    class _OptionRight:
+        Put = "Put"
+        Call = "Call"
+
+    class _SecurityType:
+        Option = "Option"
+
+    algorithm_imports.OptionRight = _OptionRight
+    algorithm_imports.SecurityType = _SecurityType
+    algorithm_imports.__all__ = ["OptionRight", "SecurityType"]
+    sys.modules["AlgorithmImports"] = algorithm_imports
 
 import core.backtesting.strategies.binbin_god as binbin_god_module
 from core.backtesting.engine import BacktestEngine
@@ -29,6 +45,7 @@ from core.backtesting.qc_parity import (
 )
 from core.backtesting.simulator import OptionPosition, TradeSimulator
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
+import signal_generation as qc_signal_generation
 from scoring import DEFAULT_WEIGHTS, score_single_stock
 
 
@@ -163,6 +180,100 @@ def test_strategy_init_uses_qc_scoring_weights():
         "momentum": 0.25,
         "pe_score": 0.20,
     }
+
+
+class _PortfolioDict(dict):
+    @property
+    def Values(self):
+        return list(self.values())
+
+
+class _SecurityDict(dict):
+    def ContainsKey(self, key):
+        return key in self
+
+
+def test_get_portfolio_state_uses_margin_remaining(monkeypatch):
+    monkeypatch.setattr(qc_signal_generation, "get_cost_basis", lambda algo, symbol: 0.0)
+
+    algo = SimpleNamespace(
+        stock_pool=["NVDA"],
+        Portfolio=SimpleNamespace(
+            TotalPortfolioValue=125000.0,
+            Cash=90000.0,
+            MarginRemaining=42000.0,
+            TotalMarginUsed=8000.0,
+            Values=[],
+        ),
+        initial_capital=100000.0,
+    )
+
+    state = qc_signal_generation.get_portfolio_state(algo)
+
+    assert state["available_margin"] == pytest.approx(42000.0)
+
+
+def test_calculate_drawdown_tracks_peak_to_trough():
+    algo = SimpleNamespace(initial_capital=100000.0, Portfolio=SimpleNamespace(TotalPortfolioValue=120000.0))
+
+    assert qc_signal_generation.calculate_drawdown(algo) == pytest.approx(0.0)
+
+    algo.Portfolio.TotalPortfolioValue = 110000.0
+
+    assert qc_signal_generation.calculate_drawdown(algo) == pytest.approx(8.3333333333)
+
+
+def test_generate_ml_signals_skips_extreme_high_vol_downtrend_put(monkeypatch):
+    monkeypatch.setattr(qc_signal_generation, "get_cost_basis", lambda algo, symbol: 0.0)
+    monkeypatch.setattr(qc_signal_generation, "get_symbols_with_holdings", lambda algo, pool: [])
+    monkeypatch.setattr(qc_signal_generation, "get_shares_held", lambda algo, symbol: 0)
+    monkeypatch.setattr(qc_signal_generation, "is_symbol_on_cooldown", lambda algo, symbol: False)
+    monkeypatch.setattr(
+        qc_signal_generation,
+        "generate_signal_for_symbol",
+        lambda algo, symbol, strategy_phase, portfolio_state: SimpleNamespace(symbol=symbol, action="SELL_PUT"),
+    )
+
+    bars = []
+    price = 100.0
+    start = datetime(2024, 1, 1)
+    for offset in range(40):
+        price *= 1.05 if offset % 2 == 0 else 0.87
+        bars.append(
+            {
+                "date": (start + timedelta(days=offset)).strftime("%Y-%m-%d"),
+                "open": price * 0.99,
+                "high": price * 1.02,
+                "low": price * 0.90,
+                "close": price,
+                "volume": 1_000_000,
+            }
+        )
+
+    algo = SimpleNamespace(
+        stock_pool=["TSLA"],
+        weights={"iv_rank": 0.25, "technical": 0.30, "momentum": 0.25, "pe_score": 0.20},
+        volatility_lookback=20,
+        stock_inventory_cap_enabled=True,
+        stock_inventory_base_cap=0.17,
+        stock_inventory_block_threshold=0.85,
+        price_history={"TSLA": bars},
+        equities={"TSLA": SimpleNamespace(Symbol="TSLA")},
+        Securities=_SecurityDict({"TSLA": SimpleNamespace(Price=bars[-1]["close"])}),
+        Portfolio=SimpleNamespace(
+            TotalPortfolioValue=100000.0,
+            Cash=100000.0,
+            MarginRemaining=100000.0,
+            TotalMarginUsed=0.0,
+            Values=[],
+        ),
+        initial_capital=100000.0,
+        Log=lambda *_args, **_kwargs: None,
+    )
+
+    signals = qc_signal_generation.generate_ml_signals(algo)
+
+    assert signals == []
 
 
 def test_binbin_god_strategy_forces_qc_replay_defaults():
