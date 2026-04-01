@@ -33,6 +33,14 @@ docker compose up -d
 sleep 180
 ```
 
+### 2.1 Binbin God Live worker 说明
+
+`Binbin God Live` 现在作为独立后台 worker 随 `docker compose up -d` 一起启动，服务名为：
+
+- `binbin_god_live_worker`
+
+这个 worker 会连接 IBKR 模拟账户、读取数据库中的实盘参数和控制命令，并在重启后先执行恢复模式，再默认停在 `stopped`，等待网页手动启动策略。
+
 ### 3. 通过 noVNC 配置 API 访问（必须！）
 
 #### 方式一：浏览器访问 noVNC
@@ -90,6 +98,19 @@ http://你的服务器IP:8050/settings
 
 在 Settings 页面点击 **Connect** 按钮测试连接。
 
+然后可以进入：
+
+```
+http://你的服务器IP:8050/binbin-god-live
+```
+
+在 `Binbin God Live` 页面中：
+
+1. 确认顶部状态栏里 `Trading Mode` 为 `paper`
+2. 确认 worker 已经有心跳、恢复结果正常
+3. 保存/加载/应用实盘参数
+4. 点击 `Start` 后再开始自动交易
+
 ## 🔐 阿里云安全组配置
 
 如果使用 `6080:6080` 和 `8050:8050` 的端口绑定（非 127.0.0.1），需要在阿里云 ECS 安全组开放：
@@ -119,6 +140,27 @@ services:
       IBC_ReadOnlyApi: 'no'    # 允许交易操作
       IBC_ExistingSessionDetectedAction: primaryonly  # 自动处理会话冲突
       IBC_AutoRestart: 'yes'   # 自动重启
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8050:8050"
+    environment:
+      IBKR_HOST: ibgateway
+      IBKR_PORT: "8888"
+      IBKR_CLIENT_ID: "1"
+      IBKR_TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      DB_PATH: "data/trading.db"
+  binbin_god_live_worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "core.live_trading.binbin_god.runner"]
+    environment:
+      IBKR_HOST: ibgateway
+      IBKR_PORT: "8888"
+      IBKR_CLIENT_ID: "1"
+      IBKR_TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      DB_PATH: "data/trading.db"
 ```
 
 ## ⚠️ 常见问题
@@ -157,7 +199,71 @@ docker compose restart ibgateway
 
 # 只重启应用
 docker compose restart app
+
+# 只重启 Binbin God Live worker
+docker compose restart binbin_god_live_worker
 ```
+
+## 🤖 Binbin God Live 部署 / 重启步骤
+
+### 首次部署
+
+```bash
+cd /opt/ibkr-options-platform
+git pull origin main
+docker compose build app binbin_god_live_worker
+docker compose up -d ibgateway app binbin_god_live_worker
+docker compose logs -f ibgateway
+```
+
+等待 IB Gateway 完全启动并完成 API 设置后：
+
+```bash
+docker compose logs -f binbin_god_live_worker
+```
+
+确认 worker 没有持续报错，然后打开：
+
+```text
+http://你的服务器IP:8050/binbin-god-live
+```
+
+### 日常重启
+
+```bash
+cd /opt/ibkr-options-platform
+docker compose restart app binbin_god_live_worker
+```
+
+如果 IB Gateway 也需要一起重启：
+
+```bash
+docker compose restart ibgateway app binbin_god_live_worker
+```
+
+### 升级代码后重启
+
+```bash
+cd /opt/ibkr-options-platform
+git pull origin main
+docker compose build app binbin_god_live_worker
+docker compose up -d app binbin_god_live_worker
+```
+
+升级后建议检查：
+
+```bash
+docker compose logs --tail=100 binbin_god_live_worker
+docker compose logs --tail=100 app
+```
+
+然后到 `Binbin God Live` 页面确认：
+
+1. 恢复结果不是 `blocked`
+2. 恢复时间是本次重启之后
+3. 持仓数、挂单数、异常数符合预期
+4. 策略状态默认是 `stopped`
+5. 人工确认无误后再点击 `Start`
 
 ## 📊 日志查看
 
@@ -170,6 +276,9 @@ docker compose logs -f ibgateway
 
 # 只看应用日志
 docker compose logs -f app
+
+# 只看 Binbin God Live worker 日志
+docker compose logs -f binbin_god_live_worker
 
 # 搜索 API 相关错误
 docker compose logs ibgateway | grep -i "api\|error\|reject"

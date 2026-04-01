@@ -39,6 +39,27 @@ services:
     networks:
       - trading-net
 
+  binbin_god_live_worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "core.live_trading.binbin_god.runner"]
+    environment:
+      IBKR_HOST: ibgateway
+      IBKR_PORT: "8888"
+      IBKR_CLIENT_ID: "1"
+      IBKR_TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8050"
+      APP_DEBUG: "false"
+      DB_PATH: "data/trading.db"
+      LOG_LEVEL: "INFO"
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      - ibgateway
+    networks:
+      - trading-net
+
 networks:
   trading-net:
     driver: bridge
