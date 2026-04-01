@@ -15,6 +15,21 @@ from option_selector import find_option_by_greeks
 from helpers import set_symbol_cooldown
 
 
+def _track_assigned_stock(algo, symbol: str, assignment_cost_basis: float):
+    """Track stock inventory created by put assignment for later fail-safe checks."""
+    if not hasattr(algo, "assigned_stock_state"):
+        algo.assigned_stock_state = {}
+    algo.assigned_stock_state[symbol] = {
+        "source": "put_assignment",
+        "assignment_date": algo.Time,
+        "assignment_cost_basis": assignment_cost_basis,
+        "repair_failures": 0,
+        "last_repair_attempt": None,
+        "force_exit_triggered": False,
+    }
+    algo.Log(f"ASSIGNED_STOCK_TRACK:{symbol}:cost_basis={assignment_cost_basis:.2f}")
+
+
 def try_sell_cc_immediately(algo, symbol):
     """Try to sell CC immediately after Put assignment to protect stock from margin call.
     
@@ -76,6 +91,8 @@ def check_expired_options(algo):
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
                 algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f}")
+                assignment_cost_basis = get_cost_basis(algo, symbol) or strike
+                _track_assigned_stock(algo, symbol, assignment_cost_basis)
                 set_symbol_cooldown(algo, symbol, algo.assignment_cooldown_days, "put_assignment")
                 
                 # CRITICAL: Immediately try to sell CC to protect stock from margin call

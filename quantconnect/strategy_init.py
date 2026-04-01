@@ -108,6 +108,25 @@ def init_parameters(algo):
     algo.assignment_cooldown_days = _as_int(_get_param(algo, "assignment_cooldown_days", 20), 20)
     algo.large_loss_cooldown_days = _as_int(_get_param(algo, "large_loss_cooldown_days", 15), 15)
     algo.large_loss_cooldown_pct = _as_float(_get_param(algo, "large_loss_cooldown_pct", 100), 100.0)
+    algo.assigned_stock_fail_safe_enabled = _as_bool(_get_param(algo, "assigned_stock_fail_safe_enabled", True), True)
+    algo.assigned_stock_drawdown_pct = _as_float(_get_param(algo, "assigned_stock_drawdown_pct", 0.12), 0.12)
+    algo.assigned_stock_repair_attempt_limit = _as_int(_get_param(algo, "assigned_stock_repair_attempt_limit", 3), 3)
+    algo.assigned_stock_min_days_held = _as_int(_get_param(algo, "assigned_stock_min_days_held", 5), 5)
+    algo.assigned_stock_force_exit_pct = _clamp(
+        _as_float(_get_param(algo, "assigned_stock_force_exit_pct", 1.0), 1.0),
+        0.0,
+        1.0,
+    )
+    algo.assigned_stock_repair_delta_boost = _clamp(
+        _as_float(_get_param(algo, "assigned_stock_repair_delta_boost", 0.10), 0.10),
+        0.0,
+        0.30,
+    )
+    algo.assigned_stock_repair_dte_min = _as_int(_get_param(algo, "assigned_stock_repair_dte_min", 7), 7)
+    algo.assigned_stock_repair_dte_max = _as_int(_get_param(algo, "assigned_stock_repair_dte_max", 14), 14)
+    algo.assigned_stock_repair_max_discount_pct = _as_float(
+        _get_param(algo, "assigned_stock_repair_max_discount_pct", 0.12), 0.12
+    )
     algo.volatility_cap_floor = _clamp(_as_float(_get_param(algo, "volatility_cap_floor", 0.35), 0.35), 0.10, 1.0)
     algo.volatility_cap_ceiling = _clamp(_as_float(_get_param(algo, "volatility_cap_ceiling", 1.0), 1.0), 1.0, 3.0)
     algo.volatility_lookback = _as_int(_get_param(algo, "volatility_lookback", 20), 20)
@@ -173,6 +192,7 @@ def init_state(algo):
     init_position_tracking(algo)
     algo.pending_order_metadata = {}
     algo.symbol_cooldowns = {}
+    algo.assigned_stock_state = {}
     algo.trade_history, algo.ml_signals_history = [], []
     algo.total_trades, algo.winning_trades, algo.total_pnl = 0, 0, 0.0
     algo.SetWarmUp(60)
@@ -198,6 +218,9 @@ def log_effective_parameters(algo):
         f"defensive_put_roll_max_dte={algo.defensive_put_roll_max_dte}, "
         f"assignment_cooldown_days={algo.assignment_cooldown_days}, "
         f"large_loss_cooldown_days={algo.large_loss_cooldown_days}, "
+        f"assigned_stock_fail_safe_enabled={algo.assigned_stock_fail_safe_enabled}, "
+        f"assigned_stock_drawdown_pct={algo.assigned_stock_drawdown_pct}, "
+        f"assigned_stock_repair_attempt_limit={algo.assigned_stock_repair_attempt_limit}, "
         f"dynamic_symbol_risk_enabled={algo.dynamic_symbol_risk_enabled}, "
         f"symbol_state_cap_floor={algo.symbol_state_cap_floor}, "
         f"symbol_assignment_base_cap={algo.symbol_assignment_base_cap}, "
