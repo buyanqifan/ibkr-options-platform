@@ -61,19 +61,19 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.position_aggressiveness == pytest.approx(1.2)
     assert config.profit_target_pct == pytest.approx(70.0)
     assert config.margin_buffer_pct == pytest.approx(0.40)
-    assert config.target_margin_utilization == pytest.approx(0.45)
+    assert config.target_margin_utilization == pytest.approx(0.50)
     assert config.max_risk_per_trade == pytest.approx(0.03)
     assert config.max_assignment_risk_per_trade == pytest.approx(0.20)
     assert config.ml_min_confidence == pytest.approx(0.40)
     assert config.defensive_put_roll_enabled is True
     assert config.assignment_cooldown_days == 20
     assert config.stock_inventory_cap_enabled is True
-    assert config.stock_inventory_base_cap == pytest.approx(0.15)
-    assert config.stock_inventory_block_threshold == pytest.approx(0.82)
+    assert config.stock_inventory_base_cap == pytest.approx(0.17)
+    assert config.stock_inventory_block_threshold == pytest.approx(0.85)
     assert config.defensive_put_roll_loss_pct == pytest.approx(85.0)
     assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.04)
     assert config.defensive_put_roll_max_dte == 21
-    assert config.symbol_assignment_base_cap == pytest.approx(0.24)
+    assert config.symbol_assignment_base_cap == pytest.approx(0.28)
     assert config.max_new_puts_per_day == 3
 
 
@@ -82,15 +82,15 @@ def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
 
     assert defaults["max_positions_ceiling"] == 20
     assert defaults["margin_buffer_pct"] == pytest.approx(0.40)
-    assert defaults["target_margin_utilization"] == pytest.approx(0.45)
+    assert defaults["target_margin_utilization"] == pytest.approx(0.50)
     assert defaults["max_risk_per_trade"] == pytest.approx(0.03)
     assert defaults["max_assignment_risk_per_trade"] == pytest.approx(0.20)
     assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(85.0)
     assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.04)
     assert defaults["defensive_put_roll_max_dte"] == 21
-    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.24)
-    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.15)
-    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.82)
+    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.28)
+    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.17)
+    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.85)
     assert defaults["max_new_puts_per_day"] == 3
 
 
@@ -99,8 +99,9 @@ def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["profit_target_pct"] == pytest.approx(70.0)
     assert QC_PARAMETER_DEFAULTS["max_risk_per_trade"] == pytest.approx(0.03)
     assert QC_PARAMETER_DEFAULTS["max_assignment_risk_per_trade"] == pytest.approx(0.20)
-    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.15)
-    assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.24)
+    assert QC_PARAMETER_DEFAULTS["target_margin_utilization"] == pytest.approx(0.50)
+    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.17)
+    assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.28)
     assert QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"] == pytest.approx(85.0)
     assert QC_PARAMETER_DEFAULTS["max_new_puts_per_day"] == 3
 

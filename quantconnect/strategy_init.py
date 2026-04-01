@@ -119,16 +119,16 @@ def init_parameters(algo):
     algo.symbol_downtrend_sensitivity = _as_float(_get_param(algo, "symbol_downtrend_sensitivity", 1.50), 1.50)
     algo.symbol_volatility_sensitivity = _as_float(_get_param(algo, "symbol_volatility_sensitivity", 0.75), 0.75)
     algo.symbol_exposure_sensitivity = _as_float(_get_param(algo, "symbol_exposure_sensitivity", 1.25), 1.25)
-    default_symbol_assignment_cap = 0.24
+    default_symbol_assignment_cap = 0.28
     algo.symbol_assignment_base_cap = _clamp(
         _as_float(_get_param(algo, "symbol_assignment_base_cap", default_symbol_assignment_cap), default_symbol_assignment_cap),
         0.05,
         1.5,
     )
     algo.stock_inventory_cap_enabled = _as_bool(_get_param(algo, "stock_inventory_cap_enabled", True), True)
-    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.15), 0.15), 0.05, 1.0)
+    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.17), 0.17), 0.05, 1.0)
     algo.stock_inventory_cap_floor = _clamp(_as_float(_get_param(algo, "stock_inventory_cap_floor", 0.50), 0.50), 0.10, 1.0)
-    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.82), 0.82), 0.50, 1.20)
+    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.85), 0.85), 0.50, 1.20)
     algo.max_new_puts_per_day = max(1, _as_int(_get_param(algo, "max_new_puts_per_day", 3), 3))
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
     algo.ml_enabled = _as_bool(_get_param(algo, "ml_enabled", True), True)
@@ -139,7 +139,7 @@ def init_parameters(algo):
     algo.stock_pool = str(_get_param(algo, "stock_pool", ",".join(MAG7_STOCKS))).split(",")
     algo.weights = {"iv_rank": 0.25, "technical": 0.30, "momentum": 0.25, "pe_score": 0.20}
     # Target margin utilization for position sizing (60% of capital)
-    algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.45), 0.45)
+    algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.50), 0.50)
 
 
 def init_ml(algo):

@@ -96,7 +96,7 @@ def _default_form_inputs() -> dict[str, Any]:
         "stock_pool_text": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
         "max_positions_ceiling": 20,
         "max_leverage": 1.0,
-        "target_margin_utilization": 0.45,
+        "target_margin_utilization": 0.50,
         "position_aggressiveness": 1.2,
         "profit_target_pct": 70,
         "stop_loss_pct": 999999,
@@ -143,11 +143,11 @@ def _default_form_inputs() -> dict[str, Any]:
         "symbol_downtrend_sensitivity": 1.50,
         "symbol_volatility_sensitivity": 0.75,
         "symbol_exposure_sensitivity": 1.25,
-        "symbol_assignment_base_cap": 0.24,
+        "symbol_assignment_base_cap": 0.28,
         "stock_inventory_cap_enabled": True,
-        "stock_inventory_base_cap": 0.15,
+        "stock_inventory_base_cap": 0.17,
         "stock_inventory_cap_floor": 0.50,
-        "stock_inventory_block_threshold": 0.82,
+        "stock_inventory_block_threshold": 0.85,
     }
 
 
@@ -228,16 +228,16 @@ def test_build_binbin_backtest_params_uses_qc_defaults(monkeypatch):
     assert params["position_aggressiveness"] == 1.2
     assert params["profit_target_pct"] == 70
     assert params["margin_buffer_pct"] == 0.40
-    assert params["target_margin_utilization"] == 0.45
+    assert params["target_margin_utilization"] == 0.50
     assert params["max_risk_per_trade"] == 0.03
     assert params["ml_delta_optimization"] is True
     assert params["ml_dte_optimization"] is True
     assert params["ml_roll_optimization"] is True
     assert params["ml_position_optimization"] is True
     assert params["stop_loss_pct"] == 999999
-    assert params["symbol_assignment_base_cap"] == 0.24
-    assert params["stock_inventory_base_cap"] == 0.15
-    assert params["stock_inventory_block_threshold"] == 0.82
+    assert params["symbol_assignment_base_cap"] == 0.28
+    assert params["stock_inventory_base_cap"] == 0.17
+    assert params["stock_inventory_block_threshold"] == 0.85
     assert "run_mode" not in params
 
 
