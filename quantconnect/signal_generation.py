@@ -5,6 +5,7 @@ No phase concept - signals are generated based on actual holdings:
 - No stock -> can sell Put
 - Both can happen simultaneously
 """
+import math
 from typing import Dict, List, Optional
 from ml_integration import StrategySignal
 from signals import get_cc_optimization_params
@@ -25,15 +26,60 @@ def get_portfolio_state(algo) -> Dict:
         cb = get_cost_basis(algo, symbol)
         if cb > 0:
             cost_basis_dict[symbol] = cb
-    return {'total_capital': algo.Portfolio.TotalPortfolioValue, 'available_margin': algo.Portfolio.Cash,
+    return {'total_capital': algo.Portfolio.TotalPortfolioValue, 'available_margin': algo.Portfolio.MarginRemaining,
             'margin_used': algo.Portfolio.TotalMarginUsed, 'drawdown': calculate_drawdown(algo),
             'positions': positions, 'cost_basis': cost_basis_dict}
 
 
 def calculate_drawdown(algo) -> float:
     current = algo.Portfolio.TotalPortfolioValue
-    if current < algo.initial_capital: return (algo.initial_capital - current) / algo.initial_capital * 100
-    return 0.0
+    peak = getattr(algo, "_portfolio_peak_value", max(getattr(algo, "initial_capital", current), current))
+    peak = max(peak, current)
+    algo._portfolio_peak_value = peak
+    if peak <= 0:
+        return 0.0
+    return max(0.0, (peak - current) / peak * 100)
+
+
+def _annualized_realized_volatility(closes: List[float]) -> float:
+    if len(closes) < 2:
+        return 0.0
+    returns = []
+    for previous, current in zip(closes[:-1], closes[1:]):
+        if previous <= 0 or current <= 0:
+            continue
+        returns.append(math.log(current / previous))
+    if len(returns) < 2:
+        return 0.0
+    mean_return = sum(returns) / len(returns)
+    variance = sum((ret - mean_return) ** 2 for ret in returns) / (len(returns) - 1)
+    return math.sqrt(variance) * math.sqrt(252)
+
+
+def _should_block_extreme_sell_put(algo, symbol: str, bars: List[Dict], underlying_price: float) -> bool:
+    lookback = max(20, int(getattr(algo, "volatility_lookback", 20) or 20))
+    if len(bars) < lookback:
+        return False
+    closes = [float(bar["close"]) for bar in bars[-lookback:] if bar.get("close", 0) > 0]
+    if len(closes) < lookback:
+        return False
+    annualized_vol = _annualized_realized_volatility(closes)
+    ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else closes[-1]
+    return_20d = underlying_price / closes[-20] - 1 if len(closes) >= 20 and closes[-20] > 0 else 0.0
+
+    vol_threshold = float(getattr(algo, "put_hard_filter_vol_threshold", 0.75) or 0.75)
+    downtrend_threshold = float(getattr(algo, "put_hard_filter_20d_drop_threshold", 0.08) or 0.08)
+    ma_threshold = float(getattr(algo, "put_hard_filter_ma_threshold", 0.97) or 0.97)
+
+    is_extreme_high_vol = annualized_vol >= vol_threshold
+    is_downtrend = return_20d <= -downtrend_threshold and underlying_price <= ma20 * ma_threshold
+    if is_extreme_high_vol and is_downtrend:
+        algo.Log(
+            f"SP_QUALITY_BLOCK:{symbol}:vol={annualized_vol:.2f}:"
+            f"ret20={return_20d:.1%}:ma20={ma20:.2f}:price={underlying_price:.2f}"
+        )
+        return True
+    return False
 
 
 def get_current_position(algo, symbol: str) -> Optional[Dict]:
@@ -81,6 +127,11 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
             if inventory_cap > 0 and stock_notional >= inventory_cap * inventory_block_threshold:
                 algo.Log(f"SP_STOCK_BLOCK:{symbol}:stock={stock_notional:.0f}:cap={inventory_cap:.0f}")
                 continue
+        bars = algo.price_history.get(symbol, [])
+        equity = algo.equities.get(symbol)
+        underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
+        if _should_block_extreme_sell_put(algo, symbol, bars, underlying_price):
+            continue
         sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
         if sig: signals.append(sig)
     
