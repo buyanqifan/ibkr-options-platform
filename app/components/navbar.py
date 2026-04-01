@@ -17,6 +17,7 @@ def create_navbar_items(lang="en"):
             "backtester": "Strategy Backtest",
             "backtest_history": "History",
             "binbin_god": "Binbin God 🤖",
+            "binbin_god_live": "Binbin God Live",
             "settings": "Settings",
         },
         "zh": {
@@ -28,6 +29,7 @@ def create_navbar_items(lang="en"):
             "backtester": "策略回测",
             "backtest_history": "历史记录",
             "binbin_god": "彬彬神 🤖",
+            "binbin_god_live": "彬彬神实盘",
             "settings": "设置",
         }
     }
@@ -50,6 +52,11 @@ def create_navbar_items(lang="en"):
             dbc.DropdownMenuItem(
                 nav_labels["binbin_god"],
                 href="/binbin-god",
+                external_link=False,
+            ),
+            dbc.DropdownMenuItem(
+                nav_labels["binbin_god_live"],
+                href="/binbin-god-live",
                 external_link=False,
             ),
         ],
