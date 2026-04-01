@@ -181,7 +181,7 @@ def _calculate_stock_inventory_cap(algo, portfolio_value: float, symbol_state_mu
     """Dynamic cap for stock inventory held after assignments."""
     if not getattr(algo, "stock_inventory_cap_enabled", True):
         return portfolio_value
-    base_cap = portfolio_value * getattr(algo, "stock_inventory_base_cap", 0.20)
+    base_cap = portfolio_value * getattr(algo, "stock_inventory_base_cap", 0.12)
     dynamic_multiplier = max(
         getattr(algo, "stock_inventory_cap_floor", 0.50),
         min(1.0, symbol_state_multiplier),
@@ -411,7 +411,7 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     # === Notional assignment caps (dynamic by strike and aggressiveness) ===
     # These caps keep worst-case assignment exposure proportional to account size.
     aggr = getattr(algo, "position_aggressiveness", 1.0)
-    base_symbol_notional_cap = portfolio_value * getattr(algo, "symbol_assignment_base_cap", (0.25 + 0.35 * aggr))
+    base_symbol_notional_cap = portfolio_value * getattr(algo, "symbol_assignment_base_cap", 0.20)
     per_symbol_notional_cap = base_symbol_notional_cap * symbol_state_multiplier
     total_notional_cap = portfolio_value * (0.70 + 0.90 * aggr)        # 0.97x ~ 2.50x PV
     candidate_notional = strike * 100

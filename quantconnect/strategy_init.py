@@ -98,10 +98,10 @@ def init_parameters(algo):
     algo.repair_call_dte_max = _as_int(_get_param(algo, "repair_call_dte_max", 21), 21)
     algo.repair_call_max_discount_pct = _as_float(_get_param(algo, "repair_call_max_discount_pct", 0.08), 0.08)
     algo.defensive_put_roll_enabled = _as_bool(_get_param(algo, "defensive_put_roll_enabled", True), True)
-    algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 100), 100.0)
-    algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.05), 0.05)
+    algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 70), 70.0)
+    algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.03), 0.03)
     algo.defensive_put_roll_min_dte = _as_int(_get_param(algo, "defensive_put_roll_min_dte", 7), 7)
-    algo.defensive_put_roll_max_dte = _as_int(_get_param(algo, "defensive_put_roll_max_dte", 14), 14)
+    algo.defensive_put_roll_max_dte = _as_int(_get_param(algo, "defensive_put_roll_max_dte", 21), 21)
     algo.defensive_put_roll_dte_min = _as_int(_get_param(algo, "defensive_put_roll_dte_min", 21), 21)
     algo.defensive_put_roll_dte_max = _as_int(_get_param(algo, "defensive_put_roll_dte_max", 60), 60)
     algo.defensive_put_roll_delta = _clamp(_as_float(_get_param(algo, "defensive_put_roll_delta", 0.20), 0.20), 0.10, 0.40)
@@ -119,16 +119,16 @@ def init_parameters(algo):
     algo.symbol_downtrend_sensitivity = _as_float(_get_param(algo, "symbol_downtrend_sensitivity", 1.50), 1.50)
     algo.symbol_volatility_sensitivity = _as_float(_get_param(algo, "symbol_volatility_sensitivity", 0.75), 0.75)
     algo.symbol_exposure_sensitivity = _as_float(_get_param(algo, "symbol_exposure_sensitivity", 1.25), 1.25)
-    default_symbol_assignment_cap = 0.30
+    default_symbol_assignment_cap = 0.20
     algo.symbol_assignment_base_cap = _clamp(
         _as_float(_get_param(algo, "symbol_assignment_base_cap", default_symbol_assignment_cap), default_symbol_assignment_cap),
         0.05,
         1.5,
     )
     algo.stock_inventory_cap_enabled = _as_bool(_get_param(algo, "stock_inventory_cap_enabled", True), True)
-    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.18), 0.18), 0.05, 1.0)
+    algo.stock_inventory_base_cap = _clamp(_as_float(_get_param(algo, "stock_inventory_base_cap", 0.12), 0.12), 0.05, 1.0)
     algo.stock_inventory_cap_floor = _clamp(_as_float(_get_param(algo, "stock_inventory_cap_floor", 0.50), 0.50), 0.10, 1.0)
-    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.85), 0.85), 0.50, 1.20)
+    algo.stock_inventory_block_threshold = _clamp(_as_float(_get_param(algo, "stock_inventory_block_threshold", 0.75), 0.75), 0.50, 1.20)
     algo.max_new_puts_per_day = max(1, _as_int(_get_param(algo, "max_new_puts_per_day", 3), 3))
     algo._last_selected_stock, algo._selection_count, algo._min_hold_cycles, algo._last_stock_scores = None, 0, 3, {}
     algo.ml_enabled = _as_bool(_get_param(algo, "ml_enabled", True), True)

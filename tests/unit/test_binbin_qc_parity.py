@@ -3,10 +3,16 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 import pytest
 
 pytest.importorskip("optionlab")
+
+ROOT = Path(__file__).resolve().parents[2]
+QC_DIR = ROOT / "quantconnect"
+if str(QC_DIR) not in sys.path:
+    sys.path.insert(0, str(QC_DIR))
 
 import core.backtesting.strategies.binbin_god as binbin_god_module
 from core.backtesting.engine import BacktestEngine
@@ -22,6 +28,7 @@ from core.backtesting.qc_parity import (
 )
 from core.backtesting.simulator import OptionPosition, TradeSimulator
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
+from scoring import DEFAULT_WEIGHTS, score_single_stock
 
 
 def _make_bars(start_price: float = 100.0, days: int = 80):
@@ -60,11 +67,12 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.defensive_put_roll_enabled is True
     assert config.assignment_cooldown_days == 20
     assert config.stock_inventory_cap_enabled is True
-    assert config.stock_inventory_base_cap == pytest.approx(0.18)
-    assert config.stock_inventory_block_threshold == pytest.approx(0.85)
-    assert config.defensive_put_roll_loss_pct == pytest.approx(100.0)
-    assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.05)
-    assert config.symbol_assignment_base_cap == pytest.approx(0.30)
+    assert config.stock_inventory_base_cap == pytest.approx(0.12)
+    assert config.stock_inventory_block_threshold == pytest.approx(0.75)
+    assert config.defensive_put_roll_loss_pct == pytest.approx(70.0)
+    assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.03)
+    assert config.defensive_put_roll_max_dte == 21
+    assert config.symbol_assignment_base_cap == pytest.approx(0.20)
     assert config.max_new_puts_per_day == 3
 
 
@@ -76,11 +84,12 @@ def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
     assert defaults["target_margin_utilization"] == pytest.approx(0.45)
     assert defaults["max_risk_per_trade"] == pytest.approx(0.03)
     assert defaults["max_assignment_risk_per_trade"] == pytest.approx(0.20)
-    assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(100.0)
-    assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.05)
-    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.30)
-    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.18)
-    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.85)
+    assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(70.0)
+    assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.03)
+    assert defaults["defensive_put_roll_max_dte"] == 21
+    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.20)
+    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.12)
+    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.75)
     assert defaults["max_new_puts_per_day"] == 3
 
 
@@ -89,8 +98,49 @@ def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["profit_target_pct"] == pytest.approx(70.0)
     assert QC_PARAMETER_DEFAULTS["max_risk_per_trade"] == pytest.approx(0.03)
     assert QC_PARAMETER_DEFAULTS["max_assignment_risk_per_trade"] == pytest.approx(0.20)
-    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.18)
+    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.12)
+    assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.20)
+    assert QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"] == pytest.approx(70.0)
     assert QC_PARAMETER_DEFAULTS["max_new_puts_per_day"] == 3
+
+
+def test_score_single_stock_penalizes_extreme_volatility():
+    assert DEFAULT_WEIGHTS["iv_rank"] == pytest.approx(0.20)
+
+    moderate_bars = []
+    extreme_bars = []
+    moderate_price = 100.0
+    extreme_price = 100.0
+    start = datetime(2024, 1, 1)
+
+    for offset in range(40):
+        moderate_price *= 1.006 if offset % 2 == 0 else 0.998
+        extreme_price *= 1.08 if offset % 2 == 0 else 0.90
+        moderate_bars.append(
+            {
+                "date": (start + timedelta(days=offset)).strftime("%Y-%m-%d"),
+                "open": moderate_price * 0.99,
+                "high": moderate_price * 1.01,
+                "low": moderate_price * 0.98,
+                "close": moderate_price,
+                "volume": 1_000_000,
+            }
+        )
+        extreme_bars.append(
+            {
+                "date": (start + timedelta(days=offset)).strftime("%Y-%m-%d"),
+                "open": extreme_price * 0.98,
+                "high": extreme_price * 1.03,
+                "low": extreme_price * 0.93,
+                "close": extreme_price,
+                "volume": 1_000_000,
+            }
+        )
+
+    moderate_score = score_single_stock("MSFT", moderate_bars, moderate_bars[-1]["close"]).total_score
+    extreme_score = score_single_stock("TSLA", extreme_bars, extreme_bars[-1]["close"]).total_score
+
+    assert extreme_score < moderate_score
 
 
 def test_binbin_god_strategy_forces_qc_replay_defaults():
