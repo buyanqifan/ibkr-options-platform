@@ -11,7 +11,9 @@ def run_qc_parity_backtest(engine, params: Dict[str, Any], qc_source: Optional[A
     """Run BinbinGod in QC parity mode and attach an optional QC baseline."""
     parity_params = dict(params)
     parity_params["parity_mode"] = "qc"
+    if qc_source is not None:
+        parity_params["qc_trace"] = adapt_qc_trace(qc_source)
     result = engine.run(parity_params)
     if qc_source is not None:
-        result["qc_trace"] = adapt_qc_trace(qc_source)
+        result["qc_trace"] = parity_params["qc_trace"]
     return result

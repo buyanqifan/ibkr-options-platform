@@ -43,7 +43,9 @@ def _adapt_qc_log_text(text: str) -> Dict[str, List[Dict[str, Any]]]:
     event_trace: List[Dict[str, Any]] = []
     portfolio_snapshots: List[Dict[str, Any]] = []
 
+    timestamp_pattern = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})(?:[ T]\d{2}:\d{2}:\d{2})?")
     signal_pattern = re.compile(r"(?P<kind>SP_SIGNAL|CC_SIGNAL):\s*(?P<symbol>[A-Z]+)\s+delta=(?P<delta>[-+]?\d+(?:\.\d+)?)")
+    deferred_pattern = re.compile(r"ORDER_DEFERRED:\s*(?P<symbol>[A-Z]+)(?:\s+\S+)?\s+waiting for first bar")
     assign_put = re.compile(r"Put assigned:\s*\+(?P<qty>\d+)\s+(?P<symbol>[A-Z]+)\s+@\s+\$(?P<strike>\d+(?:\.\d+)?)")
     assign_call = re.compile(r"Call assigned:\s*-(?P<qty>\d+)\s+(?P<symbol>[A-Z]+)\s+@\s+\$(?P<strike>\d+(?:\.\d+)?)")
     portfolio_pattern = re.compile(r"Final Portfolio:\s*\$(?P<value>[-+]?\d[\d,]*(?:\.\d+)?)")
@@ -52,15 +54,30 @@ def _adapt_qc_log_text(text: str) -> Dict[str, List[Dict[str, Any]]]:
         line = raw_line.strip()
         if not line:
             continue
+        timestamp_match = timestamp_pattern.search(line)
+        line_date = timestamp_match.group("date") if timestamp_match else None
         match = signal_pattern.search(line)
         if match:
             event_trace.append(
                 {
                     "seq": index,
+                    "date": line_date,
                     "event_type": "signal_generated",
                     "symbol": match.group("symbol"),
                     "action": "SELL_PUT" if match.group("kind") == "SP_SIGNAL" else "SELL_CALL",
                     "delta": float(match.group("delta")),
+                }
+            )
+            continue
+        match = deferred_pattern.search(line)
+        if match:
+            event_trace.append(
+                {
+                    "seq": index,
+                    "date": line_date,
+                    "event_type": "order_deferred",
+                    "symbol": match.group("symbol"),
+                    "reason": "waiting_for_first_bar",
                 }
             )
             continue
@@ -69,6 +86,7 @@ def _adapt_qc_log_text(text: str) -> Dict[str, List[Dict[str, Any]]]:
             event_trace.append(
                 {
                     "seq": index,
+                    "date": line_date,
                     "event_type": "assigned_put",
                     "symbol": match.group("symbol"),
                     "qty": int(match.group("qty")),
@@ -83,6 +101,7 @@ def _adapt_qc_log_text(text: str) -> Dict[str, List[Dict[str, Any]]]:
             event_trace.append(
                 {
                     "seq": index,
+                    "date": line_date,
                     "event_type": "assigned_call",
                     "symbol": match.group("symbol"),
                     "qty": int(match.group("qty")),
@@ -96,6 +115,7 @@ def _adapt_qc_log_text(text: str) -> Dict[str, List[Dict[str, Any]]]:
         if match:
             portfolio_snapshots.append(
                 {
+                    "date": line_date,
                     "phase": "final",
                     "portfolio_value": float(match.group("value").replace(",", "")),
                 }

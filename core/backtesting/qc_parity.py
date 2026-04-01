@@ -896,6 +896,22 @@ def calculate_put_quantity_qc(
     return max(0, quantity), diagnostics
 
 
+def estimate_put_margin_qc(
+    *,
+    strike: float,
+    premium: float,
+    underlying_price: float,
+    margin_rate_per_contract: float,
+) -> float:
+    """Mirror QC's estimated short-put margin requirement for one contract."""
+    otm_amount = max(0.0, underlying_price - strike)
+    margin_method_1 = 0.20 * underlying_price * 100 - otm_amount * 100
+    margin_method_2 = 0.10 * strike * 100
+    estimated_margin_per_contract = max(margin_method_1, margin_method_2) + premium * 100
+    fallback_margin = strike * 100 * margin_rate_per_contract
+    return max(estimated_margin_per_contract, fallback_margin)
+
+
 class EventTracer:
     """Collect parity event trace and portfolio snapshots."""
 
@@ -939,29 +955,149 @@ class EventTracer:
         if not expected_trace:
             return report
 
+        def snapshots_for_date(
+            snapshots: Sequence[Dict[str, Any]] | None,
+            date_str: Optional[str],
+        ) -> List[Dict[str, Any]]:
+            if not snapshots or not date_str:
+                return []
+            return [dict(item) for item in snapshots if item.get("date") == date_str]
+
+        def build_mismatch(
+            *,
+            index: int,
+            reason: Optional[str] = None,
+            field: Optional[str] = None,
+            expected: Any = None,
+            actual: Any = None,
+            expected_event: Optional[Dict[str, Any]] = None,
+            actual_event: Optional[Dict[str, Any]] = None,
+        ) -> Dict[str, Any]:
+            mismatch_date = None
+            if actual_event and actual_event.get("date"):
+                mismatch_date = actual_event.get("date")
+            elif expected_event and expected_event.get("date"):
+                mismatch_date = expected_event.get("date")
+            payload: Dict[str, Any] = {
+                "index": index,
+                "actual_event": dict(actual_event) if actual_event else None,
+                "expected_event": dict(expected_event) if expected_event else None,
+                "actual_snapshots": snapshots_for_date(self.portfolio_snapshots, mismatch_date),
+                "expected_snapshots": snapshots_for_date(expected_snapshots, mismatch_date),
+            }
+            if reason is not None:
+                payload["reason"] = reason
+            if field is not None:
+                payload["field"] = field
+                payload["expected"] = expected
+                payload["actual"] = actual
+            return payload
+
         report["status"] = "matched"
-        compare_keys = ("symbol", "action", "right", "qty", "exit_reason", "assignment")
+        compare_keys = (
+            "date",
+            "event_type",
+            "symbol",
+            "action",
+            "right",
+            "qty",
+            "strike",
+            "expiry",
+            "exit_reason",
+            "assignment",
+        )
         for index, actual in enumerate(self.event_trace):
             if index >= len(expected_trace):
                 report["status"] = "length_mismatch"
-                report["first_mismatch"] = {"index": index, "reason": "actual_trace_longer"}
+                report["first_mismatch"] = build_mismatch(
+                    index=index,
+                    reason="actual_trace_longer",
+                    actual_event=actual,
+                )
                 return report
             expected = expected_trace[index]
             for key in compare_keys:
                 if expected.get(key) != actual.get(key):
                     report["status"] = "mismatch"
-                    report["first_mismatch"] = {
-                        "index": index,
-                        "field": key,
-                        "expected": expected.get(key),
-                        "actual": actual.get(key),
-                    }
+                    report["first_mismatch"] = build_mismatch(
+                        index=index,
+                        field=key,
+                        expected=expected.get(key),
+                        actual=actual.get(key),
+                        expected_event=expected,
+                        actual_event=actual,
+                    )
                     return report
         if len(expected_trace) > len(self.event_trace):
             report["status"] = "length_mismatch"
-            report["first_mismatch"] = {"index": len(self.event_trace), "reason": "expected_trace_longer"}
+            missing_index = len(self.event_trace)
+            report["first_mismatch"] = build_mismatch(
+                index=missing_index,
+                reason="expected_trace_longer",
+                expected_event=expected_trace[missing_index],
+            )
+            return report
+
         if expected_snapshots:
             report["expected_snapshot_count"] = len(expected_snapshots)
+            for index, actual in enumerate(self.portfolio_snapshots):
+                if index >= len(expected_snapshots):
+                    report["status"] = "length_mismatch"
+                    report["first_mismatch"] = {
+                        "index": index,
+                        "reason": "actual_snapshots_longer",
+                        "actual_snapshot": dict(actual),
+                        "expected_snapshot": None,
+                    }
+                    return report
+                expected = expected_snapshots[index]
+                if expected.get("date") != actual.get("date"):
+                    report["status"] = "mismatch"
+                    report["first_mismatch"] = {
+                        "index": index,
+                        "field": "snapshot_date",
+                        "expected": expected.get("date"),
+                        "actual": actual.get("date"),
+                        "actual_snapshot": dict(actual),
+                        "expected_snapshot": dict(expected),
+                    }
+                    return report
+                if expected.get("phase") != actual.get("phase"):
+                    report["status"] = "mismatch"
+                    report["first_mismatch"] = {
+                        "index": index,
+                        "field": "snapshot_phase",
+                        "expected": expected.get("phase"),
+                        "actual": actual.get("phase"),
+                        "actual_snapshot": dict(actual),
+                        "expected_snapshot": dict(expected),
+                    }
+                    return report
+                actual_value = actual.get("portfolio_value")
+                expected_value = expected.get("portfolio_value")
+                if actual_value is not None and expected_value not in (None, 0):
+                    pct_diff = abs(actual_value - expected_value) / abs(expected_value) * 100
+                    if pct_diff > thresholds["daily_portfolio_value_pct"]:
+                        report["status"] = "mismatch"
+                        report["first_mismatch"] = {
+                            "index": index,
+                            "field": "portfolio_value",
+                            "expected": expected_value,
+                            "actual": actual_value,
+                            "pct_diff": round(pct_diff, 4),
+                            "actual_snapshot": dict(actual),
+                            "expected_snapshot": dict(expected),
+                        }
+                        return report
+            if len(expected_snapshots) > len(self.portfolio_snapshots):
+                missing_index = len(self.portfolio_snapshots)
+                report["status"] = "length_mismatch"
+                report["first_mismatch"] = {
+                    "index": missing_index,
+                    "reason": "expected_snapshots_longer",
+                    "actual_snapshot": None,
+                    "expected_snapshot": dict(expected_snapshots[missing_index]),
+                }
         return report
 
 

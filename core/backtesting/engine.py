@@ -19,6 +19,7 @@ from core.backtesting.qc_parity import (
     BinbinGodParityConfig,
     EventTracer,
     calculate_dynamic_max_positions_from_prices,
+    estimate_put_margin_qc,
 )
 from core.backtesting.qc_trace_adapter import adapt_qc_trace
 from utils.logger import setup_logger
@@ -45,16 +46,23 @@ class BacktestEngine:
         self._client = data_client
         self._vol_predictor = vol_predictor  # ML volatility predictor
 
-    def _get_price_for_symbol(self, symbol: str, date_str: str, mag7_data: dict) -> float | None:
-        """Get the closing price for a specific symbol on a specific date.
+    def _get_price_for_symbol(
+        self,
+        symbol: str,
+        date_str: str,
+        mag7_data: dict,
+        price_field: str = "close",
+    ) -> float | None:
+        """Get a price field for a specific symbol on a specific date.
 
         Args:
             symbol: Stock symbol
             date_str: Date string in YYYY-MM-DD format
             mag7_data: Dictionary of {symbol: list of bars}
+            price_field: Bar field to read, typically ``open`` or ``close``
 
         Returns:
-            Closing price or None if not found
+            Requested price or None if not found
         """
         if not mag7_data or symbol not in mag7_data:
             return None
@@ -63,14 +71,14 @@ class BacktestEngine:
         for bar in bars:
             bar_date = str(bar.get("date", ""))[:10]
             if bar_date == date_str:
-                return bar.get("close")
+                return bar.get(price_field, bar.get("close"))
 
         # If exact date not found, try to find the closest previous date
         closest_price = None
         for bar in bars:
             bar_date = str(bar.get("date", ""))[:10]
             if bar_date <= date_str:
-                closest_price = bar.get("close")
+                closest_price = bar.get(price_field, bar.get("close"))
             else:
                 break
 
@@ -85,12 +93,13 @@ class BacktestEngine:
         pool_data: dict,
         fallback_price: float,
         dynamic_max_positions: int,
+        price_field: str = "close",
     ) -> dict:
         """Build a QC-style portfolio snapshot for parity sizing."""
         price_by_symbol = {}
         stock_holdings_value = 0.0
         for symbol in getattr(strategy, "stock_pool", []):
-            price = self._get_price_for_symbol(symbol, bar_date, pool_data) or fallback_price
+            price = self._get_price_for_symbol(symbol, bar_date, pool_data, price_field=price_field) or fallback_price
             price_by_symbol[symbol] = price
         for symbol, holding in getattr(strategy.stock_holding, "holdings", {}).items():
             price = price_by_symbol.get(symbol, fallback_price)
@@ -135,6 +144,13 @@ class BacktestEngine:
             return False
 
         margin_per_contract = signal.margin_requirement if signal.margin_requirement is not None else signal.strike * 100
+        if getattr(strategy, "parity_config", None) and getattr(strategy.parity_config, "enabled", False) and signal.right == "P":
+            margin_per_contract = estimate_put_margin_qc(
+                strike=signal.strike,
+                premium=signal.premium,
+                underlying_price=entry_underlying_price,
+                margin_rate_per_contract=strategy.parity_config.margin_rate_per_contract,
+            )
         total_margin = abs(signal.quantity) * margin_per_contract
         position_id = f"{signal.symbol}_{bar_date}_{signal.strike}_{signal.right}"
         if not position_mgr.allocate_margin(
@@ -213,6 +229,7 @@ class BacktestEngine:
         iv: float,
         pool_data: dict,
         allow_roll: bool,
+        price_field: str = "close",
     ) -> list[str]:
         """Apply QC-style bookkeeping for closed trades."""
         assigned_put_symbols: list[str] = []
@@ -247,15 +264,6 @@ class BacktestEngine:
                     position_mgr.cumulative_pnl += additional_pnl
                     trade.pnl += additional_pnl
                 shares_acquired = abs(trade.quantity) * 100
-                stock_cost = trade.strike * shares_acquired
-                stock_position_id = f"{trade.symbol}_{bar_date}_STOCK"
-                position_mgr.allocate_margin(
-                    position_id=stock_position_id,
-                    strategy=strategy.name,
-                    symbol=trade.symbol,
-                    entry_date=bar_date,
-                    margin_amount=stock_cost,
-                )
                 tracer.record(
                     bar_date,
                     "stock_opened",
@@ -271,10 +279,6 @@ class BacktestEngine:
                     position_mgr.cumulative_pnl += stock_pnl
                     trade.pnl += stock_pnl
                 shares_sold = abs(trade.quantity) * 100
-                for pid, alloc in list(position_mgr.allocations.items()):
-                    if pid.startswith(f"{trade.symbol}_") and "_STOCK" in pid and not alloc.released:
-                        position_mgr.release_margin(pid, 0)
-                        break
                 tracer.record(
                     bar_date,
                     "stock_closed",
@@ -290,7 +294,12 @@ class BacktestEngine:
                     trade.pnl += additional_pnl
 
             if allow_roll and hasattr(strategy, "generate_roll_signal") and trade.exit_reason in ("PROFIT_TARGET", "ROLL_FORWARD", "ROLL_OUT"):
-                symbol_price = self._get_price_for_symbol(trade.symbol, bar_date, pool_data) or underlying_price
+                symbol_price = self._get_price_for_symbol(
+                    trade.symbol,
+                    bar_date,
+                    pool_data,
+                    price_field=price_field,
+                ) or underlying_price
                 roll_signal = strategy.generate_roll_signal(
                     closed_trade=trade.to_dict(),
                     current_date=bar_date,
@@ -343,13 +352,14 @@ class BacktestEngine:
 
         for i, bar in enumerate(bars):
             bar_date = str(bar["date"])[:10]
-            underlying_price = bar["close"]
+            rebalance_underlying_price = bar.get("open", bar["close"])
+            expiry_underlying_price = bar["close"]
             iv = hv[i] if i < len(hv) else 0.3
             if iv <= 0.01:
                 iv = 0.3
 
             price_series = [
-                self._get_price_for_symbol(symbol, bar_date, pool_data) or underlying_price
+                self._get_price_for_symbol(symbol, bar_date, pool_data, price_field="open") or rebalance_underlying_price
                 for symbol in getattr(strategy, "stock_pool", [])
             ]
             dynamic_max_positions = calculate_dynamic_max_positions_from_prices(price_series, strategy.parity_config)
@@ -360,8 +370,9 @@ class BacktestEngine:
                 simulator=simulator,
                 bar_date=bar_date,
                 pool_data=pool_data,
-                fallback_price=underlying_price,
+                fallback_price=rebalance_underlying_price,
                 dynamic_max_positions=dynamic_max_positions,
+                price_field="open",
             )
             strategy.set_parity_context(parity_context)
             tracer.snapshot(
@@ -426,10 +437,11 @@ class BacktestEngine:
                 cost_model=cost_model,
                 tracer=tracer,
                 bar_date=bar_date,
-                underlying_price=underlying_price,
+                underlying_price=rebalance_underlying_price,
                 iv=iv,
                 pool_data=pool_data,
                 allow_roll=True,
+                price_field="open",
             )
 
             strategy.set_parity_context(
@@ -439,13 +451,25 @@ class BacktestEngine:
                     simulator=simulator,
                     bar_date=bar_date,
                     pool_data=pool_data,
-                    fallback_price=underlying_price,
+                    fallback_price=rebalance_underlying_price,
                     dynamic_max_positions=dynamic_max_positions,
+                    price_field="open",
                 )
             )
-            signals = strategy.generate_signals(bar_date, underlying_price, iv, simulator.open_positions, position_mgr=position_mgr)
+            signals = strategy.generate_signals(
+                bar_date,
+                rebalance_underlying_price,
+                iv,
+                simulator.open_positions,
+                position_mgr=position_mgr,
+            )
             for signal in signals:
-                entry_price = self._get_price_for_symbol(signal.symbol, bar_date, pool_data) or underlying_price
+                entry_price = self._get_price_for_symbol(
+                    signal.symbol,
+                    bar_date,
+                    pool_data,
+                    price_field="open",
+                ) or rebalance_underlying_price
                 opened = self._open_signal_position(
                     strategy=strategy,
                     signal=signal,
@@ -468,8 +492,9 @@ class BacktestEngine:
                     simulator=simulator,
                     bar_date=bar_date,
                     pool_data=pool_data,
-                    fallback_price=underlying_price,
+                    fallback_price=expiry_underlying_price,
                     dynamic_max_positions=dynamic_max_positions,
+                    price_field="close",
                 )["price_by_symbol"],
                 iv=iv,
             )
@@ -483,15 +508,21 @@ class BacktestEngine:
                     cost_model=cost_model,
                     tracer=tracer,
                     bar_date=bar_date,
-                    underlying_price=underlying_price,
+                    underlying_price=expiry_underlying_price,
                     iv=iv,
                     pool_data=pool_data,
                     allow_roll=False,
+                    price_field="close",
                 )
             )
 
             for symbol in assigned_symbols:
-                symbol_price = self._get_price_for_symbol(symbol, bar_date, pool_data) or underlying_price
+                symbol_price = self._get_price_for_symbol(
+                    symbol,
+                    bar_date,
+                    pool_data,
+                    price_field="close",
+                ) or expiry_underlying_price
                 immediate_signal = strategy.generate_immediate_cc_signal(
                     symbol=symbol,
                     current_date=bar_date,
@@ -518,7 +549,12 @@ class BacktestEngine:
             daily_interest = position_mgr.apply_daily_interest()
             stock_unrealized_pnl = 0.0
             for symbol, holding in getattr(strategy.stock_holding, "holdings", {}).items():
-                symbol_price = self._get_price_for_symbol(symbol, bar_date, pool_data) or underlying_price
+                symbol_price = self._get_price_for_symbol(
+                    symbol,
+                    bar_date,
+                    pool_data,
+                    price_field="close",
+                ) or expiry_underlying_price
                 stock_unrealized_pnl += holding["shares"] * (symbol_price - holding["cost_basis"])
             open_pnl = simulator.get_total_open_pnl() + stock_unrealized_pnl
             end_of_day_context = self._build_parity_context(
@@ -527,8 +563,9 @@ class BacktestEngine:
                 simulator=simulator,
                 bar_date=bar_date,
                 pool_data=pool_data,
-                fallback_price=underlying_price,
+                fallback_price=expiry_underlying_price,
                 dynamic_max_positions=dynamic_max_positions,
+                price_field="close",
             )
             portfolio_value = end_of_day_context["portfolio_value"]
             tracer.snapshot(
@@ -560,7 +597,7 @@ class BacktestEngine:
                 pos = simulator.open_positions.pop(0)
                 temp = TradeSimulator()
                 temp.open_position(pos)
-                symbol_last_price = self._get_price_for_symbol(pos.symbol, last_date, pool_data) or last_bar["close"]
+                symbol_last_price = self._get_price_for_symbol(pos.symbol, last_date, pool_data, price_field="close") or last_bar["close"]
                 closed_trades = temp.check_exits(last_date, symbol_last_price, last_iv, 9999, 9999, min_dte=0)
                 simulator.closed_trades.extend(closed_trades)
 
