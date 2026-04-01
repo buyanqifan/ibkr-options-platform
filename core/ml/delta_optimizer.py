@@ -97,8 +97,10 @@ class DeltaOptimizerML:
         Note: Model persistence is disabled by default (persist_model=False).
         Each backtest starts with a fresh model for consistent results.
         """
-        # Check if model persistence is enabled
-        if not getattr(self.config, 'persist_model', False):
+        should_load_existing = getattr(self.config, 'persist_model', False) or (
+            self.config.model_path != DeltaOptimizationConfig.model_path
+        )
+        if not should_load_existing:
             logger.info("Model persistence disabled - initializing fresh model")
             self._initialize_model()
             return
@@ -827,14 +829,9 @@ class DeltaOptimizerML:
     def save_model(self):
         """Save trained model to disk.
         
-        Note: Model persistence is disabled by default (persist_model=False).
-        Override by setting config.persist_model=True to enable saving.
+        Explicit saves always persist to disk. The ``persist_model`` flag only
+        controls whether models are auto-loaded for fresh optimizer instances.
         """
-        # Check if model persistence is enabled
-        if not getattr(self.config, 'persist_model', False):
-            logger.debug("Model persistence disabled - skipping save")
-            return
-        
         os.makedirs(os.path.dirname(self.config.model_path), exist_ok=True)
         
         model_data = {
