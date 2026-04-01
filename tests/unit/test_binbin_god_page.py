@@ -122,8 +122,8 @@ def _default_form_inputs() -> dict[str, Any]:
         "repair_call_dte_max": 21,
         "repair_call_max_discount_pct": 0.08,
         "defensive_put_roll_enabled": True,
-        "defensive_put_roll_loss_pct": 70,
-        "defensive_put_roll_itm_buffer_pct": 0.03,
+        "defensive_put_roll_loss_pct": 85,
+        "defensive_put_roll_itm_buffer_pct": 0.04,
         "defensive_put_roll_min_dte": 7,
         "defensive_put_roll_max_dte": 21,
         "defensive_put_roll_dte_min": 21,
@@ -143,11 +143,11 @@ def _default_form_inputs() -> dict[str, Any]:
         "symbol_downtrend_sensitivity": 1.50,
         "symbol_volatility_sensitivity": 0.75,
         "symbol_exposure_sensitivity": 1.25,
-        "symbol_assignment_base_cap": 0.20,
+        "symbol_assignment_base_cap": 0.24,
         "stock_inventory_cap_enabled": True,
-        "stock_inventory_base_cap": 0.12,
+        "stock_inventory_base_cap": 0.15,
         "stock_inventory_cap_floor": 0.50,
-        "stock_inventory_block_threshold": 0.75,
+        "stock_inventory_block_threshold": 0.82,
     }
 
 
@@ -235,9 +235,9 @@ def test_build_binbin_backtest_params_uses_qc_defaults(monkeypatch):
     assert params["ml_roll_optimization"] is True
     assert params["ml_position_optimization"] is True
     assert params["stop_loss_pct"] == 999999
-    assert params["symbol_assignment_base_cap"] == 0.20
-    assert params["stock_inventory_base_cap"] == 0.12
-    assert params["stock_inventory_block_threshold"] == 0.75
+    assert params["symbol_assignment_base_cap"] == 0.24
+    assert params["stock_inventory_base_cap"] == 0.15
+    assert params["stock_inventory_block_threshold"] == 0.82
     assert "run_mode" not in params
 
 

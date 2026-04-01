@@ -1,5 +1,6 @@
 """Tests for BinbinGod QC parity helpers and engine mode."""
 
+import ast
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,12 +68,12 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.defensive_put_roll_enabled is True
     assert config.assignment_cooldown_days == 20
     assert config.stock_inventory_cap_enabled is True
-    assert config.stock_inventory_base_cap == pytest.approx(0.12)
-    assert config.stock_inventory_block_threshold == pytest.approx(0.75)
-    assert config.defensive_put_roll_loss_pct == pytest.approx(70.0)
-    assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.03)
+    assert config.stock_inventory_base_cap == pytest.approx(0.15)
+    assert config.stock_inventory_block_threshold == pytest.approx(0.82)
+    assert config.defensive_put_roll_loss_pct == pytest.approx(85.0)
+    assert config.defensive_put_roll_itm_buffer_pct == pytest.approx(0.04)
     assert config.defensive_put_roll_max_dte == 21
-    assert config.symbol_assignment_base_cap == pytest.approx(0.20)
+    assert config.symbol_assignment_base_cap == pytest.approx(0.24)
     assert config.max_new_puts_per_day == 3
 
 
@@ -84,12 +85,12 @@ def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
     assert defaults["target_margin_utilization"] == pytest.approx(0.45)
     assert defaults["max_risk_per_trade"] == pytest.approx(0.03)
     assert defaults["max_assignment_risk_per_trade"] == pytest.approx(0.20)
-    assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(70.0)
-    assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.03)
+    assert defaults["defensive_put_roll_loss_pct"] == pytest.approx(85.0)
+    assert defaults["defensive_put_roll_itm_buffer_pct"] == pytest.approx(0.04)
     assert defaults["defensive_put_roll_max_dte"] == 21
-    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.20)
-    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.12)
-    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.75)
+    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.24)
+    assert defaults["stock_inventory_base_cap"] == pytest.approx(0.15)
+    assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.82)
     assert defaults["max_new_puts_per_day"] == 3
 
 
@@ -98,14 +99,14 @@ def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["profit_target_pct"] == pytest.approx(70.0)
     assert QC_PARAMETER_DEFAULTS["max_risk_per_trade"] == pytest.approx(0.03)
     assert QC_PARAMETER_DEFAULTS["max_assignment_risk_per_trade"] == pytest.approx(0.20)
-    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.12)
-    assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.20)
-    assert QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"] == pytest.approx(70.0)
+    assert QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"] == pytest.approx(0.15)
+    assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.24)
+    assert QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"] == pytest.approx(85.0)
     assert QC_PARAMETER_DEFAULTS["max_new_puts_per_day"] == 3
 
 
 def test_score_single_stock_penalizes_extreme_volatility():
-    assert DEFAULT_WEIGHTS["iv_rank"] == pytest.approx(0.20)
+    assert DEFAULT_WEIGHTS["iv_rank"] == pytest.approx(0.25)
 
     moderate_bars = []
     extreme_bars = []
@@ -141,6 +142,26 @@ def test_score_single_stock_penalizes_extreme_volatility():
     extreme_score = score_single_stock("TSLA", extreme_bars, extreme_bars[-1]["close"]).total_score
 
     assert extreme_score < moderate_score
+
+
+def test_strategy_init_uses_qc_scoring_weights():
+    module = ast.parse((ROOT / "quantconnect" / "strategy_init.py").read_text(encoding="utf-8"))
+
+    weights_literal = None
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Attribute) and target.attr == "weights" for target in node.targets):
+            continue
+        weights_literal = ast.literal_eval(node.value)
+        break
+
+    assert weights_literal == {
+        "iv_rank": 0.25,
+        "technical": 0.30,
+        "momentum": 0.25,
+        "pe_score": 0.20,
+    }
 
 
 def test_binbin_god_strategy_forces_qc_replay_defaults():

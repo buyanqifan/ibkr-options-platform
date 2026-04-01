@@ -950,9 +950,9 @@ class TestBinbinGodStrategy:
         assert strategy.max_positions == 20
         assert strategy.profit_target_pct == 70
         assert strategy.margin_buffer_pct == 0.40
-        assert strategy.symbol_assignment_base_cap == pytest.approx(0.20)
-        assert strategy.stock_inventory_base_cap == pytest.approx(0.12)
-        assert strategy.stock_inventory_block_threshold == pytest.approx(0.75)
+        assert strategy.symbol_assignment_base_cap == pytest.approx(0.24)
+        assert strategy.stock_inventory_base_cap == pytest.approx(0.15)
+        assert strategy.stock_inventory_block_threshold == pytest.approx(0.82)
         assert strategy.max_risk_per_trade == pytest.approx(0.03)
         assert strategy.max_assignment_risk_per_trade == pytest.approx(0.20)
         assert strategy.max_new_puts_per_day == 3

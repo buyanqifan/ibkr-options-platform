@@ -9,9 +9,9 @@ from helpers import StockScore
 
 # Default scoring weights
 DEFAULT_WEIGHTS = {
-    "iv_rank": 0.20,
+    "iv_rank": 0.25,
     "technical": 0.30,
-    "momentum": 0.30,
+    "momentum": 0.25,
     "pe_score": 0.20,
 }
 
@@ -81,9 +81,9 @@ def score_single_stock(symbol: str, bars: List[Dict], current_price: float,
     # Penalize names whose recent realized volatility is extreme enough to turn
     # a short-premium wheel trade into outsized tail-risk.
     annualized_vol = calculate_historical_vol(bars, window=20)
-    if annualized_vol > 0.55:
-        excess_vol = annualized_vol - 0.55
-        penalty_factor = max(0.55, 1.0 - excess_vol * 0.6)
+    if annualized_vol > 0.70:
+        excess_vol = annualized_vol - 0.70
+        penalty_factor = max(0.70, 1.0 - excess_vol * 0.45)
         total_score *= penalty_factor
     
     # Apply liquidity penalty for very low liquidity (aligned with original binbin_god.py)
