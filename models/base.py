@@ -22,4 +22,9 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     """Create all tables."""
+    import models.backtest  # noqa: F401
+    import models.fundamentals  # noqa: F401
+    import models.live_trading  # noqa: F401
+    import models.market_data  # noqa: F401
+
     Base.metadata.create_all(bind=engine)

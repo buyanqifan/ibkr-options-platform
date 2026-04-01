@@ -5,17 +5,23 @@ from dash import html, dcc, callback, Output, Input, State
 import dash_bootstrap_components as dbc
 from app.components.navbar import create_navbar
 
+def _page_layout(key: str):
+    page = dash.page_registry.get(key, {})
+    return page.get("layout", html.Div(f"Missing page: {key}", className="text-danger"))
+
+
 # Route mapping - use dash.page_registry to get layouts
 # This avoids duplicate registration issues
 _ROUTES = {
-    "/": dash.page_registry["pages.dashboard"]["layout"],
-    "/market-data": dash.page_registry["pages.market_data"]["layout"],
-    "/screener": dash.page_registry["pages.screener"]["layout"],
-    "/options-chain": dash.page_registry["pages.options_chain"]["layout"],
-    "/backtester": dash.page_registry["pages.backtester"]["layout"],
-    "/backtest-history": dash.page_registry["pages.backtest_history"]["layout"],  # New: Backtest history
-    "/binbin-god": dash.page_registry["pages.binbin_god"]["layout"],  # New: Binbin God strategy
-    "/settings": dash.page_registry["pages.settings"]["layout"],
+    "/": _page_layout("pages.dashboard"),
+    "/market-data": _page_layout("pages.market_data"),
+    "/screener": _page_layout("pages.screener"),
+    "/options-chain": _page_layout("pages.options_chain"),
+    "/backtester": _page_layout("pages.backtester"),
+    "/backtest-history": _page_layout("pages.backtest_history"),  # New: Backtest history
+    "/binbin-god": _page_layout("pages.binbin_god"),  # New: Binbin God strategy
+    "/binbin-god-live": _page_layout("pages.binbin_god_live"),
+    "/settings": _page_layout("pages.settings"),
 }
 
 # Language translations dictionary

@@ -8,6 +8,9 @@ from config.settings import settings
 from core.ibkr.event_bridge import AsyncEventBridge
 from core.ibkr.connection import IBKRConnectionManager
 from core.ibkr.data_client import IBKRDataClient
+from core.ibkr.trading_client import IBKRTradingClient
+from core.live_trading.binbin_god.repository import BinbinGodLiveRepository
+from core.live_trading.binbin_god.service import BinbinGodLiveService
 from core.market_data.cache import DataCache
 from models.base import init_db
 from utils.logger import setup_logger
@@ -28,6 +31,7 @@ def _init_services() -> dict:
     cache = DataCache()
     conn_mgr = IBKRConnectionManager(bridge)
     data_client = IBKRDataClient(conn_mgr, bridge, cache)
+    trading_client = IBKRTradingClient(conn_mgr, bridge)
 
     # Lazy imports to avoid circular deps during page registration
     from core.screener.screener import StockScreener
@@ -44,14 +48,19 @@ def _init_services() -> dict:
         logger.info("ML volatility predictor not available (model not trained)")
     
     backtest_engine = BacktestEngine(data_client, vol_predictor)
+    live_repo = BinbinGodLiveRepository()
+    live_service = BinbinGodLiveService(live_repo)
 
     return {
         "bridge": bridge,
         "cache": cache,
         "conn_mgr": conn_mgr,
         "data_client": data_client,
+        "trading_client": trading_client,
         "screener": screener,
         "backtest_engine": backtest_engine,
+        "binbin_god_live_repo": live_repo,
+        "binbin_god_live_service": live_service,
     }
 
 
