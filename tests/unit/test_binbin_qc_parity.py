@@ -26,9 +26,28 @@ if "AlgorithmImports" not in sys.modules:
     class _SecurityType:
         Option = "Option"
 
+    class _OrderStatus:
+        Filled = "Filled"
+
+    class _Resolution:
+        Daily = "Daily"
+        Minute = "Minute"
+
+    class _DataNormalizationMode:
+        Raw = "Raw"
+
     algorithm_imports.OptionRight = _OptionRight
     algorithm_imports.SecurityType = _SecurityType
-    algorithm_imports.__all__ = ["OptionRight", "SecurityType"]
+    algorithm_imports.OrderStatus = _OrderStatus
+    algorithm_imports.Resolution = _Resolution
+    algorithm_imports.DataNormalizationMode = _DataNormalizationMode
+    algorithm_imports.__all__ = [
+        "OptionRight",
+        "SecurityType",
+        "OrderStatus",
+        "Resolution",
+        "DataNormalizationMode",
+    ]
     sys.modules["AlgorithmImports"] = algorithm_imports
 
 import core.backtesting.strategies.binbin_god as binbin_god_module
@@ -45,6 +64,8 @@ from core.backtesting.qc_parity import (
 )
 from core.backtesting.simulator import OptionPosition, TradeSimulator
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
+import expiry as qc_expiry
+import position_management as qc_position_management
 import signal_generation as qc_signal_generation
 from scoring import DEFAULT_WEIGHTS, score_single_stock
 
@@ -207,6 +228,114 @@ class _SecurityDict(dict):
         return key in self
 
 
+class _PortfolioState(dict):
+    def __init__(
+        self,
+        holdings=None,
+        *,
+        total_portfolio_value=100000.0,
+        cash=100000.0,
+        margin_remaining=100000.0,
+        total_margin_used=0.0,
+    ):
+        super().__init__(holdings or {})
+        self.TotalPortfolioValue = total_portfolio_value
+        self.Cash = cash
+        self.MarginRemaining = margin_remaining
+        self.TotalMarginUsed = total_margin_used
+
+    @property
+    def Values(self):
+        return list(self.values())
+
+    def ContainsKey(self, key):
+        return key in self
+
+
+def _make_assignment_tracking_algo():
+    option_symbol = "NVDA_OPT"
+    equity_symbol = "NVDA"
+    portfolio = _PortfolioState(
+        {equity_symbol: SimpleNamespace(Quantity=100)},
+        total_portfolio_value=100000.0,
+        cash=50000.0,
+        margin_remaining=40000.0,
+        total_margin_used=10000.0,
+    )
+    return SimpleNamespace(
+        Time=datetime(2024, 2, 1),
+        equities={"NVDA": SimpleNamespace(Symbol=equity_symbol)},
+        Securities={option_symbol: SimpleNamespace(IsDelisted=False, Price=0)},
+        Portfolio=portfolio,
+        assignment_cooldown_days=20,
+        assigned_stock_state={},
+        price_history={"NVDA": _make_bars(start_price=120.0, days=30)},
+        ml_integration=SimpleNamespace(update_performance=lambda payload: None),
+        Log=lambda *_args, **_kwargs: None,
+    )
+
+
+def _make_assigned_stock_algo(*, with_covering_call=False, days_held=8, drawdown_pct=0.16, failures=0):
+    underlying_price = 120.0 * (1 - drawdown_pct)
+    portfolio = _PortfolioState(total_portfolio_value=100000.0, cash=100000.0, margin_remaining=100000.0)
+    market_orders = []
+    algo = SimpleNamespace(
+        Time=datetime(2024, 2, 10),
+        stock_pool=["NVDA"],
+        weights={"iv_rank": 0.25, "technical": 0.30, "momentum": 0.25, "pe_score": 0.20},
+        Portfolio=portfolio,
+        equities={"NVDA": SimpleNamespace(Symbol="NVDA")},
+        Securities=_SecurityDict({"NVDA": SimpleNamespace(Price=underlying_price)}),
+        price_history={"NVDA": _make_bars(start_price=120.0, days=60)},
+        cc_optimization_enabled=True,
+        cc_min_delta_cost=0.15,
+        cc_cost_basis_threshold=0.05,
+        cc_min_strike_premium=0.02,
+        repair_call_threshold_pct=0.08,
+        repair_call_delta=0.35,
+        repair_call_dte_min=7,
+        repair_call_dte_max=21,
+        repair_call_max_discount_pct=0.08,
+        assigned_stock_fail_safe_enabled=True,
+        assigned_stock_drawdown_pct=0.12,
+        assigned_stock_repair_attempt_limit=3,
+        assigned_stock_min_days_held=5,
+        assigned_stock_force_exit_pct=1.0,
+        assigned_stock_repair_delta_boost=0.10,
+        assigned_stock_repair_dte_min=7,
+        assigned_stock_repair_dte_max=14,
+        assigned_stock_repair_max_discount_pct=0.12,
+        assigned_stock_state={
+            "NVDA": {
+                "source": "put_assignment",
+                "assignment_date": datetime(2024, 2, 10) - timedelta(days=days_held),
+                "assignment_cost_basis": 120.0,
+                "repair_failures": failures,
+                "last_repair_attempt": None,
+                "force_exit_triggered": False,
+            }
+        },
+        ml_enabled=False,
+        ml_integration=SimpleNamespace(
+            generate_signal=lambda **_kwargs: SimpleNamespace(
+                action="SELL_CALL",
+                symbol="NVDA",
+                delta=0.30,
+                dte_min=21,
+                dte_max=60,
+                num_contracts=1,
+                confidence=0.9,
+                reasoning="test",
+            )
+        ),
+        Log=lambda *_args, **_kwargs: None,
+        market_orders=market_orders,
+    )
+    algo.MarketOrder = lambda symbol, quantity: market_orders.append((symbol, quantity))
+    algo._with_covering_call = with_covering_call
+    return algo
+
+
 def test_get_portfolio_state_uses_margin_remaining(monkeypatch):
     monkeypatch.setattr(qc_signal_generation, "get_cost_basis", lambda algo, symbol: 0.0)
 
@@ -288,6 +417,105 @@ def test_generate_ml_signals_skips_extreme_high_vol_downtrend_put(monkeypatch):
     signals = qc_signal_generation.generate_ml_signals(algo)
 
     assert signals == []
+
+
+def test_check_expired_options_tracks_put_assignment_state(monkeypatch):
+    algo = _make_assignment_tracking_algo()
+    option_symbol = "NVDA_OPT"
+    tracked_updates = []
+
+    monkeypatch.setattr(
+        qc_expiry,
+        "get_option_positions",
+        lambda _algo: {
+            "NVDA_20240216_120_P": {
+                "option_symbol": option_symbol,
+                "symbol": "NVDA",
+                "strike": 120.0,
+                "right": "P",
+                "quantity": -1,
+                "expiry": datetime(2024, 2, 16),
+                "entry_price": 2.0,
+            }
+        },
+    )
+    monkeypatch.setattr(qc_expiry, "get_cost_basis", lambda _algo, _symbol: 120.0)
+    monkeypatch.setattr(
+        qc_expiry,
+        "get_position_metadata",
+        lambda _algo, _pos_id: {"delta_at_entry": 0.3, "entry_date": "2024-01-15", "strategy_phase": "SP"},
+    )
+    monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "record_trade", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: None)
+    algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked_updates.append(payload))
+
+    qc_expiry.check_expired_options(algo)
+
+    state = algo.assigned_stock_state["NVDA"]
+    assert state["source"] == "put_assignment"
+    assert state["repair_failures"] == 0
+    assert state["assignment_cost_basis"] == pytest.approx(120.0)
+    assert state["force_exit_triggered"] is False
+    assert tracked_updates and tracked_updates[0]["assigned"] is True
+
+
+def test_generate_signal_for_symbol_uses_assigned_stock_repair_overrides(monkeypatch):
+    algo = _make_assigned_stock_algo(days_held=2, drawdown_pct=0.02)
+
+    monkeypatch.setattr(qc_signal_generation, "get_cost_basis", lambda _algo, _symbol: 120.0)
+    monkeypatch.setattr(qc_signal_generation, "get_shares_held", lambda _algo, _symbol: 100)
+    monkeypatch.setattr(qc_signal_generation, "get_position_for_symbol", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_signal_generation, "score_single_stock", lambda *_args, **_kwargs: SimpleNamespace(total_score=50.0))
+    monkeypatch.setattr(qc_signal_generation, "get_cc_optimization_params", lambda *_args, **_kwargs: (0.30, None, None))
+
+    signal = qc_signal_generation.generate_signal_for_symbol(algo, "NVDA", "CC", qc_signal_generation.get_portfolio_state(algo))
+
+    assert signal is not None
+    assert signal.delta == pytest.approx(0.45)
+    assert signal.dte_min == 7
+    assert signal.dte_max == 14
+    assert signal.min_strike > 0
+
+
+def test_assignment_fail_safe_skips_when_call_is_already_covering_shares(monkeypatch):
+    algo = _make_assigned_stock_algo(with_covering_call=True, days_held=8, drawdown_pct=0.16, failures=2)
+
+    monkeypatch.setattr(qc_position_management, "get_option_positions", lambda _algo: {})
+    monkeypatch.setattr(qc_position_management, "get_shares_held", lambda _algo, _symbol: 100)
+    monkeypatch.setattr(qc_position_management, "get_call_position_contracts", lambda _algo, _symbol: 1)
+
+    qc_position_management.check_position_management(algo, execute_signal_func=lambda *a, **k: None, find_option_func=lambda *a, **k: None)
+
+    assert algo.assigned_stock_state["NVDA"]["repair_failures"] == 0
+    assert algo.market_orders == []
+
+
+def test_assignment_fail_safe_force_exits_stock_after_repeated_failures(monkeypatch):
+    algo = _make_assigned_stock_algo(with_covering_call=False, days_held=8, drawdown_pct=0.16, failures=2)
+
+    monkeypatch.setattr(qc_position_management, "get_option_positions", lambda _algo: {})
+    monkeypatch.setattr(qc_position_management, "get_shares_held", lambda _algo, _symbol: 100)
+    monkeypatch.setattr(qc_position_management, "get_call_position_contracts", lambda _algo, _symbol: 0)
+
+    qc_position_management.check_position_management(algo, execute_signal_func=lambda *a, **k: None, find_option_func=lambda *a, **k: None)
+
+    assert algo.market_orders == [("NVDA", -100)]
+    assert algo.assigned_stock_state["NVDA"]["force_exit_triggered"] is True
+
+
+def test_assignment_fail_safe_respects_min_days_held(monkeypatch):
+    algo = _make_assigned_stock_algo(with_covering_call=False, days_held=2, drawdown_pct=0.16, failures=2)
+
+    monkeypatch.setattr(qc_position_management, "get_option_positions", lambda _algo: {})
+    monkeypatch.setattr(qc_position_management, "get_shares_held", lambda _algo, _symbol: 100)
+    monkeypatch.setattr(qc_position_management, "get_call_position_contracts", lambda _algo, _symbol: 0)
+
+    qc_position_management.check_position_management(algo, execute_signal_func=lambda *a, **k: None, find_option_func=lambda *a, **k: None)
+
+    assert algo.market_orders == []
+    assert algo.assigned_stock_state["NVDA"]["repair_failures"] == 2
 
 
 def test_binbin_god_strategy_forces_qc_replay_defaults():

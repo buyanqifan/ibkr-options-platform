@@ -82,6 +82,17 @@ def _should_block_extreme_sell_put(algo, symbol: str, bars: List[Dict], underlyi
     return False
 
 
+def _get_assignment_repair_state(algo, symbol: str) -> Optional[Dict]:
+    if not getattr(algo, "assigned_stock_fail_safe_enabled", False):
+        return None
+    state = getattr(algo, "assigned_stock_state", {}).get(symbol)
+    if not state or state.get("force_exit_triggered"):
+        return None
+    if get_shares_held(algo, symbol) <= 0:
+        return None
+    return state
+
+
 def get_current_position(algo, symbol: str) -> Optional[Dict]:
     return get_position_for_symbol(algo, symbol)
 
@@ -150,6 +161,7 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     current_position = get_position_for_symbol(algo, symbol, preferred_right=preferred_right)
     traditional_delta, cc_min_strike = 0.30, None
     repair_mode = False
+    assignment_repair_state = _get_assignment_repair_state(algo, symbol) if strategy_phase == "CC" else None
     if strategy_phase == "CC" and algo.cc_optimization_enabled and cost_basis > 0:
         adj_delta, cc_min_strike, log_msg = get_cc_optimization_params(cost_basis, underlying_price,
             algo.cc_optimization_enabled, algo.cc_min_delta_cost, algo.cc_cost_basis_threshold, algo.cc_min_strike_premium)
@@ -158,10 +170,22 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
         if log_msg:
             algo.Log(log_msg)
         drawdown_vs_cost = (cost_basis - underlying_price) / cost_basis if cost_basis > 0 else 0.0
-        if drawdown_vs_cost >= algo.repair_call_threshold_pct:
+        if drawdown_vs_cost >= algo.repair_call_threshold_pct or assignment_repair_state:
             repair_mode = True
-            traditional_delta = max(traditional_delta, algo.repair_call_delta)
-            repair_min_strike = max(underlying_price * 1.01, cost_basis * (1 - algo.repair_call_max_discount_pct))
+            repair_delta = algo.repair_call_delta
+            repair_max_discount_pct = algo.repair_call_max_discount_pct
+            if assignment_repair_state:
+                repair_delta = min(0.60, repair_delta + getattr(algo, "assigned_stock_repair_delta_boost", 0.10))
+                repair_max_discount_pct = max(
+                    repair_max_discount_pct,
+                    getattr(algo, "assigned_stock_repair_max_discount_pct", repair_max_discount_pct),
+                )
+                algo.Log(
+                    f"ASSIGNED_REPAIR_ATTEMPT:{symbol}:failures={assignment_repair_state.get('repair_failures', 0)}:"
+                    f"cost_basis={cost_basis:.2f}:price={underlying_price:.2f}"
+                )
+            traditional_delta = max(traditional_delta, repair_delta)
+            repair_min_strike = max(underlying_price * 1.01, cost_basis * (1 - repair_max_discount_pct))
             if cc_min_strike is None:
                 cc_min_strike = repair_min_strike
             else:
@@ -181,9 +205,16 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
         signal.delta = adaptive_delta
     if signal:
         if repair_mode and strategy_phase == "CC":
-            signal.delta = max(signal.delta, algo.repair_call_delta)
-            signal.dte_min = max(algo.repair_call_dte_min, min(signal.dte_min, algo.repair_call_dte_max))
-            signal.dte_max = min(max(signal.dte_max, signal.dte_min), algo.repair_call_dte_max)
+            repair_delta = algo.repair_call_delta
+            if assignment_repair_state:
+                repair_delta = min(0.60, repair_delta + getattr(algo, "assigned_stock_repair_delta_boost", 0.10))
+            signal.delta = max(signal.delta, repair_delta)
+            if assignment_repair_state:
+                signal.dte_min = getattr(algo, "assigned_stock_repair_dte_min", signal.dte_min)
+                signal.dte_max = max(signal.dte_min, getattr(algo, "assigned_stock_repair_dte_max", signal.dte_max))
+            else:
+                signal.dte_min = max(algo.repair_call_dte_min, min(signal.dte_min, algo.repair_call_dte_max))
+                signal.dte_max = min(max(signal.dte_max, signal.dte_min), algo.repair_call_dte_max)
         score = score_single_stock(symbol, bars, underlying_price, algo.weights)
         signal.ml_score_adjustment = (score.total_score - 50) / 100
         if cc_min_strike is not None: signal.min_strike = cc_min_strike
