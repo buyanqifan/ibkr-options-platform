@@ -123,6 +123,20 @@ def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["max_new_puts_per_day"] == 3
 
 
+def test_strategy_init_sets_assigned_stock_fail_safe_defaults():
+    defaults = _extract_strategy_init_parameter_defaults()
+
+    assert defaults["assigned_stock_fail_safe_enabled"] is True
+    assert defaults["assigned_stock_drawdown_pct"] == pytest.approx(0.12)
+    assert defaults["assigned_stock_repair_attempt_limit"] == 3
+    assert defaults["assigned_stock_min_days_held"] == 5
+    assert defaults["assigned_stock_force_exit_pct"] == pytest.approx(1.0)
+    assert defaults["assigned_stock_repair_delta_boost"] == pytest.approx(0.10)
+    assert defaults["assigned_stock_repair_dte_min"] == 7
+    assert defaults["assigned_stock_repair_dte_max"] == 14
+    assert defaults["assigned_stock_repair_max_discount_pct"] == pytest.approx(0.12)
+
+
 def test_score_single_stock_penalizes_extreme_volatility():
     assert DEFAULT_WEIGHTS["iv_rank"] == pytest.approx(0.25)
 
