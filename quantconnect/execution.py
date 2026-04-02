@@ -249,6 +249,10 @@ def _enqueue_open_order_metadata(algo, ticket, signal: StrategySignal, selected:
     }
 
 
+def _build_position_key(symbol: str, expiry, strike: float, right: str) -> str:
+    return f"{symbol}_{expiry.strftime('%Y%m%d')}_{strike:.0f}_{right}"
+
+
 def handle_order_event(algo, order_event):
     """Persist option metadata on fill for asynchronously filled orders."""
     if order_event.Status != OrderStatus.Filled:
@@ -476,11 +480,20 @@ def execute_roll(algo, signal: StrategySignal, find_option_func, existing_positi
     existing = existing_position or get_position_for_symbol(algo, signal.symbol)
     if not existing: return
     pos_info = existing
-    pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
+    pos_id = _build_position_key(signal.symbol, pos_info['expiry'], pos_info['strike'], pos_info['right'])
     # Use safe execution for closing the existing position
     close_ticket = safe_execute_option_order(
         algo, pos_info['option_symbol'], -pos_info['quantity'], pos_info['entry_price'])
     if not close_ticket or close_ticket.Status != OrderStatus.Filled:
+        if not hasattr(algo, "pending_roll_orders"):
+            algo.pending_roll_orders = {}
+        algo.pending_roll_orders[pos_id] = {
+            "symbol": signal.symbol,
+            "existing_position": pos_info,
+            "signal": signal,
+            "queued_at": getattr(algo, "Time", None),
+            "close_order_id": getattr(close_ticket, "OrderId", None) if close_ticket else None,
+        }
         return
     pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
     record_trade(algo, signal.symbol, pos_info['right'], pnl, "ROLL")
@@ -502,15 +515,25 @@ def execute_roll(algo, signal: StrategySignal, find_option_func, existing_positi
 def execute_close(algo, signal: StrategySignal, existing_position: Optional[Dict] = None):
     pos_info = existing_position or get_position_for_symbol(algo, signal.symbol)
     if not pos_info: return
-    pos_id = f"{signal.symbol}_{pos_info['expiry'].strftime('%Y%m%d')}_{pos_info['strike']:.0f}_{pos_info['right']}"
+    pos_id = _build_position_key(signal.symbol, pos_info['expiry'], pos_info['strike'], pos_info['right'])
     # For closing, use entry price as reference for limit order fallback
     # (positions should have data, but use safe execution for consistency)
     close_ticket = safe_execute_option_order(
         algo, pos_info['option_symbol'], -pos_info['quantity'], pos_info['entry_price'])
-    if close_ticket and close_ticket.Status == OrderStatus.Filled:
-        pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
-        record_trade(algo, signal.symbol, pos_info['right'], pnl, signal.reasoning or "SIGNAL_CLOSE")
-        remove_position_metadata(algo, pos_id)
+    if not close_ticket or close_ticket.Status != OrderStatus.Filled:
+        if not hasattr(algo, "pending_close_orders"):
+            algo.pending_close_orders = {}
+        algo.pending_close_orders[pos_id] = {
+            "symbol": signal.symbol,
+            "existing_position": pos_info,
+            "reason": signal.reasoning or "SIGNAL_CLOSE",
+            "queued_at": getattr(algo, "Time", None),
+            "close_order_id": getattr(close_ticket, "OrderId", None) if close_ticket else None,
+        }
+        return
+    pnl, _ = calculate_pnl_metrics(pos_info['entry_price'], close_ticket.AverageFillPrice, pos_info['quantity'])
+    record_trade(algo, signal.symbol, pos_info['right'], pnl, signal.reasoning or "SIGNAL_CLOSE")
+    remove_position_metadata(algo, pos_id)
 
 
 def record_trade(algo, symbol: str, right: str, pnl: float, reason: str):
