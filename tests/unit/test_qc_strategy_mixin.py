@@ -116,3 +116,30 @@ def test_rebalance_keeps_short_puts_blocked_when_option_slots_are_full(monkeypat
 
     assert executed == ["SELL_CALL"]
     assert not any("SP_SIGNAL:" in entry for entry in algo.logs)
+
+
+def test_rebalance_executes_all_eligible_cc_signals_before_put_gating(monkeypatch):
+    algo = _make_algo()
+    algo.max_positions = 3
+    cc_nvda = SimpleNamespace(action="SELL_CALL", symbol="NVDA", delta=0.35, confidence=0.95)
+    cc_meta = SimpleNamespace(action="SELL_CALL", symbol="META", delta=0.32, confidence=0.80)
+    sp_msft = SimpleNamespace(action="SELL_PUT", symbol="MSFT", delta=0.30, confidence=0.85)
+
+    monkeypatch.setattr(qc_strategy_mixin, "calculate_dynamic_max_positions", lambda _algo: 3)
+    monkeypatch.setattr(qc_strategy_mixin, "check_position_management", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_strategy_mixin, "generate_ml_signals", lambda _algo: [cc_nvda, cc_meta, sp_msft])
+
+    open_counts = iter([3, 3, 3, 3])
+    monkeypatch.setattr(qc_strategy_mixin, "get_option_position_count", lambda _algo: next(open_counts))
+
+    executed = []
+    monkeypatch.setattr(
+        qc_strategy_mixin,
+        "execute_signal",
+        lambda _algo, signal, _finder: executed.append((signal.action, signal.symbol)),
+    )
+
+    qc_strategy_mixin.rebalance(algo)
+
+    assert executed == [("SELL_CALL", "NVDA"), ("SELL_CALL", "META")]
+    assert not any(action == "SELL_PUT" for action, _symbol in executed)

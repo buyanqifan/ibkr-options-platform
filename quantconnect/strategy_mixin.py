@@ -59,12 +59,12 @@ def rebalance(algo):
 
     open_count = get_option_position_count(algo)
 
-    # Execute best CC signal first (if we have stock, we should sell calls)
+    # Execute all eligible CC signals first (if we have stock, we should sell calls)
     if cc_signals:
-        best_cc = max(cc_signals, key=lambda x: x.confidence)
-        algo.Log(f"CC_SIGNAL: {best_cc.symbol} delta={best_cc.delta:.2f}")
-        if best_cc.confidence >= algo.ml_min_confidence:
-            execute_signal(algo, best_cc, find_option_by_greeks)
+        for cc_signal in sorted(cc_signals, key=lambda x: x.confidence, reverse=True):
+            algo.Log(f"CC_SIGNAL: {cc_signal.symbol} delta={cc_signal.delta:.2f}")
+            if cc_signal.confidence >= algo.ml_min_confidence:
+                execute_signal(algo, cc_signal, find_option_by_greeks)
 
     open_count = get_option_position_count(algo)
 
