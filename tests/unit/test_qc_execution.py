@@ -1,5 +1,6 @@
 """Focused tests for QuantConnect execution helpers."""
 
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -89,3 +90,52 @@ def test_execute_signal_uses_rebalanced_delta_tolerance(monkeypatch):
     qc_execution.execute_signal(algo, signal, fake_find_option)
 
     assert captured["delta_tolerance"] == pytest.approx(0.08)
+
+
+def test_execute_close_records_pending_close_when_order_is_deferred(monkeypatch):
+    algo = SimpleNamespace(
+        pending_close_orders={},
+        Time=datetime(2025, 1, 2),
+    )
+    position = {
+        "symbol": "NVDA",
+        "option_symbol": "NVDA_CALL",
+        "expiry": datetime(2025, 1, 17),
+        "strike": 120.0,
+        "right": "C",
+        "entry_price": 2.0,
+        "quantity": -1,
+    }
+
+    monkeypatch.setattr(qc_execution, "safe_execute_option_order", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_execution, "remove_position_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_execution, "record_trade", lambda *_args, **_kwargs: None)
+
+    qc_execution.execute_close(algo, qc_execution.make_signal("NVDA", "CLOSE"), existing_position=position)
+
+    assert "NVDA_20250117_120_C" in algo.pending_close_orders
+
+
+def test_execute_roll_records_pending_roll_when_close_ticket_is_not_filled(monkeypatch):
+    algo = SimpleNamespace(
+        pending_close_orders={},
+        pending_roll_orders={},
+        Time=datetime(2025, 1, 2),
+        equities={"NVDA": SimpleNamespace(Symbol="NVDA")},
+    )
+    position = {
+        "symbol": "NVDA",
+        "option_symbol": "NVDA_PUT_OLD",
+        "expiry": datetime(2025, 1, 17),
+        "strike": 100.0,
+        "right": "P",
+        "entry_price": 2.5,
+        "quantity": -1,
+    }
+
+    ticket = SimpleNamespace(Status="Submitted", OrderId=42)
+    monkeypatch.setattr(qc_execution, "safe_execute_option_order", lambda *_args, **_kwargs: ticket)
+
+    qc_execution.execute_roll(algo, qc_execution.make_signal("NVDA", "ROLL"), lambda *_args, **_kwargs: None, existing_position=position)
+
+    assert "NVDA_20250117_100_P" in algo.pending_roll_orders

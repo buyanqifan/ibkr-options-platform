@@ -631,12 +631,17 @@ def select_contract_from_lattice(
     return contracts[0] if contracts else None
 
 
-def calculate_dynamic_max_positions_from_prices(prices: Sequence[float], config: BinbinGodParityConfig) -> int:
+def calculate_dynamic_max_positions_from_prices(
+    prices: Sequence[float],
+    config: BinbinGodParityConfig,
+    portfolio_value: float | None = None,
+) -> int:
     valid_prices = [price for price in prices if price and price > 0]
     if not valid_prices:
         return config.max_positions_ceiling
     avg_price = sum(valid_prices) / len(valid_prices)
-    margin_budget = config.initial_capital * config.target_margin_utilization
+    capital_base = portfolio_value if portfolio_value is not None else config.initial_capital
+    margin_budget = capital_base * config.target_margin_utilization
     margin_per_contract = avg_price * 100 * 0.20
     dynamic_max = int(margin_budget / margin_per_contract) if margin_per_contract > 0 else config.max_positions_ceiling
     return max(1, min(dynamic_max, config.max_positions_ceiling))

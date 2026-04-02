@@ -71,6 +71,7 @@ from core.backtesting.qc_parity import (
 )
 from core.backtesting.simulator import OptionPosition, TradeSimulator
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
+import execution as qc_execution
 import expiry as qc_expiry
 import main as qc_main
 import position_management as qc_position_management
@@ -515,6 +516,72 @@ def test_handle_assignment_order_event_tracks_put_assignment_immediately(monkeyp
     assert tracked_updates and tracked_updates[0]["assigned"] is True
 
 
+def test_assignment_event_marks_option_as_processed(monkeypatch):
+    algo = _make_assignment_tracking_algo()
+    algo.processed_assignment_keys = set()
+    option_symbol = SimpleNamespace(
+        SecurityType="Option",
+        Underlying=SimpleNamespace(Value="NVDA"),
+        ID=SimpleNamespace(OptionRight="Put", StrikePrice=120.0, Date=datetime(2024, 2, 16)),
+    )
+    order_event = SimpleNamespace(
+        Status="Filled",
+        Symbol=option_symbol,
+        FillQuantity=1,
+        FillPrice=0.0,
+        IsAssignment=True,
+    )
+
+    tracked = []
+    monkeypatch.setattr(qc_expiry, "get_cost_basis", lambda _algo, _symbol: 120.0)
+    monkeypatch.setattr(qc_expiry, "get_position_metadata", lambda *_args, **_kwargs: {"delta_at_entry": 0.3, "entry_date": "2024-01-15", "strategy_phase": "SP"})
+    monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: tracked.append("cc"))
+    algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked.append(payload["assigned"]))
+
+    qc_expiry.handle_assignment_order_event(algo, order_event)
+
+    assert tracked[0] == "cc"
+    assert len(algo.processed_assignment_keys) == 1
+
+
+def test_expiry_scan_skips_assignment_already_processed_by_event(monkeypatch):
+    algo = _make_assignment_tracking_algo()
+    processed_key = "NVDA_20240216_120_P"
+    algo.processed_assignment_keys = {processed_key}
+
+    monkeypatch.setattr(
+        qc_expiry,
+        "get_option_positions",
+        lambda _algo: {
+            processed_key: {
+                "option_symbol": "NVDA_OPT",
+                "symbol": "NVDA",
+                "strike": 120.0,
+                "right": "P",
+                "quantity": -1,
+                "expiry": datetime(2024, 2, 16),
+                "entry_price": 2.0,
+            }
+        },
+    )
+    monkeypatch.setattr(qc_expiry, "get_position_metadata", lambda *_args, **_kwargs: {"delta_at_entry": 0.3, "entry_date": "2024-01-15", "strategy_phase": "SP"})
+    monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "get_cost_basis", lambda _algo, _symbol: 120.0)
+
+    tracked = []
+    monkeypatch.setattr(qc_expiry, "_track_assigned_stock", lambda *_args, **_kwargs: tracked.append("track"))
+    monkeypatch.setattr(qc_expiry, "record_trade", lambda *_args, **_kwargs: tracked.append("record"))
+    monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: tracked.append("cooldown"))
+    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: tracked.append("cc"))
+    algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked.append("ml"))
+
+    qc_expiry.check_expired_options(algo)
+
+    assert tracked == []
+
+
 def test_on_order_event_routes_assignment_events_to_expiry_handler(monkeypatch):
     calls = {"order": 0, "assignment": 0}
 
@@ -616,6 +683,35 @@ def test_dynamic_max_positions_matches_qc_style_formula():
     result = calculate_dynamic_max_positions_from_prices([100.0, 120.0, 140.0], config)
     assert result >= 1
     assert result <= config.max_positions_ceiling
+
+
+def test_calculate_dynamic_max_positions_from_prices_uses_portfolio_value_budget():
+    config = BinbinGodParityConfig.from_params({"parity_mode": "qc", "initial_capital": 100000})
+    config.target_margin_utilization = 0.58
+    result_small = calculate_dynamic_max_positions_from_prices([250.0, 250.0, 250.0], config, portfolio_value=100000.0)
+    result_large = calculate_dynamic_max_positions_from_prices([250.0, 250.0, 250.0], config, portfolio_value=160000.0)
+
+    assert result_large > result_small
+
+
+def test_qc_dynamic_max_positions_uses_total_portfolio_value():
+    algo = SimpleNamespace(
+        stock_pool=["MSFT", "AAPL"],
+        equities={"MSFT": SimpleNamespace(Symbol="MSFT"), "AAPL": SimpleNamespace(Symbol="AAPL")},
+        Securities=_SecurityDict(
+            {
+                "MSFT": SimpleNamespace(Price=100.0),
+                "AAPL": SimpleNamespace(Price=100.0),
+            }
+        ),
+        Portfolio=SimpleNamespace(TotalPortfolioValue=160000.0),
+        target_margin_utilization=0.58,
+        max_positions_ceiling=20,
+    )
+
+    result = qc_execution.calculate_dynamic_max_positions(algo)
+
+    assert result > 5
 
 
 def test_put_quantity_qc_applies_caps():
@@ -1168,6 +1264,52 @@ def test_qc_parity_returns_multiple_sp_signals_when_slots_available(monkeypatch)
     )
 
     assert [signal.symbol for signal in signals] == ["NVDA", "AAPL", "MSFT"]
+
+
+def test_qc_parity_generates_multiple_cc_signals_for_multiple_stock_holdings(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA", "META"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": False,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars, "META": bars}
+    strategy.stock_holding.add_shares("NVDA", 100, 125.0)
+    strategy.stock_holding.add_shares("META", 100, 145.0)
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 27000.0,
+            "stock_holding_count": 2,
+            "price_by_symbol": {"NVDA": 130.0, "META": 150.0},
+            "dynamic_max_positions": 2,
+        }
+    )
+
+    monkeypatch.setattr(strategy, "_generate_backtest_put_signal", lambda *args, **kwargs: [])
+
+    def fake_call_signal(symbol, *args, **kwargs):
+        confidence = {"NVDA": 0.9, "META": 0.8}[symbol]
+        return [SimpleNamespace(symbol=symbol, right="C", quantity=-1, confidence=confidence, strategy_phase="CC")]
+
+    monkeypatch.setattr(strategy, "_generate_backtest_call_signal", fake_call_signal)
+
+    signals = strategy._generate_qc_parity_signals(
+        current_date=bars[-1]["date"],
+        underlying_price=100.0,
+        iv=0.25,
+        open_positions=[],
+        position_mgr=None,
+    )
+
+    assert [(signal.symbol, signal.right) for signal in signals] == [("NVDA", "C"), ("META", "C")]
 
 
 def test_symbol_state_risk_multiplier_matches_qc_penalty_shape():

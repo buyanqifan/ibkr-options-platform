@@ -791,7 +791,11 @@ class BinbinGodStrategy(BaseStrategy):
 
         if "price_by_symbol" in self._parity_context:
             prices = list(self._parity_context["price_by_symbol"].values())
-            self.max_positions = calculate_dynamic_max_positions_from_prices(prices, self.parity_config)
+            self.max_positions = calculate_dynamic_max_positions_from_prices(
+                prices,
+                self.parity_config,
+                portfolio_value=self._parity_context.get("portfolio_value"),
+            )
 
         cc_candidates: list[Signal] = []
         existing_call_coverage: Dict[str, int] = {}
@@ -869,8 +873,11 @@ class BinbinGodStrategy(BaseStrategy):
 
         selected: list[Signal] = []
         if cc_candidates:
-            best_cc = max(cc_candidates, key=lambda item: item.confidence)
-            selected.append(best_cc)
+            selected.extend(
+                signal
+                for signal in sorted(cc_candidates, key=lambda item: item.confidence, reverse=True)
+                if signal.confidence >= self.ml_min_confidence
+            )
 
         available_slots = max(0, self.max_positions - len(wheel_positions) - len(selected))
         if sp_candidates and available_slots > 0:

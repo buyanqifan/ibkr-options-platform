@@ -16,6 +16,10 @@ from option_selector import find_option_by_greeks
 from helpers import set_symbol_cooldown
 
 
+def _build_assignment_key(symbol: str, expiry, strike: float, right: str) -> str:
+    return f"{symbol}_{expiry.strftime('%Y%m%d')}_{strike:.0f}_{right}"
+
+
 def _extract_assignment_context(order_event):
     symbol = getattr(order_event, "Symbol", None)
     if not symbol or not hasattr(symbol, "SecurityType") or symbol.SecurityType != SecurityType.Option:
@@ -97,7 +101,12 @@ def handle_assignment_order_event(algo, order_event):
     strike = context["strike"]
     right = context["right"]
     quantity = context["quantity"]
-    pos_id = f"{symbol}_{context['expiry'].strftime('%Y%m%d')}_{strike:.0f}_{right}"
+    pos_id = _build_assignment_key(symbol, context["expiry"], strike, right)
+    processed = getattr(algo, "processed_assignment_keys", None)
+    if processed is not None and pos_id in processed:
+        return
+    if processed is not None:
+        processed.add(pos_id)
     metadata = get_position_metadata(algo, pos_id)
     cost_basis = get_cost_basis(algo, symbol) or strike
 
@@ -134,6 +143,10 @@ def check_expired_options(algo):
     """
     positions = get_option_positions(algo)
     for pos_id, pos_info in positions.items():
+        processed = getattr(algo, "processed_assignment_keys", None)
+        assignment_key = _build_assignment_key(pos_info["symbol"], pos_info["expiry"], pos_info["strike"], pos_info["right"])
+        if processed is not None and assignment_key in processed:
+            continue
         security = algo.Securities.get(pos_info['option_symbol'])
         if not security or not (security.IsDelisted or security.Price == 0):
             continue
@@ -162,6 +175,8 @@ def check_expired_options(algo):
                     algo.Log(f"WARNING: Put assignment shares {shares_acquired} > expected {expected_shares}")
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
+                if processed is not None:
+                    processed.add(assignment_key)
                 algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f}")
                 assignment_cost_basis = get_cost_basis(algo, symbol) or strike
                 _track_assigned_stock(algo, symbol, assignment_cost_basis)
@@ -175,6 +190,8 @@ def check_expired_options(algo):
             if qc_shares == 0:
                 was_assigned = True
                 exit_reason = "ASSIGNMENT"
+                if processed is not None:
+                    processed.add(assignment_key)
                 cost_basis = get_cost_basis(algo, symbol)
                 shares_sold = quantity * 100
                 stock_pnl = (strike - cost_basis) * shares_sold if cost_basis > 0 else 0

@@ -272,7 +272,8 @@ class BacktestEngine:
                     strike=trade.strike,
                     portfolio_pnl_effect=0.0,
                 )
-                assigned_put_symbols.append(trade.symbol)
+                if trade.symbol not in assigned_put_symbols:
+                    assigned_put_symbols.append(trade.symbol)
             elif trade.exit_reason == "ASSIGNMENT" and trade.trade_type == "BINBIN_CALL":
                 stock_pnl = strategy.on_trade_closed(trade.to_dict()) if hasattr(strategy, "on_trade_closed") else 0.0
                 if stock_pnl:
@@ -362,8 +363,6 @@ class BacktestEngine:
                 self._get_price_for_symbol(symbol, bar_date, pool_data, price_field="open") or rebalance_underlying_price
                 for symbol in getattr(strategy, "stock_pool", [])
             ]
-            dynamic_max_positions = calculate_dynamic_max_positions_from_prices(price_series, strategy.parity_config)
-            strategy.max_positions = dynamic_max_positions
             parity_context = self._build_parity_context(
                 strategy=strategy,
                 position_mgr=position_mgr,
@@ -371,9 +370,16 @@ class BacktestEngine:
                 bar_date=bar_date,
                 pool_data=pool_data,
                 fallback_price=rebalance_underlying_price,
-                dynamic_max_positions=dynamic_max_positions,
+                dynamic_max_positions=getattr(strategy, "max_positions", strategy.parity_config.max_positions_ceiling),
                 price_field="open",
             )
+            dynamic_max_positions = calculate_dynamic_max_positions_from_prices(
+                price_series,
+                strategy.parity_config,
+                portfolio_value=parity_context["portfolio_value"],
+            )
+            strategy.max_positions = dynamic_max_positions
+            parity_context["dynamic_max_positions"] = dynamic_max_positions
             strategy.set_parity_context(parity_context)
             tracer.snapshot(
                 bar_date,

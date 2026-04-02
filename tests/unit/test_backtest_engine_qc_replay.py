@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import core.backtesting.engine as engine_module
 from core.backtesting.engine import BacktestEngine
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
 
@@ -182,3 +183,37 @@ def test_qc_replay_warmup_pretrains_ml_once(monkeypatch):
 
     assert len(pretrain_calls) == 1
     assert pretrain_calls[0][0] >= 60
+
+
+def test_qc_replay_passes_portfolio_value_into_dynamic_capacity(monkeypatch):
+    engine = BacktestEngine()
+    bars = _make_bars(61)
+    portfolio_values = []
+
+    monkeypatch.setattr(engine, "_get_historical_data", lambda *args, **kwargs: bars)
+    monkeypatch.setattr(engine, "_rolling_hv", lambda prices, window=20: [0.25] * len(prices))
+    monkeypatch.setattr(BinbinGodStrategy, "generate_signals", lambda *args, **kwargs: [])
+    monkeypatch.setattr(BinbinGodStrategy, "generate_immediate_cc_signal", lambda *args, **kwargs: None)
+
+    original_calc = engine_module.calculate_dynamic_max_positions_from_prices
+
+    def capture_dynamic_max_positions(prices, config, portfolio_value=None):
+        portfolio_values.append(portfolio_value)
+        return original_calc(prices, config, portfolio_value=portfolio_value)
+
+    monkeypatch.setattr(engine_module, "calculate_dynamic_max_positions_from_prices", capture_dynamic_max_positions)
+
+    engine.run(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA"],
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-31",
+            "initial_capital": 300000,
+            "ml_enabled": False,
+        }
+    )
+
+    assert portfolio_values
+    assert all(value is not None for value in portfolio_values)
