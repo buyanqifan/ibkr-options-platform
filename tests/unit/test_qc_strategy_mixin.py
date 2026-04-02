@@ -73,10 +73,13 @@ def test_on_end_of_algorithm_emits_summary_lines():
     logs = []
     algo = SimpleNamespace(
         initial_capital=100000.0,
-        total_trades=4,
-        winning_trades=3,
-        stock_pool=["NVDA"],
-        equities={"NVDA": SimpleNamespace(Symbol="NVDA")},
+        total_trades=12,
+        winning_trades=9,
+        stock_pool=["NVDA", "AAPL"],
+        equities={
+            "NVDA": SimpleNamespace(Symbol="NVDA"),
+            "AAPL": SimpleNamespace(Symbol="AAPL"),
+        },
         Portfolio=SimpleNamespace(
             TotalProfit=1250.0,
             TotalPortfolioValue=101250.0,
@@ -86,7 +89,19 @@ def test_on_end_of_algorithm_emits_summary_lines():
         debug_counters={
             "holdings_seen": 2,
             "cc_signals": 1,
-            "stock_buy": 3,
+            "sp_signals": 4,
+            "put_block": 5,
+            "no_suitable_options": 6,
+            "assigned_stock_track": 7,
+            "immediate_cc": 8,
+            "assigned_repair_attempt": 9,
+            "assigned_repair_fail": 10,
+            "assigned_stock_exit": 11,
+            "stock_buy": 12,
+            "stock_sell": 13,
+            "sp_quality_block": 14,
+            "sp_stock_block": 15,
+            "sp_held_block": 16,
         },
         ml_integration=SimpleNamespace(get_status_report=lambda: "STATUS"),
         Log=lambda msg: logs.append(msg),
@@ -94,9 +109,28 @@ def test_on_end_of_algorithm_emits_summary_lines():
 
     qc_strategy_mixin.on_end_of_algorithm(algo)
 
-    assert any(line.startswith("SUMMARY_FLOW") for line in logs)
-    assert any(line.startswith("SUMMARY_ASSIGNMENT") for line in logs)
-    assert any(line.startswith("SUMMARY_STOCK_FILLS") for line in logs)
+    flow_line = next((line for line in logs if line.startswith("SUMMARY_FLOW")), None)
+    assignment_line = next((line for line in logs if line.startswith("SUMMARY_ASSIGNMENT")), None)
+    stock_fills_line = next((line for line in logs if line.startswith("SUMMARY_STOCK_FILLS")), None)
+
+    assert flow_line is not None
+    assert assignment_line is not None
+    assert stock_fills_line is not None
+    assert "holdings_seen=2" in flow_line
+    assert "cc_signals=1" in flow_line
+    assert "sp_signals=4" in flow_line
+    assert "put_block=5" in flow_line
+    assert "no_suitable_options=6" in flow_line
+    assert "assigned_stock_track=7" in assignment_line
+    assert "immediate_cc=8" in assignment_line
+    assert "assigned_repair_attempt=9" in assignment_line
+    assert "assigned_repair_fail=10" in assignment_line
+    assert "assigned_stock_exit=11" in assignment_line
+    assert "stock_buy=12" in stock_fills_line
+    assert "stock_sell=13" in stock_fills_line
+    assert "sp_quality_block=14" in stock_fills_line
+    assert "sp_stock_block=15" in stock_fills_line
+    assert "sp_held_block=16" in stock_fills_line
 
 
 def test_rebalance_executes_cc_even_when_option_slots_are_full(monkeypatch):
