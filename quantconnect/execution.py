@@ -284,7 +284,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
     min_strike = getattr(signal, 'min_strike', 0.0)
     selected = find_option_func(algo, symbol=signal.symbol, equity_symbol=equity.Symbol,
         target_right=target_right, target_delta=target_delta, dte_min=signal.dte_min, dte_max=signal.dte_max,
-        delta_tolerance=0.05, min_strike=min_strike if min_strike > 0 else None)
+        delta_tolerance=0.08, min_strike=min_strike if min_strike > 0 else None)
     if not selected:
         algo.Log(f"No suitable options for {signal.symbol} delta ~{target_delta:.2f}")
         return
