@@ -44,8 +44,9 @@ def calculate_dynamic_max_positions(algo) -> int:
     
     avg_price = total_price / count
     
-    # Calculate margin budget (60% of capital by default)
-    margin_budget = algo.initial_capital * algo.target_margin_utilization
+    # Calculate margin budget from current portfolio value so slot capacity compounds.
+    portfolio_value = max(getattr(algo.Portfolio, "TotalPortfolioValue", getattr(algo, "initial_capital", 0.0)), 0.0)
+    margin_budget = portfolio_value * algo.target_margin_utilization
     
     # Estimate margin per contract using standard formula
     # max(20% * price, 10% * price) * 100 ≈ 20% * price * 100

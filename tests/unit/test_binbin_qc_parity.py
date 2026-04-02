@@ -71,6 +71,7 @@ from core.backtesting.qc_parity import (
 )
 from core.backtesting.simulator import OptionPosition, TradeSimulator
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
+import execution as qc_execution
 import expiry as qc_expiry
 import main as qc_main
 import position_management as qc_position_management
@@ -682,6 +683,35 @@ def test_dynamic_max_positions_matches_qc_style_formula():
     result = calculate_dynamic_max_positions_from_prices([100.0, 120.0, 140.0], config)
     assert result >= 1
     assert result <= config.max_positions_ceiling
+
+
+def test_calculate_dynamic_max_positions_from_prices_uses_portfolio_value_budget():
+    config = BinbinGodParityConfig.from_params({"parity_mode": "qc", "initial_capital": 100000})
+    config.target_margin_utilization = 0.58
+    result_small = calculate_dynamic_max_positions_from_prices([250.0, 250.0, 250.0], config, portfolio_value=100000.0)
+    result_large = calculate_dynamic_max_positions_from_prices([250.0, 250.0, 250.0], config, portfolio_value=160000.0)
+
+    assert result_large > result_small
+
+
+def test_qc_dynamic_max_positions_uses_total_portfolio_value():
+    algo = SimpleNamespace(
+        stock_pool=["MSFT", "AAPL"],
+        equities={"MSFT": SimpleNamespace(Symbol="MSFT"), "AAPL": SimpleNamespace(Symbol="AAPL")},
+        Securities=_SecurityDict(
+            {
+                "MSFT": SimpleNamespace(Price=100.0),
+                "AAPL": SimpleNamespace(Price=100.0),
+            }
+        ),
+        Portfolio=SimpleNamespace(TotalPortfolioValue=160000.0),
+        target_margin_utilization=0.58,
+        max_positions_ceiling=20,
+    )
+
+    result = qc_execution.calculate_dynamic_max_positions(algo)
+
+    assert result > 5
 
 
 def test_put_quantity_qc_applies_caps():

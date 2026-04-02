@@ -791,7 +791,11 @@ class BinbinGodStrategy(BaseStrategy):
 
         if "price_by_symbol" in self._parity_context:
             prices = list(self._parity_context["price_by_symbol"].values())
-            self.max_positions = calculate_dynamic_max_positions_from_prices(prices, self.parity_config)
+            self.max_positions = calculate_dynamic_max_positions_from_prices(
+                prices,
+                self.parity_config,
+                portfolio_value=self._parity_context.get("portfolio_value"),
+            )
 
         cc_candidates: list[Signal] = []
         existing_call_coverage: Dict[str, int] = {}
