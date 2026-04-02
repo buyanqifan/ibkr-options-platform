@@ -950,11 +950,13 @@ class TestBinbinGodStrategy:
         assert strategy.max_positions == 20
         assert strategy.profit_target_pct == 70
         assert strategy.margin_buffer_pct == 0.40
-        assert strategy.symbol_assignment_base_cap == pytest.approx(0.28)
-        assert strategy.stock_inventory_base_cap == pytest.approx(0.17)
-        assert strategy.stock_inventory_block_threshold == pytest.approx(0.85)
+        assert strategy.target_margin_utilization == pytest.approx(0.58)
+        assert strategy.position_aggressiveness == pytest.approx(1.35)
+        assert strategy.symbol_assignment_base_cap == pytest.approx(0.36)
+        assert strategy.stock_inventory_base_cap == pytest.approx(0.24)
+        assert strategy.stock_inventory_block_threshold == pytest.approx(0.92)
         assert strategy.max_risk_per_trade == pytest.approx(0.03)
-        assert strategy.max_assignment_risk_per_trade == pytest.approx(0.20)
+        assert strategy.max_assignment_risk_per_trade == pytest.approx(0.25)
         assert strategy.max_new_puts_per_day == 3
         assert strategy._is_qc_parity_enabled() is True
         assert strategy.contract_universe_mode == "qc_emulated_lattice"
