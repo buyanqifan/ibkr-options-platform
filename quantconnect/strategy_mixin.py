@@ -44,39 +44,41 @@ def _select_sp_candidates_for_execution(algo, sp_signals, available_slots: int):
 def rebalance(algo):
     if algo.IsWarmingUp:
         return
-    
+
     # Dynamically update max_positions based on current stock prices
     algo.max_positions = calculate_dynamic_max_positions(algo)
-    
+
     check_position_management(algo, execute_signal, find_option_by_greeks)
-    open_count = get_option_position_count(algo)
-    if open_count >= algo.max_positions:
-        return
     signals = generate_ml_signals(algo)
     if not signals:
         return
-    
+
     # Separate SP and CC signals - both can execute in same cycle
     sp_signals = [s for s in signals if s.action == "SELL_PUT"]
     cc_signals = [s for s in signals if s.action == "SELL_CALL"]
-    
+
+    open_count = get_option_position_count(algo)
+
     # Execute best CC signal first (if we have stock, we should sell calls)
-    if cc_signals and open_count < algo.max_positions:
+    if cc_signals:
         best_cc = max(cc_signals, key=lambda x: x.confidence)
         algo.Log(f"CC_SIGNAL: {best_cc.symbol} delta={best_cc.delta:.2f}")
         if best_cc.confidence >= algo.ml_min_confidence:
             execute_signal(algo, best_cc, find_option_by_greeks)
-            open_count = get_option_position_count(algo)
-    
+
+    open_count = get_option_position_count(algo)
+
     # Execute top SP signals, preserving memory for the first pick
-    if sp_signals and open_count < algo.max_positions:
-        available_slots = max(0, algo.max_positions - open_count)
-        for sp_signal in _select_sp_candidates_for_execution(algo, sp_signals, available_slots):
-            algo.Log(f"SP_SIGNAL: {sp_signal.symbol} delta={sp_signal.delta:.2f}")
-            execute_signal(algo, sp_signal, find_option_by_greeks)
-            open_count = get_option_position_count(algo)
-            if open_count >= algo.max_positions:
-                break
+    if not sp_signals or open_count >= algo.max_positions:
+        return
+
+    available_slots = max(0, algo.max_positions - open_count)
+    for sp_signal in _select_sp_candidates_for_execution(algo, sp_signals, available_slots):
+        algo.Log(f"SP_SIGNAL: {sp_signal.symbol} delta={sp_signal.delta:.2f}")
+        execute_signal(algo, sp_signal, find_option_by_greeks)
+        open_count = get_option_position_count(algo)
+        if open_count >= algo.max_positions:
+            break
 
 
 def on_end_of_algorithm(algo):
