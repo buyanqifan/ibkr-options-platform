@@ -75,6 +75,7 @@ import execution as qc_execution
 import expiry as qc_expiry
 import main as qc_main
 import position_management as qc_position_management
+import strategy_init as qc_strategy_init
 import signal_generation as qc_signal_generation
 from scoring import DEFAULT_WEIGHTS, score_single_stock
 
@@ -233,6 +234,19 @@ def test_strategy_init_uses_qc_scoring_weights():
         "momentum": 0.25,
         "pe_score": 0.20,
     }
+
+
+def test_init_state_initializes_debug_counters(monkeypatch):
+    monkeypatch.setattr(qc_strategy_init, "init_position_tracking", lambda _algo: None)
+
+    algo = SimpleNamespace(SetWarmUp=lambda *_args, **_kwargs: None)
+
+    qc_strategy_init.init_state(algo)
+
+    assert isinstance(algo.debug_counters, dict)
+    assert algo.debug_counters["holdings_seen"] == 0
+    assert algo.debug_counters["cc_signals"] == 0
+    assert algo.debug_counters["stock_buy"] == 0
 
 
 class _PortfolioDict(dict):

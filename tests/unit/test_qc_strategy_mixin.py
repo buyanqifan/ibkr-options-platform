@@ -69,6 +69,36 @@ def _make_algo():
     )
 
 
+def test_on_end_of_algorithm_emits_summary_lines():
+    logs = []
+    algo = SimpleNamespace(
+        initial_capital=100000.0,
+        total_trades=4,
+        winning_trades=3,
+        stock_pool=["NVDA"],
+        equities={"NVDA": SimpleNamespace(Symbol="NVDA")},
+        Portfolio=SimpleNamespace(
+            TotalProfit=1250.0,
+            TotalPortfolioValue=101250.0,
+            Values=[],
+            ContainsKey=lambda _symbol: False,
+        ),
+        debug_counters={
+            "holdings_seen": 2,
+            "cc_signals": 1,
+            "stock_buy": 3,
+        },
+        ml_integration=SimpleNamespace(get_status_report=lambda: "STATUS"),
+        Log=lambda msg: logs.append(msg),
+    )
+
+    qc_strategy_mixin.on_end_of_algorithm(algo)
+
+    assert any(line.startswith("SUMMARY_FLOW") for line in logs)
+    assert any(line.startswith("SUMMARY_ASSIGNMENT") for line in logs)
+    assert any(line.startswith("SUMMARY_STOCK_FILLS") for line in logs)
+
+
 def test_rebalance_executes_cc_even_when_option_slots_are_full(monkeypatch):
     algo = _make_algo()
     cc_signal = SimpleNamespace(action="SELL_CALL", symbol="NVDA", delta=0.35, confidence=0.9)
