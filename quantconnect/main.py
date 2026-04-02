@@ -2,7 +2,7 @@
 from AlgorithmImports import *
 from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events, log_effective_parameters
 from strategy_mixin import rebalance, on_end_of_algorithm
-from expiry import check_expired_options, update_ml_models
+from expiry import check_expired_options, handle_assignment_order_event, update_ml_models
 from execution import handle_order_event
 
 class BinbinGodStrategy(QCAlgorithm):
@@ -53,6 +53,8 @@ class BinbinGodStrategy(QCAlgorithm):
     def OnOrderEvent(self, orderEvent):
         """Called on order event."""
         handle_order_event(self, orderEvent)
+        if orderEvent.Status == OrderStatus.Filled and getattr(orderEvent, "IsAssignment", False):
+            handle_assignment_order_event(self, orderEvent)
         if orderEvent.Status == OrderStatus.Filled:
             symbol = orderEvent.Symbol
             qty = orderEvent.FillQuantity

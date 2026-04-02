@@ -25,6 +25,7 @@ if "AlgorithmImports" not in sys.modules:
 
     class _SecurityType:
         Option = "Option"
+        Equity = "Equity"
 
     class _OrderStatus:
         Filled = "Filled"
@@ -36,17 +37,22 @@ if "AlgorithmImports" not in sys.modules:
     class _DataNormalizationMode:
         Raw = "Raw"
 
+    class _QCAlgorithm:
+        pass
+
     algorithm_imports.OptionRight = _OptionRight
     algorithm_imports.SecurityType = _SecurityType
     algorithm_imports.OrderStatus = _OrderStatus
     algorithm_imports.Resolution = _Resolution
     algorithm_imports.DataNormalizationMode = _DataNormalizationMode
+    algorithm_imports.QCAlgorithm = _QCAlgorithm
     algorithm_imports.__all__ = [
         "OptionRight",
         "SecurityType",
         "OrderStatus",
         "Resolution",
         "DataNormalizationMode",
+        "QCAlgorithm",
     ]
     sys.modules["AlgorithmImports"] = algorithm_imports
 
@@ -66,6 +72,7 @@ from core.backtesting.qc_parity import (
 from core.backtesting.simulator import OptionPosition, TradeSimulator
 from core.backtesting.strategies.binbin_god import BinbinGodStrategy
 import expiry as qc_expiry
+import main as qc_main
 import position_management as qc_position_management
 import signal_generation as qc_signal_generation
 from scoring import DEFAULT_WEIGHTS, score_single_stock
@@ -469,6 +476,58 @@ def test_check_expired_options_tracks_put_assignment_state(monkeypatch):
     assert state["assignment_cost_basis"] == pytest.approx(120.0)
     assert state["force_exit_triggered"] is False
     assert tracked_updates and tracked_updates[0]["assigned"] is True
+
+
+def test_handle_assignment_order_event_tracks_put_assignment_immediately(monkeypatch):
+    algo = _make_assignment_tracking_algo()
+    tracked_updates = []
+    cooldown_calls = []
+    immediate_cc_calls = []
+    option_symbol = SimpleNamespace(
+        SecurityType="Option",
+        Underlying=SimpleNamespace(Value="NVDA"),
+        ID=SimpleNamespace(OptionRight="Put", StrikePrice=120.0, Date=datetime(2024, 2, 16)),
+    )
+    order_event = SimpleNamespace(
+        Status="Filled",
+        Symbol=option_symbol,
+        FillQuantity=1,
+        FillPrice=0.0,
+        IsAssignment=True,
+    )
+
+    monkeypatch.setattr(qc_expiry, "get_cost_basis", lambda _algo, _symbol: 120.0)
+    monkeypatch.setattr(qc_expiry, "get_position_metadata", lambda *_args, **_kwargs: {"delta_at_entry": 0.3, "entry_date": "2024-01-15", "strategy_phase": "SP"})
+    monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "record_trade", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: cooldown_calls.append(_args[1]))
+    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: immediate_cc_calls.append(_args[1]))
+    algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked_updates.append(payload))
+
+    qc_expiry.handle_assignment_order_event(algo, order_event)
+
+    state = algo.assigned_stock_state["NVDA"]
+    assert state["source"] == "put_assignment"
+    assert state["assignment_cost_basis"] == pytest.approx(120.0)
+    assert state["repair_failures"] == 0
+    assert cooldown_calls == ["NVDA"]
+    assert immediate_cc_calls == ["NVDA"]
+    assert tracked_updates and tracked_updates[0]["assigned"] is True
+
+
+def test_on_order_event_routes_assignment_events_to_expiry_handler(monkeypatch):
+    calls = {"order": 0, "assignment": 0}
+
+    monkeypatch.setattr(qc_main, "handle_order_event", lambda *_args, **_kwargs: calls.__setitem__("order", calls["order"] + 1))
+    monkeypatch.setattr(qc_main, "handle_assignment_order_event", lambda *_args, **_kwargs: calls.__setitem__("assignment", calls["assignment"] + 1))
+
+    fake_algo = SimpleNamespace(Log=lambda *_args, **_kwargs: None)
+    option_symbol = SimpleNamespace(SecurityType="Option")
+    order_event = SimpleNamespace(Status="Filled", Symbol=option_symbol, FillQuantity=1, FillPrice=0.0, IsAssignment=True)
+
+    qc_main.BinbinGodStrategy.OnOrderEvent(fake_algo, order_event)
+
+    assert calls == {"order": 1, "assignment": 1}
 
 
 def test_generate_signal_for_symbol_uses_assigned_stock_repair_overrides(monkeypatch):
