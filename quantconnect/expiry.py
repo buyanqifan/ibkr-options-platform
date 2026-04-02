@@ -3,6 +3,7 @@
 No phase concept - QC handles assignment automatically, we just log and record.
 """
 from datetime import datetime
+from AlgorithmImports import OptionRight, SecurityType
 from option_utils import calculate_dte
 from execution import record_trade, execute_signal
 from signals import calculate_pnl_metrics
@@ -13,6 +14,33 @@ from qc_portfolio import (
 from signal_generation import generate_signal_for_symbol, get_portfolio_state
 from option_selector import find_option_by_greeks
 from helpers import set_symbol_cooldown
+
+
+def _extract_assignment_context(order_event):
+    symbol = getattr(order_event, "Symbol", None)
+    if not symbol or not hasattr(symbol, "SecurityType") or symbol.SecurityType != SecurityType.Option:
+        return None
+
+    underlying = None
+    if hasattr(symbol, "Underlying") and symbol.Underlying:
+        underlying = getattr(symbol.Underlying, "Value", None)
+    if not underlying and hasattr(symbol, "ID") and hasattr(symbol.ID, "Underlying"):
+        underlying = getattr(symbol.ID.Underlying, "Value", None)
+    if not underlying:
+        return None
+
+    right = "P" if symbol.ID.OptionRight == OptionRight.Put else "C"
+    strike = float(symbol.ID.StrikePrice)
+    expiry = symbol.ID.Date
+    quantity = abs(int(getattr(order_event, "FillQuantity", 0) or 0))
+    return {
+        "symbol": underlying,
+        "right": right,
+        "strike": strike,
+        "expiry": expiry,
+        "quantity": max(1, quantity),
+        "option_symbol": symbol,
+    }
 
 
 def _track_assigned_stock(algo, symbol: str, assignment_cost_basis: float):
@@ -52,6 +80,50 @@ def try_sell_cc_immediately(algo, symbol):
             algo.Log(f"IMMEDIATE_CC: Confidence {signal.confidence:.2f} < min {algo.ml_min_confidence}")
     else:
         algo.Log(f"IMMEDIATE_CC: No valid CC signal for {symbol}")
+
+
+def handle_assignment_order_event(algo, order_event):
+    """Process QC assignment events immediately instead of relying on expiry scans."""
+    if getattr(order_event, "Status", None) != "Filled":
+        return
+    if not getattr(order_event, "IsAssignment", False):
+        return
+
+    context = _extract_assignment_context(order_event)
+    if not context:
+        return
+
+    symbol = context["symbol"]
+    strike = context["strike"]
+    right = context["right"]
+    quantity = context["quantity"]
+    pos_id = f"{symbol}_{context['expiry'].strftime('%Y%m%d')}_{strike:.0f}_{right}"
+    metadata = get_position_metadata(algo, pos_id)
+    cost_basis = get_cost_basis(algo, symbol) or strike
+
+    if right == "P":
+        algo.Log(f"Put assigned (event): +{quantity * 100} {symbol} @ ${strike:.2f}")
+        _track_assigned_stock(algo, symbol, cost_basis)
+        set_symbol_cooldown(algo, symbol, algo.assignment_cooldown_days, "put_assignment")
+        try_sell_cc_immediately(algo, symbol)
+    else:
+        algo.Log(f"Call assigned (event): {symbol} @ ${strike:.2f}")
+
+    if hasattr(algo, "ml_integration") and hasattr(algo.ml_integration, "update_performance"):
+        entry_date = metadata.get("entry_date", algo.Time.strftime("%Y-%m-%d"))
+        algo.ml_integration.update_performance({
+            "symbol": symbol,
+            "delta": abs(metadata.get("delta_at_entry", 0)),
+            "dte": calculate_dte(context["expiry"], datetime.strptime(entry_date, "%Y-%m-%d")),
+            "num_contracts": quantity,
+            "pnl": 0.0,
+            "assigned": True,
+            "bars": algo.price_history.get(symbol, []),
+            "cost_basis": cost_basis,
+            "strategy_phase": metadata.get("strategy_phase", "SP"),
+        })
+
+    remove_position_metadata(algo, pos_id)
 
 
 def check_expired_options(algo):
