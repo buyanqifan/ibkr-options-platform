@@ -272,7 +272,8 @@ class BacktestEngine:
                     strike=trade.strike,
                     portfolio_pnl_effect=0.0,
                 )
-                assigned_put_symbols.append(trade.symbol)
+                if trade.symbol not in assigned_put_symbols:
+                    assigned_put_symbols.append(trade.symbol)
             elif trade.exit_reason == "ASSIGNMENT" and trade.trade_type == "BINBIN_CALL":
                 stock_pnl = strategy.on_trade_closed(trade.to_dict()) if hasattr(strategy, "on_trade_closed") else 0.0
                 if stock_pnl:

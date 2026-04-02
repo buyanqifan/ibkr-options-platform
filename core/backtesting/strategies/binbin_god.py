@@ -873,8 +873,11 @@ class BinbinGodStrategy(BaseStrategy):
 
         selected: list[Signal] = []
         if cc_candidates:
-            best_cc = max(cc_candidates, key=lambda item: item.confidence)
-            selected.append(best_cc)
+            selected.extend(
+                signal
+                for signal in sorted(cc_candidates, key=lambda item: item.confidence, reverse=True)
+                if signal.confidence >= self.ml_min_confidence
+            )
 
         available_slots = max(0, self.max_positions - len(wheel_positions) - len(selected))
         if sp_candidates and available_slots > 0:

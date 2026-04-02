@@ -1266,6 +1266,52 @@ def test_qc_parity_returns_multiple_sp_signals_when_slots_available(monkeypatch)
     assert [signal.symbol for signal in signals] == ["NVDA", "AAPL", "MSFT"]
 
 
+def test_qc_parity_generates_multiple_cc_signals_for_multiple_stock_holdings(monkeypatch):
+    strategy = BinbinGodStrategy(
+        {
+            "strategy": "binbin_god",
+            "symbol": "MAG7_AUTO",
+            "stock_pool": ["NVDA", "META"],
+            "parity_mode": "qc",
+            "contract_universe_mode": "qc_emulated_lattice",
+            "ml_enabled": False,
+        }
+    )
+    bars = _make_bars(100.0, 90)
+    strategy.mag7_data = {"NVDA": bars, "META": bars}
+    strategy.stock_holding.add_shares("NVDA", 100, 125.0)
+    strategy.stock_holding.add_shares("META", 100, 145.0)
+    strategy.set_parity_context(
+        {
+            "portfolio_value": 100000.0,
+            "margin_remaining": 100000.0,
+            "total_margin_used": 0.0,
+            "stock_holdings_value": 27000.0,
+            "stock_holding_count": 2,
+            "price_by_symbol": {"NVDA": 130.0, "META": 150.0},
+            "dynamic_max_positions": 2,
+        }
+    )
+
+    monkeypatch.setattr(strategy, "_generate_backtest_put_signal", lambda *args, **kwargs: [])
+
+    def fake_call_signal(symbol, *args, **kwargs):
+        confidence = {"NVDA": 0.9, "META": 0.8}[symbol]
+        return [SimpleNamespace(symbol=symbol, right="C", quantity=-1, confidence=confidence, strategy_phase="CC")]
+
+    monkeypatch.setattr(strategy, "_generate_backtest_call_signal", fake_call_signal)
+
+    signals = strategy._generate_qc_parity_signals(
+        current_date=bars[-1]["date"],
+        underlying_price=100.0,
+        iv=0.25,
+        open_positions=[],
+        position_mgr=None,
+    )
+
+    assert [(signal.symbol, signal.right) for signal in signals] == [("NVDA", "C"), ("META", "C")]
+
+
 def test_symbol_state_risk_multiplier_matches_qc_penalty_shape():
     bars = _make_bars(100.0, 90)
     stressed_bars = []
