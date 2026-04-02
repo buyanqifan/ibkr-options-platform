@@ -191,6 +191,7 @@ def init_state(algo):
     # position_metadata tracks entry Greeks (QC doesn't have this)
     init_position_tracking(algo)
     algo.pending_order_metadata = {}
+    algo.processed_assignment_keys = set()
     algo.symbol_cooldowns = {}
     algo.assigned_stock_state = {}
     algo.trade_history, algo.ml_signals_history = [], []

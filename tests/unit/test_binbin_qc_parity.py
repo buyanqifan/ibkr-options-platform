@@ -515,6 +515,72 @@ def test_handle_assignment_order_event_tracks_put_assignment_immediately(monkeyp
     assert tracked_updates and tracked_updates[0]["assigned"] is True
 
 
+def test_assignment_event_marks_option_as_processed(monkeypatch):
+    algo = _make_assignment_tracking_algo()
+    algo.processed_assignment_keys = set()
+    option_symbol = SimpleNamespace(
+        SecurityType="Option",
+        Underlying=SimpleNamespace(Value="NVDA"),
+        ID=SimpleNamespace(OptionRight="Put", StrikePrice=120.0, Date=datetime(2024, 2, 16)),
+    )
+    order_event = SimpleNamespace(
+        Status="Filled",
+        Symbol=option_symbol,
+        FillQuantity=1,
+        FillPrice=0.0,
+        IsAssignment=True,
+    )
+
+    tracked = []
+    monkeypatch.setattr(qc_expiry, "get_cost_basis", lambda _algo, _symbol: 120.0)
+    monkeypatch.setattr(qc_expiry, "get_position_metadata", lambda *_args, **_kwargs: {"delta_at_entry": 0.3, "entry_date": "2024-01-15", "strategy_phase": "SP"})
+    monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: tracked.append("cc"))
+    algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked.append(payload["assigned"]))
+
+    qc_expiry.handle_assignment_order_event(algo, order_event)
+
+    assert tracked[0] == "cc"
+    assert len(algo.processed_assignment_keys) == 1
+
+
+def test_expiry_scan_skips_assignment_already_processed_by_event(monkeypatch):
+    algo = _make_assignment_tracking_algo()
+    processed_key = "NVDA_20240216_120_P"
+    algo.processed_assignment_keys = {processed_key}
+
+    monkeypatch.setattr(
+        qc_expiry,
+        "get_option_positions",
+        lambda _algo: {
+            processed_key: {
+                "option_symbol": "NVDA_OPT",
+                "symbol": "NVDA",
+                "strike": 120.0,
+                "right": "P",
+                "quantity": -1,
+                "expiry": datetime(2024, 2, 16),
+                "entry_price": 2.0,
+            }
+        },
+    )
+    monkeypatch.setattr(qc_expiry, "get_position_metadata", lambda *_args, **_kwargs: {"delta_at_entry": 0.3, "entry_date": "2024-01-15", "strategy_phase": "SP"})
+    monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_expiry, "get_cost_basis", lambda _algo, _symbol: 120.0)
+
+    tracked = []
+    monkeypatch.setattr(qc_expiry, "_track_assigned_stock", lambda *_args, **_kwargs: tracked.append("track"))
+    monkeypatch.setattr(qc_expiry, "record_trade", lambda *_args, **_kwargs: tracked.append("record"))
+    monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: tracked.append("cooldown"))
+    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: tracked.append("cc"))
+    algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked.append("ml"))
+
+    qc_expiry.check_expired_options(algo)
+
+    assert tracked == []
+
+
 def test_on_order_event_routes_assignment_events_to_expiry_handler(monkeypatch):
     calls = {"order": 0, "assignment": 0}
 
