@@ -705,6 +705,55 @@ def test_assignment_event_marks_option_as_processed(monkeypatch):
     assert len(algo.processed_assignment_keys) == 1
 
 
+def test_try_sell_cc_immediately_preserves_deferred_open_for_retry(monkeypatch):
+    option_symbol = "NVDA_CC"
+    signal = SimpleNamespace(
+        action="SELL_CALL",
+        symbol="NVDA",
+        delta=0.30,
+        dte_min=7,
+        dte_max=21,
+        confidence=0.9,
+    )
+    algo = SimpleNamespace(
+        pending_open_orders={},
+        ml_min_confidence=0.1,
+        max_positions=4,
+        equities={"NVDA": SimpleNamespace(Symbol="NVDA")},
+        Securities=_SecurityDict(
+            {
+                "NVDA": SimpleNamespace(Price=120.0),
+                option_symbol: SimpleNamespace(HasData=False, Price=0.0),
+            }
+        ),
+        Log=lambda *_args, **_kwargs: None,
+        AddOptionContract=lambda *_args, **_kwargs: None,
+        debug_counters=dict(qc_debug_counters.DEFAULT_DEBUG_COUNTERS),
+    )
+
+    monkeypatch.setattr(qc_expiry, "get_portfolio_state", lambda _algo: {})
+    monkeypatch.setattr(qc_expiry, "generate_signal_for_symbol", lambda *_args, **_kwargs: signal)
+    monkeypatch.setattr(
+        qc_expiry,
+        "find_option_by_greeks",
+        lambda *_args, **_kwargs: {
+            "option_symbol": option_symbol,
+            "premium": 1.25,
+            "strike": 130.0,
+            "expiry": datetime(2024, 6, 21),
+            "delta": 0.30,
+            "iv": 0.40,
+        },
+    )
+    monkeypatch.setattr(qc_execution, "get_shares_held", lambda *_args, **_kwargs: 100)
+    monkeypatch.setattr(qc_execution, "get_call_position_contracts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(qc_execution, "get_option_position_count", lambda *_args, **_kwargs: 0)
+
+    qc_expiry.try_sell_cc_immediately(algo, "NVDA")
+
+    assert option_symbol in {item["option_symbol"] for item in algo.pending_open_orders.values()}
+
+
 def test_expiry_scan_skips_assignment_already_processed_by_event(monkeypatch):
     algo = _make_assignment_tracking_algo()
     processed_key = "NVDA_20240216_120_P"

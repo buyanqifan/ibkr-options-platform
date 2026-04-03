@@ -31,20 +31,35 @@ if "AlgorithmImports" not in sys.modules:
     class _SecurityType:
         Option = "Option"
 
+    class _DataNormalizationMode:
+        Raw = "Raw"
+
+    class _QCAlgorithm:
+        pass
+
     algorithm_imports.OptionRight = _OptionRight
     algorithm_imports.OrderStatus = _OrderStatus
     algorithm_imports.Resolution = _Resolution
     algorithm_imports.SecurityType = _SecurityType
+    algorithm_imports.DataNormalizationMode = _DataNormalizationMode
+    algorithm_imports.QCAlgorithm = _QCAlgorithm
     algorithm_imports.__all__ = [
         "OptionRight",
         "OrderStatus",
         "Resolution",
         "SecurityType",
+        "DataNormalizationMode",
+        "QCAlgorithm",
     ]
     sys.modules["AlgorithmImports"] = algorithm_imports
 
 import execution as qc_execution
 from ml_integration import StrategySignal
+
+
+class _SecurityDict(dict):
+    def ContainsKey(self, key):
+        return key in self
 
 
 def test_execute_signal_uses_rebalanced_delta_tolerance(monkeypatch):
@@ -139,3 +154,37 @@ def test_execute_roll_records_pending_roll_when_close_ticket_is_not_filled(monke
     qc_execution.execute_roll(algo, qc_execution.make_signal("NVDA", "ROLL"), lambda *_args, **_kwargs: None, existing_position=position)
 
     assert "NVDA_20250117_100_P" in algo.pending_roll_orders
+
+
+def test_safe_execute_option_order_enqueues_deferred_open_when_no_data():
+    option_symbol = "NVDA 240621C01000000"
+    security = SimpleNamespace(HasData=False, Price=0.0)
+    signal = qc_execution.make_signal("NVDA", "SELL_CALL", confidence=0.9)
+    selected = {
+        "strike": 1000.0,
+        "expiry": datetime(2024, 6, 21),
+        "delta": 0.3,
+        "iv": 0.4,
+    }
+
+    algo = SimpleNamespace(
+        Securities=_SecurityDict({option_symbol: security}),
+        Log=lambda *_args, **_kwargs: None,
+        pending_open_orders={},
+    )
+
+    ticket = qc_execution.safe_execute_option_order(
+        algo,
+        option_symbol=option_symbol,
+        quantity=-1,
+        theoretical_price=1.25,
+        deferred_context={
+            "queue_key": "NVDA_20240621_1000_C_-1",
+            "signal": signal,
+            "selected": selected,
+            "target_right": "Call",
+        },
+    )
+
+    assert ticket is None
+    assert "NVDA_20240621_1000_C_-1" in algo.pending_open_orders
