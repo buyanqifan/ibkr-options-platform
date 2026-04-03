@@ -194,6 +194,7 @@ def init_state(algo):
     init_position_tracking(algo)
     algo.debug_counters = dict(DEFAULT_DEBUG_COUNTERS)
     algo.pending_order_metadata = {}
+    algo.pending_open_orders = {}
     algo.pending_close_orders = {}
     algo.pending_roll_orders = {}
     algo.processed_assignment_keys = set()

@@ -15,6 +15,7 @@ from qc_portfolio import (
 )
 
 RISK_FREE_RATE = 0.05
+MAX_DEFERRED_OPEN_ATTEMPTS = 3
 
 
 def calculate_dynamic_max_positions(algo) -> int:
@@ -191,7 +192,30 @@ def _calculate_stock_inventory_cap(algo, portfolio_value: float, symbol_state_mu
     return max(0.0, base_cap * dynamic_multiplier)
 
 
-def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
+def _format_pending_expiry(expiry) -> str:
+    if hasattr(expiry, "strftime"):
+        return expiry.strftime("%Y%m%d")
+    return str(expiry).replace("-", "")
+
+
+def _format_pending_right(target_right) -> str:
+    return "C" if target_right in (OptionRight.Call, "Call", "C") else "P"
+
+
+def _build_pending_open_key(signal, selected, target_right, quantity):
+    return (
+        f"{signal.symbol}_{_format_pending_expiry(selected['expiry'])}_"
+        f"{float(selected['strike']):.0f}_{_format_pending_right(target_right)}_{quantity}"
+    )
+
+
+def _enqueue_pending_open_order(algo, queue_key, payload):
+    if not hasattr(algo, "pending_open_orders") or algo.pending_open_orders is None:
+        algo.pending_open_orders = {}
+    algo.pending_open_orders[queue_key] = payload
+
+
+def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price, deferred_context=None):
     """Safely execute option order with data readiness check.
     
     QC dynamically subscribed options may not have price data immediately.
@@ -222,6 +246,18 @@ def safe_execute_option_order(algo, option_symbol, quantity, theoretical_price):
     else:
         # Data not ready yet. Defer order to next rebalance cycle.
         algo.Log(f"ORDER_DEFERRED: {option_symbol} waiting for first bar")
+        if deferred_context:
+            _enqueue_pending_open_order(
+                algo,
+                deferred_context["queue_key"],
+                {
+                    **deferred_context,
+                    "option_symbol": option_symbol,
+                    "quantity": quantity,
+                    "theoretical_price": theoretical_price,
+                    "attempt_count": deferred_context.get("attempt_count", 0),
+                },
+            )
         return None
 
 
@@ -253,6 +289,39 @@ def _enqueue_open_order_metadata(algo, ticket, signal: StrategySignal, selected:
 
 def _build_position_key(symbol: str, expiry, strike: float, right: str) -> str:
     return f"{symbol}_{expiry.strftime('%Y%m%d')}_{strike:.0f}_{right}"
+
+
+def retry_pending_open_orders(algo, _find_option_func=None):
+    """Retry deferred opening orders once contracts have price data."""
+    pending = getattr(algo, "pending_open_orders", None)
+    if not pending:
+        return []
+
+    completed = []
+    items = sorted(
+        pending.items(),
+        key=lambda kv: 0 if kv[1]["signal"].action == "SELL_CALL" else 1,
+    )
+    for queue_key, item in items:
+        attempts = int(item.get("attempt_count", 0))
+        if attempts >= MAX_DEFERRED_OPEN_ATTEMPTS:
+            algo.Log(f"ORDER_DEFERRED_EXPIRED: {queue_key}")
+            completed.append(queue_key)
+            continue
+
+        security = algo.Securities[item["option_symbol"]] if algo.Securities.ContainsKey(item["option_symbol"]) else None
+        if security is None or not security.HasData or security.Price <= 0:
+            item["attempt_count"] = attempts + 1
+            continue
+
+        algo.Log(f"RETRY_DEFERRED_OPEN: {queue_key}")
+        ticket = algo.MarketOrder(item["option_symbol"], item["quantity"])
+        _enqueue_open_order_metadata(algo, ticket, item["signal"], item["selected"], item["target_right"])
+        completed.append(queue_key)
+
+    for queue_key in completed:
+        pending.pop(queue_key, None)
+    return completed
 
 
 def handle_order_event(algo, order_event):
@@ -310,8 +379,22 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
     if quantity <= 0: return
     quantity = -quantity
     option_symbol = selected['option_symbol']
+    queue_key = _build_pending_open_key(signal, selected, target_right, quantity)
+    deferred_context = {
+        "queue_key": queue_key,
+        "signal": signal,
+        "selected": selected,
+        "target_right": target_right,
+        "attempt_count": getattr(algo, "pending_open_orders", {}).get(queue_key, {}).get("attempt_count", 0),
+    }
     # Use safe execution to handle data readiness
-    ticket = safe_execute_option_order(algo, option_symbol, quantity, selected['premium'])
+    ticket = safe_execute_option_order(
+        algo,
+        option_symbol,
+        quantity,
+        selected['premium'],
+        deferred_context=deferred_context,
+    )
     _enqueue_open_order_metadata(algo, ticket, signal, selected, target_right)
 
 

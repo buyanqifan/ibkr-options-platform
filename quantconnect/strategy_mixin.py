@@ -4,7 +4,7 @@ from debug_counters import DEFAULT_DEBUG_COUNTERS, increment_debug_counter
 from signals import select_best_signal_with_memory
 from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events
 from signal_generation import generate_ml_signals
-from execution import execute_signal, calculate_dynamic_max_positions
+from execution import execute_signal, calculate_dynamic_max_positions, retry_pending_open_orders
 from position_management import check_position_management
 from expiry import check_expired_options, update_ml_models
 from option_selector import find_option_by_greeks
@@ -73,6 +73,7 @@ def rebalance(algo):
     algo.max_positions = calculate_dynamic_max_positions(algo)
 
     check_position_management(algo, execute_signal, find_option_by_greeks)
+    retry_pending_open_orders(algo, find_option_by_greeks)
     signals = generate_ml_signals(algo)
     if not signals:
         return
