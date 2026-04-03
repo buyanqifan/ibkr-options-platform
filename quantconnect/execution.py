@@ -359,11 +359,14 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
     min_strike = getattr(signal, 'min_strike', 0.0)
     selected = find_option_func(algo, symbol=signal.symbol, equity_symbol=equity.Symbol,
         target_right=target_right, target_delta=target_delta, dte_min=signal.dte_min, dte_max=signal.dte_max,
-        delta_tolerance=0.08, min_strike=min_strike if min_strike > 0 else None)
+        delta_tolerance=0.08, min_strike=min_strike if min_strike > 0 else None,
+        selection_tiers=getattr(signal, "selection_tiers", None))
     if not selected:
         algo.Log(f"No suitable options for {signal.symbol} delta ~{target_delta:.2f}")
         increment_debug_counter(algo, "no_suitable_options")
         return
+    if signal.action == "SELL_CALL" and selected.get("selection_tier") and selected["selection_tier"] != "primary":
+        algo.Log(f"CC_SELECTION_TIER:{signal.symbol}:{selected['selection_tier']}")
     current_positions = get_option_position_count(algo)
     if target_right == OptionRight.Put:
         quantity = calculate_put_quantity(algo, selected, current_positions, underlying_price, signal.symbol)

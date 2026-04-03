@@ -78,6 +78,7 @@ import position_management as qc_position_management
 import strategy_init as qc_strategy_init
 import signal_generation as qc_signal_generation
 import debug_counters as qc_debug_counters
+from ml_integration import StrategySignal
 from scoring import DEFAULT_WEIGHTS, score_single_stock
 
 
@@ -124,6 +125,11 @@ def test_qc_parity_config_uses_qc_defaults():
     assert config.defensive_put_roll_max_dte == 21
     assert config.symbol_assignment_base_cap == pytest.approx(0.36)
     assert config.max_new_puts_per_day == 3
+    assert config.cc_fallback_delta_tolerance_1 == pytest.approx(0.12)
+    assert config.cc_fallback_delta_tolerance_2 == pytest.approx(0.15)
+    assert config.cc_fallback_dte_min == 14
+    assert config.cc_fallback_dte_max == 30
+    assert config.cc_fallback_min_cost_basis_ratio == pytest.approx(0.85)
 
 
 def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
@@ -141,6 +147,11 @@ def test_extract_strategy_init_parameter_defaults_reads_qc_source_defaults():
     assert defaults["stock_inventory_base_cap"] == pytest.approx(0.24)
     assert defaults["stock_inventory_block_threshold"] == pytest.approx(0.92)
     assert defaults["max_new_puts_per_day"] == 3
+    assert defaults["cc_fallback_delta_tolerance_1"] == pytest.approx(0.12)
+    assert defaults["cc_fallback_delta_tolerance_2"] == pytest.approx(0.15)
+    assert defaults["cc_fallback_dte_min"] == 14
+    assert defaults["cc_fallback_dte_max"] == 30
+    assert defaults["cc_fallback_min_cost_basis_ratio"] == pytest.approx(0.85)
 
 
 def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
@@ -153,6 +164,11 @@ def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.36)
     assert QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"] == pytest.approx(85.0)
     assert QC_PARAMETER_DEFAULTS["max_new_puts_per_day"] == 3
+    assert QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_1"] == pytest.approx(0.12)
+    assert QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_2"] == pytest.approx(0.15)
+    assert QC_PARAMETER_DEFAULTS["cc_fallback_dte_min"] == 14
+    assert QC_PARAMETER_DEFAULTS["cc_fallback_dte_max"] == 30
+    assert QC_PARAMETER_DEFAULTS["cc_fallback_min_cost_basis_ratio"] == pytest.approx(0.85)
 
 
 def test_qc_parameter_fallbacks_track_runtime_defaults():
@@ -162,6 +178,11 @@ def test_qc_parameter_fallbacks_track_runtime_defaults():
     assert _QC_PARAMETER_FALLBACKS["symbol_assignment_base_cap"] == pytest.approx(0.36)
     assert _QC_PARAMETER_FALLBACKS["stock_inventory_base_cap"] == pytest.approx(0.24)
     assert _QC_PARAMETER_FALLBACKS["stock_inventory_block_threshold"] == pytest.approx(0.92)
+    assert _QC_PARAMETER_FALLBACKS["cc_fallback_delta_tolerance_1"] == pytest.approx(0.12)
+    assert _QC_PARAMETER_FALLBACKS["cc_fallback_delta_tolerance_2"] == pytest.approx(0.15)
+    assert _QC_PARAMETER_FALLBACKS["cc_fallback_dte_min"] == 14
+    assert _QC_PARAMETER_FALLBACKS["cc_fallback_dte_max"] == 30
+    assert _QC_PARAMETER_FALLBACKS["cc_fallback_min_cost_basis_ratio"] == pytest.approx(0.85)
 
 
 def test_strategy_init_sets_assigned_stock_fail_safe_defaults():
@@ -838,6 +859,18 @@ def test_generate_signal_for_symbol_uses_assigned_stock_repair_overrides(monkeyp
     assert signal.dte_min == 7
     assert signal.dte_max == 14
     assert signal.min_strike > 0
+    assert [tier["label"] for tier in signal.selection_tiers] == [
+        "primary",
+        "fallback_delta",
+        "fallback_dte",
+        "rescue_discount",
+    ]
+    assert signal.selection_tiers[-1]["min_strike"] == pytest.approx(
+        max(algo.Securities["NVDA"].Price * 1.01, 120.0 * 0.85)
+    )
+    assert signal.selection_tiers[-1]["delta_tolerance"] == pytest.approx(0.15)
+    assert signal.selection_tiers[-1]["dte_min"] == 14
+    assert signal.selection_tiers[-1]["dte_max"] == 30
     assert algo.debug_counters["assigned_repair_attempt"] == 1
 
 

@@ -182,6 +182,61 @@ def get_cc_optimization_params(
     return adjusted_delta, min_strike, log_message
 
 
+def build_cc_selection_tiers(
+    *,
+    underlying_price: float,
+    cost_basis: float,
+    primary_dte_min: int,
+    primary_dte_max: int,
+    primary_delta_tolerance: float,
+    primary_min_strike: Optional[float],
+    fallback_delta_tolerance_1: float,
+    fallback_delta_tolerance_2: float,
+    fallback_dte_min: int,
+    fallback_dte_max: int,
+    fallback_min_cost_basis_ratio: float,
+) -> List[Dict[str, float]]:
+    """Build a bounded fallback ladder for covered-call selection.
+
+    The ladder only applies when we already have a minimum-strike repair target.
+    Each successive tier relaxes one dimension while keeping the call OTM.
+    """
+    if cost_basis <= 0 or primary_min_strike is None:
+        return []
+
+    rescue_min_strike = max(underlying_price * 1.01, cost_basis * fallback_min_cost_basis_ratio)
+    return [
+        {
+            "label": "primary",
+            "delta_tolerance": primary_delta_tolerance,
+            "dte_min": primary_dte_min,
+            "dte_max": primary_dte_max,
+            "min_strike": primary_min_strike,
+        },
+        {
+            "label": "fallback_delta",
+            "delta_tolerance": fallback_delta_tolerance_1,
+            "dte_min": primary_dte_min,
+            "dte_max": primary_dte_max,
+            "min_strike": primary_min_strike,
+        },
+        {
+            "label": "fallback_dte",
+            "delta_tolerance": fallback_delta_tolerance_1,
+            "dte_min": fallback_dte_min,
+            "dte_max": fallback_dte_max,
+            "min_strike": primary_min_strike,
+        },
+        {
+            "label": "rescue_discount",
+            "delta_tolerance": fallback_delta_tolerance_2,
+            "dte_min": fallback_dte_min,
+            "dte_max": fallback_dte_max,
+            "min_strike": rescue_min_strike,
+        },
+    ]
+
+
 def build_position_data(
     pos_info: Dict,
     current_price: float,

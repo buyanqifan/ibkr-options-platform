@@ -13,6 +13,7 @@ from core.backtesting.pricing import OptionsPricer
 from core.backtesting.qc_parity import (
     BinbinGodParityConfig,
     QC_BINBIN_DEFAULTS,
+    build_cc_selection_tiers_qc,
     calculate_dynamic_max_positions_from_prices,
     calculate_put_quantity_qc,
     select_contract_from_lattice,
@@ -194,6 +195,26 @@ class BinbinGodStrategy(BaseStrategy):
         self.repair_call_dte_min = resolved_config.get("repair_call_dte_min", 7)
         self.repair_call_dte_max = resolved_config.get("repair_call_dte_max", 21)
         self.repair_call_max_discount_pct = resolved_config.get("repair_call_max_discount_pct", 0.08)
+        self.cc_fallback_delta_tolerance_1 = resolved_config.get(
+            "cc_fallback_delta_tolerance_1",
+            QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"],
+        )
+        self.cc_fallback_delta_tolerance_2 = resolved_config.get(
+            "cc_fallback_delta_tolerance_2",
+            QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"],
+        )
+        self.cc_fallback_dte_min = resolved_config.get(
+            "cc_fallback_dte_min",
+            QC_BINBIN_DEFAULTS["cc_fallback_dte_min"],
+        )
+        self.cc_fallback_dte_max = resolved_config.get(
+            "cc_fallback_dte_max",
+            QC_BINBIN_DEFAULTS["cc_fallback_dte_max"],
+        )
+        self.cc_fallback_min_cost_basis_ratio = resolved_config.get(
+            "cc_fallback_min_cost_basis_ratio",
+            QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"],
+        )
         self.defensive_put_roll_enabled = resolved_config.get("defensive_put_roll_enabled", True)
         self.defensive_put_roll_loss_pct = resolved_config.get("defensive_put_roll_loss_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"])
         self.defensive_put_roll_itm_buffer_pct = resolved_config.get("defensive_put_roll_itm_buffer_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"])
@@ -1333,6 +1354,15 @@ class BinbinGodStrategy(BaseStrategy):
         contract_metadata = None
         if self._is_qc_parity_enabled():
             min_strike = additional_constraints.get("min_strike")
+            selection_tiers = build_cc_selection_tiers_qc(
+                config=self.parity_config,
+                underlying_price=underlying_price,
+                cost_basis=cost_basis,
+                primary_dte_min=dte_window_min,
+                primary_dte_max=dte_window_max,
+                primary_delta_tolerance=0.05,
+                primary_min_strike=min_strike,
+            )
             selected_contract = select_contract_from_lattice(
                 symbol=symbol,
                 current_date=current_date,
@@ -1344,19 +1374,8 @@ class BinbinGodStrategy(BaseStrategy):
                 dte_max=dte_window_max,
                 delta_tolerance=0.05,
                 min_strike=min_strike,
+                selection_tiers=selection_tiers or None,
             )
-            if selected_contract is None and min_strike is not None:
-                selected_contract = select_contract_from_lattice(
-                    symbol=symbol,
-                    current_date=current_date,
-                    underlying_price=underlying_price,
-                    iv=iv,
-                    target_right="C",
-                    target_delta=abs(final_delta),
-                    dte_min=dte_window_min,
-                    dte_max=dte_window_max,
-                    delta_tolerance=0.05,
-                )
             if selected_contract is None:
                 self._record_event(
                     current_date,

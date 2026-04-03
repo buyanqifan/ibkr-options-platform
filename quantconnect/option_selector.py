@@ -1,5 +1,5 @@
 """Option selection functions for BinbinGod Strategy."""
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from AlgorithmImports import OptionRight
 from option_utils import filter_option_by_itm_protection, estimate_delta_from_moneyness, build_option_result
 from scoring import calculate_historical_vol
@@ -16,8 +16,17 @@ def bs_call_price(S, K, T, sigma):
     return BlackScholes.call_price(S, K, T, RISK_FREE_RATE, sigma)
 
 
-def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target_delta: float,
-                            dte_min: int, dte_max: int, delta_tolerance: float = 0.10, min_strike: float = None) -> Optional[Dict]:
+def _find_option_by_constraints(
+    algo,
+    symbol: str,
+    equity_symbol,
+    target_right,
+    target_delta: float,
+    dte_min: int,
+    dte_max: int,
+    delta_tolerance: float,
+    min_strike: float | None,
+) -> Optional[Dict]:
     underlying_price = algo.Securities[equity_symbol].Price
     option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
     if not option_chain:
@@ -61,3 +70,44 @@ def find_option_by_greeks(algo, symbol: str, equity_symbol, target_right, target
     
     suitable.sort(key=lambda x: x['delta_diff'])
     return suitable[0]
+
+
+def find_option_by_greeks(
+    algo,
+    symbol: str,
+    equity_symbol,
+    target_right,
+    target_delta: float,
+    dte_min: int,
+    dte_max: int,
+    delta_tolerance: float = 0.10,
+    min_strike: float = None,
+    selection_tiers: Optional[List[Dict]] = None,
+) -> Optional[Dict]:
+    tiers = selection_tiers or [
+        {
+            "label": "primary",
+            "delta_tolerance": delta_tolerance,
+            "dte_min": dte_min,
+            "dte_max": dte_max,
+            "min_strike": min_strike,
+        }
+    ]
+
+    for tier in tiers:
+        selected = _find_option_by_constraints(
+            algo,
+            symbol=symbol,
+            equity_symbol=equity_symbol,
+            target_right=target_right,
+            target_delta=target_delta,
+            dte_min=int(tier.get("dte_min", dte_min)),
+            dte_max=int(tier.get("dte_max", dte_max)),
+            delta_tolerance=float(tier.get("delta_tolerance", delta_tolerance)),
+            min_strike=tier.get("min_strike", min_strike),
+        )
+        if selected:
+            selected["selection_tier"] = str(tier.get("label", "primary"))
+            return selected
+
+    return None
