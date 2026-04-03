@@ -314,3 +314,39 @@ def test_rebalance_counts_cc_and_sp_signals(monkeypatch):
 
     assert algo.debug_counters["cc_signals"] == 1
     assert algo.debug_counters["sp_signals"] == 1
+
+
+def test_rebalance_retries_pending_cc_opens_before_new_put_signals(monkeypatch):
+    algo = _make_algo()
+    algo.max_positions = 2
+    algo.pending_open_orders = {
+        "cc-1": {
+            "signal": SimpleNamespace(action="SELL_CALL", symbol="NVDA", confidence=0.9),
+            "option_symbol": "NVDA 240621C01000000",
+            "quantity": -1,
+            "theoretical_price": 1.25,
+            "attempt_count": 0,
+            "target_right": "Call",
+            "selected": {"strike": 1000.0},
+        }
+    }
+
+    order = []
+    monkeypatch.setattr(qc_strategy_mixin, "calculate_dynamic_max_positions", lambda _algo: 2)
+    monkeypatch.setattr(qc_strategy_mixin, "check_position_management", lambda *_args, **_kwargs: order.append("manage"))
+    monkeypatch.setattr(
+        qc_strategy_mixin,
+        "retry_pending_open_orders",
+        lambda _algo, _finder: order.append("retry") or ["cc-1"],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        qc_strategy_mixin,
+        "generate_ml_signals",
+        lambda _algo: order.append("signals") or [SimpleNamespace(action="SELL_PUT", symbol="META", delta=0.3, confidence=0.9)],
+    )
+    monkeypatch.setattr(qc_strategy_mixin, "get_option_position_count", lambda _algo: 2)
+
+    qc_strategy_mixin.rebalance(algo)
+
+    assert order[:3] == ["manage", "retry", "signals"]
