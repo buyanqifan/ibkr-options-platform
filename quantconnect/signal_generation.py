@@ -128,10 +128,6 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
         if is_symbol_on_cooldown(algo, symbol):
             continue
         shares_held = get_shares_held(algo, symbol)
-        if shares_held > 0:
-            increment_debug_counter(algo, "sp_held_block")
-            algo.Log(f"SP_HELD_BLOCK:{symbol}:shares={shares_held}")
-            continue
         if getattr(algo, "stock_inventory_cap_enabled", True):
             equity = algo.equities.get(symbol)
             underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
@@ -139,10 +135,13 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
             portfolio_value = max(algo.Portfolio.TotalPortfolioValue, 0.0)
             inventory_cap = portfolio_value * getattr(algo, "stock_inventory_base_cap", 0.17)
             inventory_block_threshold = getattr(algo, "stock_inventory_block_threshold", 0.85)
-            if inventory_cap > 0 and stock_notional >= inventory_cap * inventory_block_threshold:
+            if shares_held > 0 and inventory_cap > 0 and stock_notional >= inventory_cap * inventory_block_threshold:
                 increment_debug_counter(algo, "sp_stock_block")
                 algo.Log(f"SP_STOCK_BLOCK:{symbol}:stock={stock_notional:.0f}:cap={inventory_cap:.0f}")
-                continue
+        if shares_held > 0:
+            increment_debug_counter(algo, "sp_held_block")
+            algo.Log(f"SP_HELD_BLOCK:{symbol}:shares={shares_held}")
+            continue
         bars = algo.price_history.get(symbol, [])
         equity = algo.equities.get(symbol)
         underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0

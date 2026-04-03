@@ -491,23 +491,14 @@ def test_generate_ml_signals_skips_extreme_high_vol_downtrend_put(monkeypatch):
 
 
 def test_generate_ml_signals_counts_holdings_and_put_blocks(monkeypatch):
-    class _InventoryBlockedShares:
-        def __gt__(self, other):
-            return False
-
-        def __mul__(self, other):
-            return 1_000_000.0
-
-        __rmul__ = __mul__
-
     bars = _make_bars(100.0, 30)
 
     monkeypatch.setattr(qc_signal_generation, "get_cost_basis", lambda *_args, **_kwargs: 0.0)
-    monkeypatch.setattr(qc_signal_generation, "get_symbols_with_holdings", lambda _algo, _pool: ["NVDA"])
+    monkeypatch.setattr(qc_signal_generation, "get_symbols_with_holdings", lambda _algo, _pool: ["AAPL"])
     monkeypatch.setattr(
         qc_signal_generation,
         "get_shares_held",
-        lambda _algo, symbol: {"NVDA": 100, "AAPL": _InventoryBlockedShares(), "TSLA": 0, "META": 0}[symbol],
+        lambda _algo, symbol: {"AAPL": 1000, "META": 0}[symbol],
     )
     monkeypatch.setattr(qc_signal_generation, "is_symbol_on_cooldown", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(
@@ -519,24 +510,20 @@ def test_generate_ml_signals_counts_holdings_and_put_blocks(monkeypatch):
     )
 
     algo = SimpleNamespace(
-        stock_pool=["NVDA", "AAPL", "TSLA", "META"],
+        stock_pool=["AAPL", "META"],
         weights={"iv_rank": 0.25, "technical": 0.30, "momentum": 0.25, "pe_score": 0.20},
         volatility_lookback=20,
         stock_inventory_cap_enabled=True,
         stock_inventory_base_cap=0.01,
         stock_inventory_block_threshold=0.85,
-        price_history={"TSLA": bars, "NVDA": bars, "AAPL": bars, "META": bars},
+        price_history={"AAPL": bars, "META": bars},
         equities={
-            "NVDA": SimpleNamespace(Symbol="NVDA"),
             "AAPL": SimpleNamespace(Symbol="AAPL"),
-            "TSLA": SimpleNamespace(Symbol="TSLA"),
             "META": SimpleNamespace(Symbol="META"),
         },
         Securities=_SecurityDict(
             {
-                "NVDA": SimpleNamespace(Price=100.0),
                 "AAPL": SimpleNamespace(Price=100.0),
-                "TSLA": SimpleNamespace(Price=100.0),
                 "META": SimpleNamespace(Price=100.0),
             }
         ),
