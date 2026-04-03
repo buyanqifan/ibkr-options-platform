@@ -53,6 +53,8 @@ if "AlgorithmImports" not in sys.modules:
 
 import strategy_mixin as qc_strategy_mixin
 
+_MISSING = object()
+
 
 def _make_algo():
     logs = []
@@ -69,9 +71,9 @@ def _make_algo():
     )
 
 
-def _make_summary_algo(debug_counters):
+def _make_summary_algo(debug_counters=_MISSING):
     logs = []
-    return SimpleNamespace(
+    algo = SimpleNamespace(
         initial_capital=100000.0,
         total_trades=12,
         winning_trades=9,
@@ -83,15 +85,24 @@ def _make_summary_algo(debug_counters):
             Values=[],
             ContainsKey=lambda _symbol: False,
         ),
-        debug_counters=debug_counters,
         ml_integration=SimpleNamespace(get_status_report=lambda: "STATUS"),
         Log=lambda msg: logs.append(msg),
         logs=logs,
     )
+    if debug_counters is not _MISSING:
+        algo.debug_counters = debug_counters
+    return algo
 
 
 def _summary_token_map(logs, prefix):
-    line = next((entry for entry in logs if entry.startswith(prefix)), None)
+    line = next(
+        (
+            entry
+            for entry in logs
+            if entry.split(maxsplit=1) and entry.split(maxsplit=1)[0] == prefix
+        ),
+        None,
+    )
 
     assert line is not None
 
@@ -127,9 +138,9 @@ def test_on_end_of_algorithm_emits_summary_lines(monkeypatch):
 
     qc_strategy_mixin.on_end_of_algorithm(algo)
 
-    flow_tokens = _summary_token_map(algo.logs, "SUMMARY_FLOW")
-    assignment_tokens = _summary_token_map(algo.logs, "SUMMARY_ASSIGNMENT")
-    stock_fill_tokens = _summary_token_map(algo.logs, "SUMMARY_STOCK_FILLS")
+    flow_tokens = _summary_token_map(algo.logs, "SUMMARY_FLOW:")
+    assignment_tokens = _summary_token_map(algo.logs, "SUMMARY_ASSIGNMENT:")
+    stock_fill_tokens = _summary_token_map(algo.logs, "SUMMARY_STOCK_FILLS:")
 
     assert flow_tokens["holdings_seen"] == "2"
     assert flow_tokens["cc_signals"] == "1"
@@ -161,9 +172,9 @@ def test_on_end_of_algorithm_defaults_missing_summary_counters_to_zero(monkeypat
 
     qc_strategy_mixin.on_end_of_algorithm(algo)
 
-    flow_tokens = _summary_token_map(algo.logs, "SUMMARY_FLOW")
-    assignment_tokens = _summary_token_map(algo.logs, "SUMMARY_ASSIGNMENT")
-    stock_fill_tokens = _summary_token_map(algo.logs, "SUMMARY_STOCK_FILLS")
+    flow_tokens = _summary_token_map(algo.logs, "SUMMARY_FLOW:")
+    assignment_tokens = _summary_token_map(algo.logs, "SUMMARY_ASSIGNMENT:")
+    stock_fill_tokens = _summary_token_map(algo.logs, "SUMMARY_STOCK_FILLS:")
 
     assert flow_tokens["holdings_seen"] == "2"
     assert flow_tokens["cc_signals"] == "0"
@@ -176,6 +187,34 @@ def test_on_end_of_algorithm_defaults_missing_summary_counters_to_zero(monkeypat
     assert assignment_tokens["assigned_repair_fail"] == "0"
     assert assignment_tokens["assigned_stock_exit"] == "0"
     assert stock_fill_tokens["stock_buy"] == "12"
+    assert stock_fill_tokens["stock_sell"] == "0"
+    assert stock_fill_tokens["sp_quality_block"] == "0"
+    assert stock_fill_tokens["sp_stock_block"] == "0"
+    assert stock_fill_tokens["sp_held_block"] == "0"
+
+
+def test_on_end_of_algorithm_defaults_all_summary_counters_to_zero_when_debug_counters_missing(monkeypatch):
+    monkeypatch.setattr(qc_strategy_mixin, "get_symbols_with_holdings", lambda *_args, **_kwargs: [])
+
+    algo = _make_summary_algo()
+
+    qc_strategy_mixin.on_end_of_algorithm(algo)
+
+    flow_tokens = _summary_token_map(algo.logs, "SUMMARY_FLOW:")
+    assignment_tokens = _summary_token_map(algo.logs, "SUMMARY_ASSIGNMENT:")
+    stock_fill_tokens = _summary_token_map(algo.logs, "SUMMARY_STOCK_FILLS:")
+
+    assert flow_tokens["holdings_seen"] == "0"
+    assert flow_tokens["cc_signals"] == "0"
+    assert flow_tokens["sp_signals"] == "0"
+    assert flow_tokens["put_block"] == "0"
+    assert flow_tokens["no_suitable_options"] == "0"
+    assert assignment_tokens["assigned_stock_track"] == "0"
+    assert assignment_tokens["immediate_cc"] == "0"
+    assert assignment_tokens["assigned_repair_attempt"] == "0"
+    assert assignment_tokens["assigned_repair_fail"] == "0"
+    assert assignment_tokens["assigned_stock_exit"] == "0"
+    assert stock_fill_tokens["stock_buy"] == "0"
     assert stock_fill_tokens["stock_sell"] == "0"
     assert stock_fill_tokens["sp_quality_block"] == "0"
     assert stock_fill_tokens["sp_stock_block"] == "0"
