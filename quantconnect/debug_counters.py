@@ -20,6 +20,9 @@ DEFAULT_DEBUG_COUNTERS = {
 
 
 def increment_debug_counter(algo, key, amount=1):
+    if key not in DEFAULT_DEBUG_COUNTERS:
+        raise ValueError(f"Unknown debug counter: {key}")
+
     counters = getattr(algo, "debug_counters", None)
     if not isinstance(counters, dict):
         counters = dict(DEFAULT_DEBUG_COUNTERS)

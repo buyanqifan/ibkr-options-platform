@@ -77,6 +77,7 @@ import main as qc_main
 import position_management as qc_position_management
 import strategy_init as qc_strategy_init
 import signal_generation as qc_signal_generation
+import debug_counters as qc_debug_counters
 from scoring import DEFAULT_WEIGHTS, score_single_stock
 
 
@@ -247,6 +248,34 @@ def test_init_state_initializes_debug_counters(monkeypatch):
     assert algo.debug_counters["holdings_seen"] == 0
     assert algo.debug_counters["cc_signals"] == 0
     assert algo.debug_counters["stock_buy"] == 0
+
+
+def test_increment_debug_counter_rejects_unknown_keys():
+    algo = SimpleNamespace()
+
+    with pytest.raises(ValueError, match=r"Unknown debug counter: typo_counter"):
+        qc_debug_counters.increment_debug_counter(algo, "typo_counter")
+
+    assert not hasattr(algo, "debug_counters")
+
+
+@pytest.mark.parametrize(
+    "initial_counters, expected_stock_buy",
+    [
+        (None, 1),
+        ({"stock_buy": 2}, 3),
+    ],
+)
+def test_increment_debug_counter_bootstraps_missing_or_partial_state(initial_counters, expected_stock_buy):
+    algo = SimpleNamespace()
+    if initial_counters is not None:
+        algo.debug_counters = dict(initial_counters)
+
+    qc_debug_counters.increment_debug_counter(algo, "stock_buy")
+
+    assert algo.debug_counters["stock_buy"] == expected_stock_buy
+    assert algo.debug_counters["holdings_seen"] == 0
+    assert algo.debug_counters["cc_signals"] == 0
 
 
 class _PortfolioDict(dict):
