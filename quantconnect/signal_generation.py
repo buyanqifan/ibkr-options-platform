@@ -8,7 +8,7 @@ No phase concept - signals are generated based on actual holdings:
 import math
 from typing import Dict, List, Optional
 from ml_integration import StrategySignal
-from signals import get_cc_optimization_params
+from signals import build_cc_selection_tiers, get_cc_optimization_params
 from scoring import score_single_stock
 from helpers import is_symbol_on_cooldown
 from debug_counters import increment_debug_counter
@@ -223,4 +223,18 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
         score = score_single_stock(symbol, bars, underlying_price, algo.weights)
         signal.ml_score_adjustment = (score.total_score - 50) / 100
         if cc_min_strike is not None: signal.min_strike = cc_min_strike
+        if strategy_phase == "CC":
+            signal.selection_tiers = build_cc_selection_tiers(
+                underlying_price=underlying_price,
+                cost_basis=cost_basis,
+                primary_dte_min=signal.dte_min,
+                primary_dte_max=signal.dte_max,
+                primary_delta_tolerance=0.08,
+                primary_min_strike=cc_min_strike,
+                fallback_delta_tolerance_1=float(getattr(algo, "cc_fallback_delta_tolerance_1", 0.12) or 0.12),
+                fallback_delta_tolerance_2=float(getattr(algo, "cc_fallback_delta_tolerance_2", 0.15) or 0.15),
+                fallback_dte_min=int(getattr(algo, "cc_fallback_dte_min", 14) or 14),
+                fallback_dte_max=int(getattr(algo, "cc_fallback_dte_max", 30) or 30),
+                fallback_min_cost_basis_ratio=float(getattr(algo, "cc_fallback_min_cost_basis_ratio", 0.85) or 0.85),
+            )
     return signal

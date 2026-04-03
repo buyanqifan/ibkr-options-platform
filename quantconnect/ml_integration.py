@@ -105,6 +105,8 @@ class StrategySignal:
     
     # CC optimization constraints (set when stock price below cost basis)
     min_strike: float = 0.0  # Minimum strike price for CC optimization
+    selection_tiers: List[Dict[str, Any]] = field(default_factory=list)
+    selection_tier: str = ""
 
 
 class BinbinGodMLIntegration:

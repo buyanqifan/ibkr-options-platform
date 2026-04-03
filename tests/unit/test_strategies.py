@@ -15,6 +15,7 @@ import pytest
 import numpy as np
 from datetime import datetime, timedelta
 
+import core.backtesting.strategies.binbin_god as binbin_god_module
 from core.backtesting.strategies.base import BaseStrategy, Signal
 from core.backtesting.strategies.sell_put import SellPutStrategy
 from core.backtesting.strategies.covered_call import CoveredCallStrategy
@@ -1196,7 +1197,7 @@ class TestBinbinGodStrategy:
         assert signals == []
 
     def test_repair_call_uses_shorter_dte_window(self, base_params):
-        """QC sync: repair call mode should compress DTE when stock is deeply below cost basis."""
+        """QC sync: repair call mode should start short and only widen via fallback ladder."""
         params = base_params.copy()
         params["symbol"] = "NVDA"
         params["repair_call_threshold_pct"] = 0.08
@@ -1220,7 +1221,60 @@ class TestBinbinGodStrategy:
         entry_date = datetime.strptime("2024-01-15", "%Y-%m-%d")
         expiry_date = datetime.strptime(signals[0].expiry, "%Y%m%d")
         dte = (expiry_date - entry_date).days
-        assert 7 <= dte <= 21
+        assert 7 <= dte <= 30
+        if dte > 21:
+            assert signals[0].metadata["selection_tier"] in {"fallback_dte", "rescue_discount"}
+
+    def test_qc_parity_call_ladder_uses_rescue_discount_tier(self, base_params, monkeypatch):
+        params = base_params.copy()
+        params["symbol"] = "NVDA"
+        strategy = BinbinGodStrategy(params)
+        strategy.stock_holding.add_shares("NVDA", 100, 150.0)
+
+        selection_calls = []
+
+        def fake_select_contract_from_lattice(**kwargs):
+            selection_calls.append(kwargs)
+            tiers = kwargs.get("selection_tiers") or []
+            if tiers and tiers[-1]["label"] == "rescue_discount":
+                return type(
+                    "SelectedContract",
+                    (),
+                    {
+                        "strike": 130.0,
+                        "expiry": datetime(2024, 2, 9),
+                        "dte": 25,
+                        "premium": 1.75,
+                        "delta": 0.33,
+                        "to_dict": lambda self: {"selection_tier": "rescue_discount", "strike": 130.0},
+                    },
+                )()
+            return None
+
+        monkeypatch.setattr(binbin_god_module, "select_contract_from_lattice", fake_select_contract_from_lattice)
+
+        signals = strategy._generate_backtest_call_signal(
+            symbol="NVDA",
+            current_date="2024-01-15",
+            underlying_price=120.0,
+            iv=0.25,
+            position_mgr=None,
+            shares_available=100,
+            cost_basis=150.0,
+        )
+
+        assert len(signals) == 1
+        assert signals[0].metadata["selection_tier"] == "rescue_discount"
+        assert [tier["label"] for tier in selection_calls[-1]["selection_tiers"]] == [
+            "primary",
+            "fallback_delta",
+            "fallback_dte",
+            "rescue_discount",
+        ]
+        assert selection_calls[-1]["selection_tiers"][-1]["dte_min"] == 14
+        assert selection_calls[-1]["selection_tiers"][-1]["dte_max"] == 30
+        assert selection_calls[-1]["selection_tiers"][-1]["delta_tolerance"] == pytest.approx(0.15)
+        assert selection_calls[-1]["selection_tiers"][-1]["min_strike"] == pytest.approx(127.5)
 
     def test_put_assignment_sets_symbol_cooldown(self, base_params):
         """QC sync: put assignment should add a symbol cooldown."""

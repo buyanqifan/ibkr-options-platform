@@ -33,6 +33,11 @@ _QC_PARAMETER_FALLBACKS = {
     "symbol_assignment_base_cap": 0.36,
     "stock_inventory_base_cap": 0.24,
     "stock_inventory_block_threshold": 0.92,
+    "cc_fallback_delta_tolerance_1": 0.12,
+    "cc_fallback_delta_tolerance_2": 0.15,
+    "cc_fallback_dte_min": 14,
+    "cc_fallback_dte_max": 30,
+    "cc_fallback_min_cost_basis_ratio": 0.85,
     "max_new_puts_per_day": 3,
     "defensive_put_roll_loss_pct": 85.0,
     "defensive_put_roll_itm_buffer_pct": 0.04,
@@ -165,6 +170,11 @@ QC_BINBIN_DEFAULTS = {
     "repair_call_dte_min": int(QC_PARAMETER_DEFAULTS["repair_call_dte_min"]),
     "repair_call_dte_max": int(QC_PARAMETER_DEFAULTS["repair_call_dte_max"]),
     "repair_call_max_discount_pct": float(QC_PARAMETER_DEFAULTS["repair_call_max_discount_pct"]),
+    "cc_fallback_delta_tolerance_1": float(QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_1"]),
+    "cc_fallback_delta_tolerance_2": float(QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_2"]),
+    "cc_fallback_dte_min": int(QC_PARAMETER_DEFAULTS["cc_fallback_dte_min"]),
+    "cc_fallback_dte_max": int(QC_PARAMETER_DEFAULTS["cc_fallback_dte_max"]),
+    "cc_fallback_min_cost_basis_ratio": float(QC_PARAMETER_DEFAULTS["cc_fallback_min_cost_basis_ratio"]),
     "defensive_put_roll_enabled": bool(QC_PARAMETER_DEFAULTS["defensive_put_roll_enabled"]),
     "defensive_put_roll_loss_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"]),
     "defensive_put_roll_itm_buffer_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_itm_buffer_pct"]),
@@ -246,6 +256,11 @@ class BinbinGodParityConfig:
     repair_call_dte_min: int = QC_BINBIN_DEFAULTS["repair_call_dte_min"]
     repair_call_dte_max: int = QC_BINBIN_DEFAULTS["repair_call_dte_max"]
     repair_call_max_discount_pct: float = QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]
+    cc_fallback_delta_tolerance_1: float = QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]
+    cc_fallback_delta_tolerance_2: float = QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]
+    cc_fallback_dte_min: int = QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]
+    cc_fallback_dte_max: int = QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]
+    cc_fallback_min_cost_basis_ratio: float = QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"]
     defensive_put_roll_enabled: bool = bool(QC_BINBIN_DEFAULTS["defensive_put_roll_enabled"])
     defensive_put_roll_loss_pct: float = QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]
     defensive_put_roll_itm_buffer_pct: float = QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]
@@ -352,6 +367,18 @@ class BinbinGodParityConfig:
             repair_call_dte_min=_to_int(merged.get("repair_call_dte_min", QC_BINBIN_DEFAULTS["repair_call_dte_min"]), QC_BINBIN_DEFAULTS["repair_call_dte_min"]),
             repair_call_dte_max=_to_int(merged.get("repair_call_dte_max", QC_BINBIN_DEFAULTS["repair_call_dte_max"]), QC_BINBIN_DEFAULTS["repair_call_dte_max"]),
             repair_call_max_discount_pct=_to_float(merged.get("repair_call_max_discount_pct", QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]), QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]),
+            cc_fallback_delta_tolerance_1=_to_float(merged.get("cc_fallback_delta_tolerance_1", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]), QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]),
+            cc_fallback_delta_tolerance_2=_to_float(merged.get("cc_fallback_delta_tolerance_2", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]), QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]),
+            cc_fallback_dte_min=_to_int(merged.get("cc_fallback_dte_min", QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]), QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]),
+            cc_fallback_dte_max=_to_int(merged.get("cc_fallback_dte_max", QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]), QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]),
+            cc_fallback_min_cost_basis_ratio=_clamp(
+                _to_float(
+                    merged.get("cc_fallback_min_cost_basis_ratio", QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"]),
+                    QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"],
+                ),
+                0.50,
+                1.0,
+            ),
             defensive_put_roll_enabled=bool(merged.get("defensive_put_roll_enabled", QC_BINBIN_DEFAULTS["defensive_put_roll_enabled"])),
             defensive_put_roll_loss_pct=_to_float(merged.get("defensive_put_roll_loss_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]), QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]),
             defensive_put_roll_itm_buffer_pct=_to_float(merged.get("defensive_put_roll_itm_buffer_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]), QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]),
@@ -419,6 +446,11 @@ class BinbinGodParityConfig:
                 "repair_call_dte_min": self.repair_call_dte_min,
                 "repair_call_dte_max": self.repair_call_dte_max,
                 "repair_call_max_discount_pct": self.repair_call_max_discount_pct,
+                "cc_fallback_delta_tolerance_1": self.cc_fallback_delta_tolerance_1,
+                "cc_fallback_delta_tolerance_2": self.cc_fallback_delta_tolerance_2,
+                "cc_fallback_dte_min": self.cc_fallback_dte_min,
+                "cc_fallback_dte_max": self.cc_fallback_dte_max,
+                "cc_fallback_min_cost_basis_ratio": self.cc_fallback_min_cost_basis_ratio,
                 "defensive_put_roll_enabled": self.defensive_put_roll_enabled,
                 "defensive_put_roll_loss_pct": self.defensive_put_roll_loss_pct,
                 "defensive_put_roll_itm_buffer_pct": self.defensive_put_roll_itm_buffer_pct,
@@ -471,6 +503,7 @@ class LatticeContract:
     delta_diff: float
     bid: float
     ask: float
+    selection_tier: str = "primary"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -485,6 +518,7 @@ class LatticeContract:
             "delta_diff": self.delta_diff,
             "bid": self.bid,
             "ask": self.ask,
+            "selection_tier": self.selection_tier,
         }
 
 
@@ -520,6 +554,55 @@ def generate_weekly_expiries(current_date: str | datetime | date, dte_min: int, 
         if candidate.weekday() == 4:
             expiries.append(candidate.replace(hour=0, minute=0, second=0, microsecond=0))
     return expiries
+
+
+def build_cc_selection_tiers_qc(
+    *,
+    config: BinbinGodParityConfig,
+    underlying_price: float,
+    cost_basis: float,
+    primary_dte_min: int,
+    primary_dte_max: int,
+    primary_delta_tolerance: float,
+    primary_min_strike: float | None,
+) -> List[Dict[str, float]]:
+    if cost_basis <= 0 or primary_min_strike is None:
+        return []
+
+    rescue_min_strike = max(
+        underlying_price * 1.01,
+        cost_basis * config.cc_fallback_min_cost_basis_ratio,
+    )
+    return [
+        {
+            "label": "primary",
+            "delta_tolerance": primary_delta_tolerance,
+            "dte_min": primary_dte_min,
+            "dte_max": primary_dte_max,
+            "min_strike": primary_min_strike,
+        },
+        {
+            "label": "fallback_delta",
+            "delta_tolerance": config.cc_fallback_delta_tolerance_1,
+            "dte_min": primary_dte_min,
+            "dte_max": primary_dte_max,
+            "min_strike": primary_min_strike,
+        },
+        {
+            "label": "fallback_dte",
+            "delta_tolerance": config.cc_fallback_delta_tolerance_1,
+            "dte_min": config.cc_fallback_dte_min,
+            "dte_max": config.cc_fallback_dte_max,
+            "min_strike": primary_min_strike,
+        },
+        {
+            "label": "rescue_discount",
+            "delta_tolerance": config.cc_fallback_delta_tolerance_2,
+            "dte_min": config.cc_fallback_dte_min,
+            "dte_max": config.cc_fallback_dte_max,
+            "min_strike": rescue_min_strike,
+        },
+    ]
 
 
 def filter_option_by_itm_protection(strike: float, underlying_price: float, right: str, itm_buffer_pct: float = 0.01) -> bool:
@@ -615,20 +698,34 @@ def select_contract_from_lattice(
     dte_max: int,
     delta_tolerance: float = 0.05,
     min_strike: float | None = None,
+    selection_tiers: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[LatticeContract]:
-    contracts = build_contract_lattice(
-        symbol=symbol,
-        current_date=current_date,
-        underlying_price=underlying_price,
-        iv=iv,
-        target_right=target_right,
-        target_delta=target_delta,
-        dte_min=dte_min,
-        dte_max=dte_max,
-        delta_tolerance=delta_tolerance,
-        min_strike=min_strike,
-    )
-    return contracts[0] if contracts else None
+    tiers = selection_tiers or [
+        {
+            "label": "primary",
+            "delta_tolerance": delta_tolerance,
+            "dte_min": dte_min,
+            "dte_max": dte_max,
+            "min_strike": min_strike,
+        }
+    ]
+    for tier in tiers:
+        contracts = build_contract_lattice(
+            symbol=symbol,
+            current_date=current_date,
+            underlying_price=underlying_price,
+            iv=iv,
+            target_right=target_right,
+            target_delta=target_delta,
+            dte_min=int(tier.get("dte_min", dte_min)),
+            dte_max=int(tier.get("dte_max", dte_max)),
+            delta_tolerance=float(tier.get("delta_tolerance", delta_tolerance)),
+            min_strike=tier.get("min_strike", min_strike),
+        )
+        if contracts:
+            contracts[0].selection_tier = str(tier.get("label", "primary"))
+            return contracts[0]
+    return None
 
 
 def calculate_dynamic_max_positions_from_prices(

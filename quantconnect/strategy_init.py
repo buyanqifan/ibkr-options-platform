@@ -97,6 +97,15 @@ def init_parameters(algo):
     algo.repair_call_dte_min = _as_int(_get_param(algo, "repair_call_dte_min", 7), 7)
     algo.repair_call_dte_max = _as_int(_get_param(algo, "repair_call_dte_max", 21), 21)
     algo.repair_call_max_discount_pct = _as_float(_get_param(algo, "repair_call_max_discount_pct", 0.08), 0.08)
+    algo.cc_fallback_delta_tolerance_1 = _as_float(_get_param(algo, "cc_fallback_delta_tolerance_1", 0.12), 0.12)
+    algo.cc_fallback_delta_tolerance_2 = _as_float(_get_param(algo, "cc_fallback_delta_tolerance_2", 0.15), 0.15)
+    algo.cc_fallback_dte_min = _as_int(_get_param(algo, "cc_fallback_dte_min", 14), 14)
+    algo.cc_fallback_dte_max = _as_int(_get_param(algo, "cc_fallback_dte_max", 30), 30)
+    algo.cc_fallback_min_cost_basis_ratio = _clamp(
+        _as_float(_get_param(algo, "cc_fallback_min_cost_basis_ratio", 0.85), 0.85),
+        0.50,
+        1.0,
+    )
     algo.defensive_put_roll_enabled = _as_bool(_get_param(algo, "defensive_put_roll_enabled", True), True)
     algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 85), 85.0)
     algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.04), 0.04)
@@ -236,6 +245,11 @@ def log_effective_parameters(algo):
         f"stock_inventory_block_threshold={algo.stock_inventory_block_threshold}, "
         f"max_new_puts_per_day={algo.max_new_puts_per_day}, "
         f"repair_call_delta={algo.repair_call_delta}, "
+        f"cc_fallback_delta_tolerance_1={algo.cc_fallback_delta_tolerance_1}, "
+        f"cc_fallback_delta_tolerance_2={algo.cc_fallback_delta_tolerance_2}, "
+        f"cc_fallback_dte_min={algo.cc_fallback_dte_min}, "
+        f"cc_fallback_dte_max={algo.cc_fallback_dte_max}, "
+        f"cc_fallback_min_cost_basis_ratio={algo.cc_fallback_min_cost_basis_ratio}, "
         f"stop_loss_pct={algo.stop_loss_pct}, "
         f"ml_enabled={algo.ml_enabled}, "
         f"ml_min_confidence={algo.ml_min_confidence}, "
