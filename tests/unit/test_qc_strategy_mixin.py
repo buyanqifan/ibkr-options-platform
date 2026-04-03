@@ -295,3 +295,22 @@ def test_rebalance_executes_all_eligible_cc_signals_before_put_gating(monkeypatc
 
     assert executed == [("SELL_CALL", "NVDA"), ("SELL_CALL", "META")]
     assert not any(action == "SELL_PUT" for action, _symbol in executed)
+
+
+def test_rebalance_counts_cc_and_sp_signals(monkeypatch):
+    algo = _make_algo()
+    cc_signal = SimpleNamespace(action="SELL_CALL", symbol="NVDA", delta=0.35, confidence=0.9, ml_score_adjustment=0.0)
+    sp_signal = SimpleNamespace(action="SELL_PUT", symbol="META", delta=0.30, confidence=0.9, ml_score_adjustment=0.0)
+
+    monkeypatch.setattr(qc_strategy_mixin, "calculate_dynamic_max_positions", lambda _algo: 3)
+    monkeypatch.setattr(qc_strategy_mixin, "check_position_management", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_strategy_mixin, "generate_ml_signals", lambda _algo: [cc_signal, sp_signal])
+
+    open_counts = iter([0, 0, 0])
+    monkeypatch.setattr(qc_strategy_mixin, "get_option_position_count", lambda _algo: next(open_counts))
+    monkeypatch.setattr(qc_strategy_mixin, "execute_signal", lambda *_args, **_kwargs: None)
+
+    qc_strategy_mixin.rebalance(algo)
+
+    assert algo.debug_counters["cc_signals"] == 1
+    assert algo.debug_counters["sp_signals"] == 1

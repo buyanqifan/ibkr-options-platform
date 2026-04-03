@@ -7,6 +7,7 @@ from AlgorithmImports import OptionRight, SecurityType
 from option_utils import calculate_dte
 from execution import record_trade, execute_signal
 from signals import calculate_pnl_metrics
+from debug_counters import increment_debug_counter
 from qc_portfolio import (
     get_option_positions, get_shares_held, get_cost_basis,
     get_position_metadata, remove_position_metadata, get_symbols_with_holdings
@@ -59,6 +60,7 @@ def _track_assigned_stock(algo, symbol: str, assignment_cost_basis: float):
         "last_repair_attempt": None,
         "force_exit_triggered": False,
     }
+    increment_debug_counter(algo, "assigned_stock_track")
     algo.Log(f"ASSIGNED_STOCK_TRACK:{symbol}:cost_basis={assignment_cost_basis:.2f}")
 
 
@@ -70,6 +72,7 @@ def try_sell_cc_immediately(algo, symbol):
     2. Margin check happens before next rebalance
     3. If we don't sell CC immediately, stock may be liquidated
     """
+    increment_debug_counter(algo, "immediate_cc")
     algo.Log(f"IMMEDIATE_CC: Attempting to sell CC for {symbol} after Put assignment")
     
     portfolio_state = get_portfolio_state(algo)

@@ -317,7 +317,15 @@ def _make_assignment_tracking_algo():
     option_symbol = "NVDA_OPT"
     equity_symbol = "NVDA"
     portfolio = _PortfolioState(
-        {equity_symbol: SimpleNamespace(Quantity=100)},
+        {
+            equity_symbol: SimpleNamespace(
+                Quantity=100,
+                Invested=True,
+                HoldingsValue=12000.0,
+                AveragePrice=120.0,
+                Symbol=equity_symbol,
+            )
+        },
         total_portfolio_value=100000.0,
         cash=50000.0,
         margin_remaining=40000.0,
@@ -325,6 +333,7 @@ def _make_assignment_tracking_algo():
     )
     return SimpleNamespace(
         Time=datetime(2024, 2, 1),
+        stock_pool=["NVDA"],
         equities={"NVDA": SimpleNamespace(Symbol=equity_symbol)},
         Securities={option_symbol: SimpleNamespace(IsDelisted=False, Price=0)},
         Portfolio=portfolio,
@@ -478,6 +487,76 @@ def test_generate_ml_signals_skips_extreme_high_vol_downtrend_put(monkeypatch):
     signals = qc_signal_generation.generate_ml_signals(algo)
 
     assert signals == []
+    assert algo.debug_counters["sp_quality_block"] == 1
+
+
+def test_generate_ml_signals_counts_holdings_and_put_blocks(monkeypatch):
+    class _InventoryBlockedShares:
+        def __gt__(self, other):
+            return False
+
+        def __mul__(self, other):
+            return 1_000_000.0
+
+        __rmul__ = __mul__
+
+    bars = _make_bars(100.0, 30)
+
+    monkeypatch.setattr(qc_signal_generation, "get_cost_basis", lambda *_args, **_kwargs: 0.0)
+    monkeypatch.setattr(qc_signal_generation, "get_symbols_with_holdings", lambda _algo, _pool: ["NVDA"])
+    monkeypatch.setattr(
+        qc_signal_generation,
+        "get_shares_held",
+        lambda _algo, symbol: {"NVDA": 100, "AAPL": _InventoryBlockedShares(), "TSLA": 0, "META": 0}[symbol],
+    )
+    monkeypatch.setattr(qc_signal_generation, "is_symbol_on_cooldown", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        qc_signal_generation,
+        "generate_signal_for_symbol",
+        lambda _algo, symbol, strategy_phase, portfolio_state: SimpleNamespace(action="SELL_PUT", symbol=symbol)
+        if strategy_phase == "SP" and symbol == "META"
+        else None,
+    )
+
+    algo = SimpleNamespace(
+        stock_pool=["NVDA", "AAPL", "TSLA", "META"],
+        weights={"iv_rank": 0.25, "technical": 0.30, "momentum": 0.25, "pe_score": 0.20},
+        volatility_lookback=20,
+        stock_inventory_cap_enabled=True,
+        stock_inventory_base_cap=0.01,
+        stock_inventory_block_threshold=0.85,
+        price_history={"TSLA": bars, "NVDA": bars, "AAPL": bars, "META": bars},
+        equities={
+            "NVDA": SimpleNamespace(Symbol="NVDA"),
+            "AAPL": SimpleNamespace(Symbol="AAPL"),
+            "TSLA": SimpleNamespace(Symbol="TSLA"),
+            "META": SimpleNamespace(Symbol="META"),
+        },
+        Securities=_SecurityDict(
+            {
+                "NVDA": SimpleNamespace(Price=100.0),
+                "AAPL": SimpleNamespace(Price=100.0),
+                "TSLA": SimpleNamespace(Price=100.0),
+                "META": SimpleNamespace(Price=100.0),
+            }
+        ),
+        Portfolio=SimpleNamespace(
+            TotalPortfolioValue=100000.0,
+            Cash=100000.0,
+            MarginRemaining=100000.0,
+            TotalMarginUsed=0.0,
+            Values=[],
+        ),
+        initial_capital=100000.0,
+        Log=lambda *_args, **_kwargs: None,
+    )
+
+    signals = qc_signal_generation.generate_ml_signals(algo)
+
+    assert [signal.symbol for signal in signals] == ["META"]
+    assert algo.debug_counters["holdings_seen"] == 1
+    assert algo.debug_counters["sp_held_block"] == 1
+    assert algo.debug_counters["sp_stock_block"] == 1
 
 
 def test_check_expired_options_tracks_put_assignment_state(monkeypatch):
@@ -509,7 +588,19 @@ def test_check_expired_options_tracks_put_assignment_state(monkeypatch):
     monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(qc_expiry, "record_trade", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        qc_expiry,
+        "generate_signal_for_symbol",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            action="SELL_CALL",
+            symbol="NVDA",
+            delta=0.30,
+            confidence=0.9,
+            ml_score_adjustment=0.0,
+        ),
+    )
+    monkeypatch.setattr(qc_expiry, "execute_signal", lambda *_args, **_kwargs: None)
+    algo.ml_min_confidence = 0.4
     algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked_updates.append(payload))
 
     qc_expiry.check_expired_options(algo)
@@ -519,6 +610,8 @@ def test_check_expired_options_tracks_put_assignment_state(monkeypatch):
     assert state["repair_failures"] == 0
     assert state["assignment_cost_basis"] == pytest.approx(120.0)
     assert state["force_exit_triggered"] is False
+    assert algo.debug_counters["assigned_stock_track"] == 1
+    assert algo.debug_counters["immediate_cc"] == 1
     assert tracked_updates and tracked_updates[0]["assigned"] is True
 
 
@@ -545,7 +638,19 @@ def test_handle_assignment_order_event_tracks_put_assignment_immediately(monkeyp
     monkeypatch.setattr(qc_expiry, "remove_position_metadata", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(qc_expiry, "record_trade", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(qc_expiry, "set_symbol_cooldown", lambda *_args, **_kwargs: cooldown_calls.append(_args[1]))
-    monkeypatch.setattr(qc_expiry, "try_sell_cc_immediately", lambda *_args, **_kwargs: immediate_cc_calls.append(_args[1]))
+    monkeypatch.setattr(
+        qc_expiry,
+        "generate_signal_for_symbol",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            action="SELL_CALL",
+            symbol="NVDA",
+            delta=0.30,
+            confidence=0.9,
+            ml_score_adjustment=0.0,
+        ),
+    )
+    monkeypatch.setattr(qc_expiry, "execute_signal", lambda *_args, **_kwargs: None)
+    algo.ml_min_confidence = 0.4
     algo.ml_integration = SimpleNamespace(update_performance=lambda payload: tracked_updates.append(payload))
 
     qc_expiry.handle_assignment_order_event(algo, order_event)
@@ -555,7 +660,8 @@ def test_handle_assignment_order_event_tracks_put_assignment_immediately(monkeyp
     assert state["assignment_cost_basis"] == pytest.approx(120.0)
     assert state["repair_failures"] == 0
     assert cooldown_calls == ["NVDA"]
-    assert immediate_cc_calls == ["NVDA"]
+    assert algo.debug_counters["assigned_stock_track"] == 1
+    assert algo.debug_counters["immediate_cc"] == 1
     assert tracked_updates and tracked_updates[0]["assigned"] is True
 
 
@@ -640,6 +746,23 @@ def test_on_order_event_routes_assignment_events_to_expiry_handler(monkeypatch):
     assert calls == {"order": 1, "assignment": 1}
 
 
+def test_on_order_event_counts_filled_equity_buys_and_sells(monkeypatch):
+    algo = SimpleNamespace(Log=lambda *_args, **_kwargs: None, debug_counters={})
+
+    monkeypatch.setattr(qc_main, "handle_order_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_main, "handle_assignment_order_event", lambda *_args, **_kwargs: None)
+
+    equity_symbol = SimpleNamespace(SecurityType="Equity")
+    buy_event = SimpleNamespace(Status="Filled", Symbol=equity_symbol, FillQuantity=100, FillPrice=123.45, IsAssignment=False)
+    sell_event = SimpleNamespace(Status="Filled", Symbol=equity_symbol, FillQuantity=-100, FillPrice=125.67, IsAssignment=False)
+
+    qc_main.BinbinGodStrategy.OnOrderEvent(algo, buy_event)
+    qc_main.BinbinGodStrategy.OnOrderEvent(algo, sell_event)
+
+    assert algo.debug_counters["stock_buy"] == 1
+    assert algo.debug_counters["stock_sell"] == 1
+
+
 def test_generate_signal_for_symbol_uses_assigned_stock_repair_overrides(monkeypatch):
     algo = _make_assigned_stock_algo(days_held=2, drawdown_pct=0.02)
 
@@ -656,6 +779,7 @@ def test_generate_signal_for_symbol_uses_assigned_stock_repair_overrides(monkeyp
     assert signal.dte_min == 7
     assert signal.dte_max == 14
     assert signal.min_strike > 0
+    assert algo.debug_counters["assigned_repair_attempt"] == 1
 
 
 def test_assignment_fail_safe_skips_when_call_is_already_covering_shares(monkeypatch):
@@ -682,6 +806,8 @@ def test_assignment_fail_safe_force_exits_stock_after_repeated_failures(monkeypa
 
     assert algo.market_orders == [("NVDA", -100)]
     assert algo.assigned_stock_state["NVDA"]["force_exit_triggered"] is True
+    assert algo.debug_counters["assigned_repair_fail"] == 1
+    assert algo.debug_counters["assigned_stock_exit"] == 1
 
 
 def test_assignment_fail_safe_respects_min_days_held(monkeypatch):

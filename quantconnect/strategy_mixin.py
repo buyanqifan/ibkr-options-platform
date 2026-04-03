@@ -64,6 +64,7 @@ def rebalance(algo):
     # Execute all eligible CC signals first (if we have stock, we should sell calls)
     if cc_signals:
         for cc_signal in sorted(cc_signals, key=lambda x: x.confidence, reverse=True):
+            increment_debug_counter(algo, "cc_signals")
             algo.Log(f"CC_SIGNAL: {cc_signal.symbol} delta={cc_signal.delta:.2f}")
             if cc_signal.confidence >= algo.ml_min_confidence:
                 execute_signal(algo, cc_signal, find_option_by_greeks)
@@ -76,6 +77,7 @@ def rebalance(algo):
 
     available_slots = max(0, algo.max_positions - open_count)
     for sp_signal in _select_sp_candidates_for_execution(algo, sp_signals, available_slots):
+        increment_debug_counter(algo, "sp_signals")
         algo.Log(f"SP_SIGNAL: {sp_signal.symbol} delta={sp_signal.delta:.2f}")
         execute_signal(algo, sp_signal, find_option_by_greeks)
         open_count = get_option_position_count(algo)

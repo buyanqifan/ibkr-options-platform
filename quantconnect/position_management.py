@@ -6,6 +6,7 @@ from option_utils import should_roll_position, calculate_dte, should_defensively
 from signals import build_position_data, calculate_pnl_metrics
 from execution import make_signal, execute_roll, execute_close
 from helpers import set_symbol_cooldown
+from debug_counters import increment_debug_counter
 from qc_portfolio import get_option_positions, get_shares_held, get_call_position_contracts
 
 
@@ -62,6 +63,7 @@ def _manage_assigned_stock_fail_safe(algo):
 
         state["repair_failures"] = int(state.get("repair_failures", 0)) + 1
         state["last_repair_attempt"] = algo.Time
+        increment_debug_counter(algo, "assigned_repair_fail")
         algo.Log(
             f"ASSIGNED_REPAIR_FAIL:{symbol}:failures={state['repair_failures']}:"
             f"drawdown={drawdown_pct:.1%}:days={days_held}"
@@ -77,6 +79,7 @@ def _manage_assigned_stock_fail_safe(algo):
 
         algo.MarketOrder(equity.Symbol, -shares_to_sell)
         state["force_exit_triggered"] = True
+        increment_debug_counter(algo, "assigned_stock_exit")
         algo.Log(
             f"ASSIGNED_STOCK_EXIT:{symbol}:shares={shares_to_sell}:"
             f"drawdown={drawdown_pct:.1%}:days={days_held}"
