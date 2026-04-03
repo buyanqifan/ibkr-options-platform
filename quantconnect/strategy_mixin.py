@@ -1,23 +1,6 @@
 """Strategy mixin for BinbinGod - Main entry point coordinating all modules."""
 
-DEFAULT_DEBUG_COUNTERS = {
-    "holdings_seen": 0,
-    "cc_signals": 0,
-    "sp_signals": 0,
-    "put_block": 0,
-    "sp_quality_block": 0,
-    "sp_stock_block": 0,
-    "sp_held_block": 0,
-    "assigned_stock_track": 0,
-    "assigned_repair_attempt": 0,
-    "assigned_repair_fail": 0,
-    "assigned_stock_exit": 0,
-    "immediate_cc": 0,
-    "stock_buy": 0,
-    "stock_sell": 0,
-    "no_suitable_options": 0,
-}
-
+from debug_counters import DEFAULT_DEBUG_COUNTERS, increment_debug_counter
 from signals import select_best_signal_with_memory
 from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events
 from signal_generation import generate_ml_signals
@@ -26,18 +9,6 @@ from position_management import check_position_management
 from expiry import check_expired_options, update_ml_models
 from option_selector import find_option_by_greeks
 from qc_portfolio import get_option_position_count, get_symbols_with_holdings
-
-
-def increment_debug_counter(algo, key, amount=1):
-    counters = getattr(algo, "debug_counters", None)
-    if not isinstance(counters, dict):
-        counters = dict(DEFAULT_DEBUG_COUNTERS)
-        setattr(algo, "debug_counters", counters)
-    else:
-        for counter_key, default_value in DEFAULT_DEBUG_COUNTERS.items():
-            counters.setdefault(counter_key, default_value)
-
-    counters[key] = counters.get(key, 0) + amount
 
 
 def _select_sp_candidates_for_execution(algo, sp_signals, available_slots: int):
