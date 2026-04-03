@@ -7,6 +7,7 @@ from ml_integration import StrategySignal
 from option_utils import calculate_dte, calculate_historical_vol
 from signals import calculate_pnl_metrics, calculate_position_risk
 from option_pricing import BlackScholes
+from debug_counters import increment_debug_counter
 from qc_portfolio import (
     get_option_position_count, get_shares_held, get_call_position_contracts,
     get_position_for_symbol, save_position_metadata, remove_position_metadata,
@@ -292,6 +293,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         delta_tolerance=0.08, min_strike=min_strike if min_strike > 0 else None)
     if not selected:
         algo.Log(f"No suitable options for {signal.symbol} delta ~{target_delta:.2f}")
+        increment_debug_counter(algo, "no_suitable_options")
         return
     current_positions = get_option_position_count(algo)
     if target_right == OptionRight.Put:

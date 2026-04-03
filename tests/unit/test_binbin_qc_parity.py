@@ -278,6 +278,29 @@ def test_increment_debug_counter_bootstraps_missing_or_partial_state(initial_cou
     assert algo.debug_counters["cc_signals"] == 0
 
 
+def test_execute_signal_increments_no_suitable_options_when_no_contract_is_found():
+    logs = []
+    algo = SimpleNamespace(
+        equities={"NVDA": SimpleNamespace(Symbol="NVDA")},
+        Securities={"NVDA": SimpleNamespace(Price=120.0)},
+        debug_counters=dict(qc_debug_counters.DEFAULT_DEBUG_COUNTERS),
+        Log=lambda msg: logs.append(msg),
+    )
+
+    signal = SimpleNamespace(
+        action="SELL_PUT",
+        symbol="NVDA",
+        delta=0.30,
+        dte_min=21,
+        dte_max=60,
+    )
+
+    qc_execution.execute_signal(algo, signal, lambda *_args, **_kwargs: None)
+
+    assert algo.debug_counters["no_suitable_options"] == 1
+    assert any("No suitable options for NVDA" in entry for entry in logs)
+
+
 class _PortfolioDict(dict):
     @property
     def Values(self):

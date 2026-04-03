@@ -11,6 +11,28 @@ from option_selector import find_option_by_greeks
 from qc_portfolio import get_option_position_count, get_symbols_with_holdings
 
 
+_SUMMARY_COUNTER_GROUPS = (
+    (
+        "SUMMARY_FLOW:",
+        ("holdings_seen", "cc_signals", "sp_signals", "put_block", "no_suitable_options"),
+    ),
+    (
+        "SUMMARY_ASSIGNMENT:",
+        (
+            "assigned_stock_track",
+            "immediate_cc",
+            "assigned_repair_attempt",
+            "assigned_repair_fail",
+            "assigned_stock_exit",
+        ),
+    ),
+    (
+        "SUMMARY_STOCK_FILLS:",
+        ("stock_buy", "stock_sell", "sp_quality_block", "sp_stock_block", "sp_held_block"),
+    ),
+)
+
+
 def _select_sp_candidates_for_execution(algo, sp_signals, available_slots: int):
     """Select up to N distinct SP signals, preserving memory bias for the first pick."""
     if not sp_signals or available_slots <= 0:
@@ -110,6 +132,12 @@ def on_end_of_algorithm(algo):
     if held_symbols:
         holdings_info = {s: algo.Portfolio[algo.equities[s].Symbol].Quantity for s in held_symbols if algo.equities.get(s) and algo.Portfolio.ContainsKey(algo.equities[s].Symbol)}
         algo.Log(f"Holdings: {holdings_info}")
+    counters = dict(DEFAULT_DEBUG_COUNTERS)
+    existing_counters = getattr(algo, "debug_counters", None)
+    if isinstance(existing_counters, dict):
+        counters.update(existing_counters)
+    for prefix, keys in _SUMMARY_COUNTER_GROUPS:
+        algo.Log(f"{prefix} " + " ".join(f"{key}={counters.get(key, 0)}" for key in keys))
     algo.Log("")
     algo.Log(algo.ml_integration.get_status_report())
     algo.Log("=" * 60)
