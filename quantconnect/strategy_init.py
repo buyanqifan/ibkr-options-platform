@@ -189,7 +189,10 @@ def init_state(algo):
     # No phase concept - strategy is holdings-driven
     # Use QC Portfolio for position tracking (no manual dict needed)
     # position_metadata tracks entry Greeks (QC doesn't have this)
+    from debug_counters import DEFAULT_DEBUG_COUNTERS
+
     init_position_tracking(algo)
+    algo.debug_counters = dict(DEFAULT_DEBUG_COUNTERS)
     algo.pending_order_metadata = {}
     algo.pending_close_orders = {}
     algo.pending_roll_orders = {}

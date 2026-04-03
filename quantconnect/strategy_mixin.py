@@ -1,4 +1,6 @@
 """Strategy mixin for BinbinGod - Main entry point coordinating all modules."""
+
+from debug_counters import DEFAULT_DEBUG_COUNTERS, increment_debug_counter
 from signals import select_best_signal_with_memory
 from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events
 from signal_generation import generate_ml_signals
@@ -7,6 +9,28 @@ from position_management import check_position_management
 from expiry import check_expired_options, update_ml_models
 from option_selector import find_option_by_greeks
 from qc_portfolio import get_option_position_count, get_symbols_with_holdings
+
+
+_SUMMARY_COUNTER_GROUPS = (
+    (
+        "SUMMARY_FLOW:",
+        ("holdings_seen", "cc_signals", "sp_signals", "put_block", "no_suitable_options"),
+    ),
+    (
+        "SUMMARY_ASSIGNMENT:",
+        (
+            "assigned_stock_track",
+            "immediate_cc",
+            "assigned_repair_attempt",
+            "assigned_repair_fail",
+            "assigned_stock_exit",
+        ),
+    ),
+    (
+        "SUMMARY_STOCK_FILLS:",
+        ("stock_buy", "stock_sell", "sp_quality_block", "sp_stock_block", "sp_held_block"),
+    ),
+)
 
 
 def _select_sp_candidates_for_execution(algo, sp_signals, available_slots: int):
@@ -62,6 +86,7 @@ def rebalance(algo):
     # Execute all eligible CC signals first (if we have stock, we should sell calls)
     if cc_signals:
         for cc_signal in sorted(cc_signals, key=lambda x: x.confidence, reverse=True):
+            increment_debug_counter(algo, "cc_signals")
             algo.Log(f"CC_SIGNAL: {cc_signal.symbol} delta={cc_signal.delta:.2f}")
             if cc_signal.confidence >= algo.ml_min_confidence:
                 execute_signal(algo, cc_signal, find_option_by_greeks)
@@ -74,6 +99,7 @@ def rebalance(algo):
 
     available_slots = max(0, algo.max_positions - open_count)
     for sp_signal in _select_sp_candidates_for_execution(algo, sp_signals, available_slots):
+        increment_debug_counter(algo, "sp_signals")
         algo.Log(f"SP_SIGNAL: {sp_signal.symbol} delta={sp_signal.delta:.2f}")
         execute_signal(algo, sp_signal, find_option_by_greeks)
         open_count = get_option_position_count(algo)
@@ -106,6 +132,12 @@ def on_end_of_algorithm(algo):
     if held_symbols:
         holdings_info = {s: algo.Portfolio[algo.equities[s].Symbol].Quantity for s in held_symbols if algo.equities.get(s) and algo.Portfolio.ContainsKey(algo.equities[s].Symbol)}
         algo.Log(f"Holdings: {holdings_info}")
+    counters = dict(DEFAULT_DEBUG_COUNTERS)
+    existing_counters = getattr(algo, "debug_counters", None)
+    if isinstance(existing_counters, dict):
+        counters.update(existing_counters)
+    for prefix, keys in _SUMMARY_COUNTER_GROUPS:
+        algo.Log(f"{prefix} " + " ".join(f"{key}={counters.get(key, 0)}" for key in keys))
     algo.Log("")
     algo.Log(algo.ml_integration.get_status_report())
     algo.Log("=" * 60)

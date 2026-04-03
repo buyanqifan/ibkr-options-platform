@@ -11,6 +11,7 @@ from ml_integration import StrategySignal
 from signals import get_cc_optimization_params
 from scoring import score_single_stock
 from helpers import is_symbol_on_cooldown
+from debug_counters import increment_debug_counter
 from qc_portfolio import (
     get_symbols_with_holdings, get_cost_basis,
     get_position_for_symbol, get_option_position_count, get_call_position_contracts,
@@ -74,6 +75,7 @@ def _should_block_extreme_sell_put(algo, symbol: str, bars: List[Dict], underlyi
     is_extreme_high_vol = annualized_vol >= vol_threshold
     is_downtrend = return_20d <= -downtrend_threshold and underlying_price <= ma20 * ma_threshold
     if is_extreme_high_vol and is_downtrend:
+        increment_debug_counter(algo, "sp_quality_block")
         algo.Log(
             f"SP_QUALITY_BLOCK:{symbol}:vol={annualized_vol:.2f}:"
             f"ret20={return_20d:.1%}:ma20={ma20:.2f}:price={underlying_price:.2f}"
@@ -111,6 +113,7 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
     
     # Log when we have stock holdings (important for CC debugging)
     if held_symbols:
+        increment_debug_counter(algo, "holdings_seen")
         shares_info = {s: get_shares_held(algo, s) for s in held_symbols}
         algo.Log(f"HOLDINGS: {shares_info}")
     
@@ -125,9 +128,6 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
         if is_symbol_on_cooldown(algo, symbol):
             continue
         shares_held = get_shares_held(algo, symbol)
-        if shares_held > 0:
-            algo.Log(f"SP_HELD_BLOCK:{symbol}:shares={shares_held}")
-            continue
         if getattr(algo, "stock_inventory_cap_enabled", True):
             equity = algo.equities.get(symbol)
             underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
@@ -135,9 +135,13 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
             portfolio_value = max(algo.Portfolio.TotalPortfolioValue, 0.0)
             inventory_cap = portfolio_value * getattr(algo, "stock_inventory_base_cap", 0.17)
             inventory_block_threshold = getattr(algo, "stock_inventory_block_threshold", 0.85)
-            if inventory_cap > 0 and stock_notional >= inventory_cap * inventory_block_threshold:
+            if shares_held > 0 and inventory_cap > 0 and stock_notional >= inventory_cap * inventory_block_threshold:
+                increment_debug_counter(algo, "sp_stock_block")
                 algo.Log(f"SP_STOCK_BLOCK:{symbol}:stock={stock_notional:.0f}:cap={inventory_cap:.0f}")
-                continue
+        if shares_held > 0:
+            increment_debug_counter(algo, "sp_held_block")
+            algo.Log(f"SP_HELD_BLOCK:{symbol}:shares={shares_held}")
+            continue
         bars = algo.price_history.get(symbol, [])
         equity = algo.equities.get(symbol)
         underlying_price = algo.Securities[equity.Symbol].Price if equity and algo.Securities.ContainsKey(equity.Symbol) else 0
@@ -180,6 +184,7 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
                     repair_max_discount_pct,
                     getattr(algo, "assigned_stock_repair_max_discount_pct", repair_max_discount_pct),
                 )
+                increment_debug_counter(algo, "assigned_repair_attempt")
                 algo.Log(
                     f"ASSIGNED_REPAIR_ATTEMPT:{symbol}:failures={assignment_repair_state.get('repair_failures', 0)}:"
                     f"cost_basis={cost_basis:.2f}:price={underlying_price:.2f}"

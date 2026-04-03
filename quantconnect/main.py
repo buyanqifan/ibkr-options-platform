@@ -4,6 +4,7 @@ from strategy_init import init_dates, init_parameters, init_ml, init_securities,
 from strategy_mixin import rebalance, on_end_of_algorithm
 from expiry import check_expired_options, handle_assignment_order_event, update_ml_models
 from execution import handle_order_event
+from debug_counters import increment_debug_counter
 
 class BinbinGodStrategy(QCAlgorithm):
     """BinbinGod Strategy - Intelligent stock selection + Full Wheel logic + ML optimization."""
@@ -61,6 +62,7 @@ class BinbinGodStrategy(QCAlgorithm):
             price = orderEvent.FillPrice
             # Log stock trades separately for debugging
             if symbol.SecurityType == SecurityType.Equity:
+                increment_debug_counter(self, "stock_buy" if qty > 0 else "stock_sell")
                 action = "BUY" if qty > 0 else "SELL"
                 self.Log(f"STOCK_{action}: {symbol} qty={qty} @ ${price:.2f}")
             else:
