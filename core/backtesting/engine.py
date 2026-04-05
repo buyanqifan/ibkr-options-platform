@@ -421,7 +421,7 @@ class BacktestEngine:
                 avg_iv = float(np.mean(warmup_iv)) if warmup_iv else 0.25
                 avg_iv = max(0.15, min(0.50, avg_iv))
                 warmup_pool_data = None
-                if strategy_name == "binbin_god" and hasattr(strategy, "mag7_data"):
+                if hasattr(strategy, "mag7_data"):
                     warmup_pool_data = {
                         sym: data[:warmup_bars] if data else []
                         for sym, data in strategy.mag7_data.items()
