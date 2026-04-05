@@ -157,9 +157,17 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     equity = algo.equities.get(symbol)
     if not equity: return None
     underlying_price = algo.Securities[equity.Symbol].Price
-    if underlying_price <= 0: return None
+    if underlying_price <= 0:
+        if strategy_phase == "CC":
+            increment_debug_counter(algo, "cc_signal_missing")
+            algo.Log(f"CC_SKIP:{symbol}:invalid_underlying_price={underlying_price}")
+        return None
     bars = algo.price_history.get(symbol, [])
-    if len(bars) < 20: return None
+    if len(bars) < 20:
+        if strategy_phase == "CC":
+            increment_debug_counter(algo, "cc_signal_missing")
+            algo.Log(f"CC_SKIP:{symbol}:insufficient_history={len(bars)}")
+        return None
     cost_basis = get_cost_basis(algo, symbol)
     preferred_right = "C" if strategy_phase == "CC" else "P"
     current_position = get_position_for_symbol(algo, symbol, preferred_right=preferred_right)
@@ -201,6 +209,12 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
             )
     signal = algo.ml_integration.generate_signal(symbol=symbol, current_price=underlying_price, cost_basis=cost_basis,
         bars=bars, strategy_phase=strategy_phase, portfolio_state=portfolio_state, current_position=current_position)
+    if not signal and strategy_phase == "CC":
+        increment_debug_counter(algo, "cc_signal_missing")
+        algo.Log(
+            f"CC_SIGNAL_MISSING:{symbol}:shares={get_shares_held(algo, symbol)}:"
+            f"cost={cost_basis:.2f}:price={underlying_price:.2f}"
+        )
     if signal and algo.ml_enabled:
         right = "P" if strategy_phase == "SP" else "C"
         if right == "P":
@@ -220,6 +234,12 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
             else:
                 signal.dte_min = max(algo.repair_call_dte_min, min(signal.dte_min, algo.repair_call_dte_max))
                 signal.dte_max = min(max(signal.dte_max, signal.dte_min), algo.repair_call_dte_max)
+        if strategy_phase == "CC":
+            algo.Log(
+                f"CC_SIGNAL_READY:{symbol}:delta={signal.delta:.2f}:dte={signal.dte_min}-{signal.dte_max}:"
+                f"min_strike={cc_min_strike if cc_min_strike is not None else 0:.2f}:"
+                f"confidence={signal.confidence:.2f}:shares={get_shares_held(algo, symbol)}"
+            )
         score = score_single_stock(symbol, bars, underlying_price, algo.weights)
         signal.ml_score_adjustment = (score.total_score - 50) / 100
         if cc_min_strike is not None: signal.min_strike = cc_min_strike

@@ -333,10 +333,10 @@ class BinbinGodStrategy(BaseStrategy):
         # Technical factors provide trend confirmation (25%)
         # Momentum and Value provide balance (20% each)
         self.weights = {
-            "iv_rank": 0.35,       # Higher IV = better premium income
-            "technical": 0.25,     # RSI + MA position (trend quality)
-            "momentum": 0.20,      # Price trend strength
-            "pe_score": 0.20,      # Value factor (inverse of momentum proxy)
+            "iv_rank": 0.25,
+            "technical": 0.30,
+            "momentum": 0.25,
+            "pe_score": 0.20,
         }
         
         # Selection memory: avoid frequent switching
@@ -381,6 +381,24 @@ class BinbinGodStrategy(BaseStrategy):
 
     def _now(self) -> datetime:
         return getattr(self, "current_time", datetime.now())
+
+    def _calculate_historical_vol(self, bars: List[Dict], window: int = 20) -> float:
+        if len(bars) < window + 1:
+            return 0.25
+        closes = [float(bar.get("close", 0.0)) for bar in bars[-(window + 1):] if bar.get("close", 0)]
+        if len(closes) < window + 1:
+            return 0.25
+        returns = []
+        for idx in range(1, len(closes)):
+            prev = closes[idx - 1]
+            if prev <= 0:
+                continue
+            returns.append((closes[idx] - prev) / prev)
+        if len(returns) < 2:
+            return 0.25
+        mean = sum(returns) / len(returns)
+        variance = sum((value - mean) ** 2 for value in returns) / len(returns)
+        return max(variance ** 0.5 * (252 ** 0.5), 0.25)
 
     def set_symbol_cooldown(self, symbol: str, days: int, reason: str = ""):
         if days <= 0:
@@ -558,7 +576,7 @@ class BinbinGodStrategy(BaseStrategy):
             
             # Normalize PE ratio (lower is better, invert the score)
             pe_score = max(0, min(100, 100 - pe_ratio))
-            
+
             # Calculate weighted total score
             total_score = (
                 iv_rank * self.weights["iv_rank"] +
@@ -566,7 +584,14 @@ class BinbinGodStrategy(BaseStrategy):
                 momentum * self.weights["momentum"] +
                 pe_score * self.weights["pe_score"]
             )
-            
+
+            # Penalize extreme volatility (QC parity)
+            annualized_vol = self._calculate_historical_vol(data, window=20)
+            if annualized_vol > 0.70:
+                excess_vol = annualized_vol - 0.70
+                penalty_factor = max(0.70, 1.0 - excess_vol * 0.45)
+                total_score *= penalty_factor
+
             # Apply liquidity penalty for very low liquidity
             if liquidity_score < 30:
                 total_score *= 0.8  # 20% penalty for low liquidity
@@ -818,7 +843,7 @@ class BinbinGodStrategy(BaseStrategy):
                 portfolio_value=self._parity_context.get("portfolio_value"),
             )
 
-        cc_candidates: list[Signal] = []
+        cc_signals: list[Signal] = []
         existing_call_coverage: Dict[str, int] = {}
         for pos in wheel_positions:
             if pos.trade_type == "BINBIN_CALL":
@@ -836,7 +861,7 @@ class BinbinGodStrategy(BaseStrategy):
                 continue
             actual_price, actual_iv, _ = self._get_symbol_market_state(stock_symbol, current_date, underlying_price, iv)
             stock_cost_basis = self.stock_holding.holdings.get(stock_symbol, {}).get("cost_basis", 0)
-            cc_candidates.extend(
+            cc_signals.extend(
                 self._generate_backtest_call_signal(
                     stock_symbol,
                     current_date,
@@ -848,7 +873,7 @@ class BinbinGodStrategy(BaseStrategy):
                 )
             )
 
-        sp_candidates: list[Signal] = []
+        sp_signals: list[Signal] = []
         portfolio_value = self._parity_context.get("portfolio_value", self.initial_capital)
         for stock_symbol in stock_pool:
             if self.is_symbol_on_cooldown(stock_symbol):
@@ -880,7 +905,7 @@ class BinbinGodStrategy(BaseStrategy):
                         inventory_cap=round(inventory_cap, 2),
                     )
                     continue
-            sp_candidates.extend(
+            sp_signals.extend(
                 self._generate_backtest_put_signal(
                     stock_symbol,
                     current_date,
@@ -892,18 +917,19 @@ class BinbinGodStrategy(BaseStrategy):
                 )
             )
 
-        selected: list[Signal] = []
-        if cc_candidates:
-            selected.extend(
+        selected_cc: list[Signal] = []
+        if cc_signals:
+            selected_cc.extend(
                 signal
-                for signal in sorted(cc_candidates, key=lambda item: item.confidence, reverse=True)
+                for signal in sorted(cc_signals, key=lambda item: item.confidence, reverse=True)
                 if signal.confidence >= self.ml_min_confidence
             )
 
-        available_slots = max(0, self.max_positions - len(wheel_positions) - len(selected))
-        if sp_candidates and available_slots > 0:
+        available_slots = max(0, self.max_positions - len(wheel_positions) - len(selected_cc))
+        selected_sp: list[Signal] = []
+        if sp_signals and available_slots > 0:
             max_new_puts = max(1, min(self.max_new_puts_per_day, available_slots))
-            remaining = list(sp_candidates)
+            remaining = list(sp_signals)
             best_sp, self._last_selected_stock, self._selection_count, self._last_stock_scores = select_best_signal_with_memory(
                 remaining,
                 self._last_selected_stock,
@@ -912,15 +938,19 @@ class BinbinGodStrategy(BaseStrategy):
                 getattr(self, "_last_stock_scores", {}),
             )
             if best_sp and best_sp.confidence >= self.ml_min_confidence:
-                selected.append(best_sp)
+                selected_sp.append(best_sp)
                 remaining = [signal for signal in remaining if signal.symbol != best_sp.symbol]
 
-            while remaining and len([signal for signal in selected if signal.right == "P"]) < max_new_puts:
+            while remaining and len(selected_sp) < max_new_puts:
                 candidate = max(remaining, key=lambda item: item.confidence)
                 if candidate.confidence < self.ml_min_confidence:
                     break
-                selected.append(candidate)
+                selected_sp.append(candidate)
                 remaining = [signal for signal in remaining if signal.symbol != candidate.symbol]
+
+        selected: list[Signal] = []
+        selected.extend(selected_cc)
+        selected.extend(selected_sp)
 
         for signal in selected:
             self._record_event(

@@ -8,7 +8,7 @@ from dash import Input, Output, State, callback, ctx, dcc, html, no_update
 
 from app.components.connection_status import connection_badge
 from app.components.tables import create_data_table, metric_card
-from app.pages.binbin_god import ALL_FORM_FIELDS, QC_UI_DEFAULTS, _build_rows, _section_card
+from app.pages.binbin_god_shared import ALL_FORM_FIELDS, QC_UI_DEFAULTS, _build_rows, _section_card
 from app.services import get_services
 from core.live_trading.binbin_god.defaults import build_live_defaults
 from core.live_trading.binbin_god.models import ControlCommandType

@@ -3,6 +3,10 @@
 DEFAULT_DEBUG_COUNTERS = {
     "holdings_seen": 0,
     "cc_signals": 0,
+    "cc_signal_missing": 0,
+    "cc_confidence_block": 0,
+    "cc_share_block": 0,
+    "cc_option_filter_block": 0,
     "sp_signals": 0,
     "put_block": 0,
     "sp_quality_block": 0,

@@ -30,9 +30,20 @@ def _find_option_by_constraints(
     underlying_price = algo.Securities[equity_symbol].Price
     option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
     if not option_chain:
+        algo._last_option_selection_stats = {
+            "symbol": symbol,
+            "target_right": str(target_right),
+            "target_delta": target_delta,
+            "dte_min": dte_min,
+            "dte_max": dte_max,
+            "delta_tolerance": delta_tolerance,
+            "min_strike": min_strike,
+            "total_chain": 0,
+            "stats": {"right": 0, "dte": 0, "min_strike": 0, "itm": 0, "delta_none": 0, "tolerance": 0, "premium": 0},
+        }
         return None
     suitable = []
-    stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'tolerance': 0}
+    stats = {'right': 0, 'dte': 0, 'min_strike': 0, 'itm': 0, 'delta_none': 0, 'tolerance': 0, 'premium': 0}
     for option_symbol in option_chain:
         if option_symbol.ID.OptionRight != target_right: 
             continue
@@ -51,6 +62,7 @@ def _find_option_by_constraints(
         delta = estimate_delta_from_moneyness(strike, underlying_price, target_right)
         iv = calculate_historical_vol(algo.price_history.get(symbol, []))
         if delta is None: 
+            stats['delta_none'] += 1
             continue
         if abs(delta - target_delta) > delta_tolerance: 
             stats['tolerance'] += 1
@@ -61,10 +73,22 @@ def _find_option_by_constraints(
         else:
             premium = bs_call_price(underlying_price, strike, T, iv)
         if premium <= 0.10:
+            stats['premium'] += 1
             continue
         suitable.append(build_option_result(option_symbol, strike, option_symbol.ID.Date, dte,
             delta, iv, premium, abs(delta - target_delta), premium * 0.99, premium * 1.01))
-    
+    algo._last_option_selection_stats = {
+        "symbol": symbol,
+        "target_right": str(target_right),
+        "target_delta": target_delta,
+        "dte_min": dte_min,
+        "dte_max": dte_max,
+        "delta_tolerance": delta_tolerance,
+        "min_strike": min_strike,
+        "total_chain": len(option_chain),
+        "stats": stats,
+        "suitable_count": len(suitable),
+    }
     if not suitable:
         return None
     

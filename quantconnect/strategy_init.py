@@ -127,12 +127,12 @@ def init_parameters(algo):
         1.0,
     )
     algo.assigned_stock_repair_delta_boost = _clamp(
-        _as_float(_get_param(algo, "assigned_stock_repair_delta_boost", 0.10), 0.10),
+        _as_float(_get_param(algo, "assigned_stock_repair_delta_boost", 0.05), 0.05),
         0.0,
         0.30,
     )
-    algo.assigned_stock_repair_dte_min = _as_int(_get_param(algo, "assigned_stock_repair_dte_min", 7), 7)
-    algo.assigned_stock_repair_dte_max = _as_int(_get_param(algo, "assigned_stock_repair_dte_max", 14), 14)
+    algo.assigned_stock_repair_dte_min = _as_int(_get_param(algo, "assigned_stock_repair_dte_min", 10), 10)
+    algo.assigned_stock_repair_dte_max = _as_int(_get_param(algo, "assigned_stock_repair_dte_max", 21), 21)
     algo.assigned_stock_repair_max_discount_pct = _as_float(
         _get_param(algo, "assigned_stock_repair_max_discount_pct", 0.12), 0.12
     )

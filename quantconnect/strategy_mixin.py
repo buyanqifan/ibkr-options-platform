@@ -14,7 +14,17 @@ from qc_portfolio import get_option_position_count, get_symbols_with_holdings
 _SUMMARY_COUNTER_GROUPS = (
     (
         "SUMMARY_FLOW:",
-        ("holdings_seen", "cc_signals", "sp_signals", "put_block", "no_suitable_options"),
+        (
+            "holdings_seen",
+            "cc_signals",
+            "cc_signal_missing",
+            "cc_confidence_block",
+            "cc_share_block",
+            "cc_option_filter_block",
+            "sp_signals",
+            "put_block",
+            "no_suitable_options",
+        ),
     ),
     (
         "SUMMARY_ASSIGNMENT:",

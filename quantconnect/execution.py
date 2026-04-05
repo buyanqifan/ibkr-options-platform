@@ -18,6 +18,32 @@ RISK_FREE_RATE = 0.05
 MAX_DEFERRED_OPEN_ATTEMPTS = 3
 
 
+def _log_option_selection_failure(algo, signal: StrategySignal, target_right, target_delta: float):
+    stats = getattr(algo, "_last_option_selection_stats", None)
+    right_label = "CALL" if target_right == OptionRight.Call else "PUT"
+    if signal.action == "SELL_CALL":
+        increment_debug_counter(algo, "cc_option_filter_block")
+    if not isinstance(stats, dict):
+        algo.Log(f"OPTION_FILTER_BLOCK:{signal.symbol}:{right_label}:delta={target_delta:.2f}:stats=unavailable")
+        return
+    counts = stats.get("stats", {})
+    algo.Log(
+        f"OPTION_FILTER_BLOCK:{signal.symbol}:{right_label}:delta={target_delta:.2f}:"
+        f"dte={stats.get('dte_min')}-{stats.get('dte_max')}:"
+        f"tol={stats.get('delta_tolerance', 0):.2f}:"
+        f"minstrike={float(stats.get('min_strike') or 0):.2f}:"
+        f"chain={stats.get('total_chain', 0)}:"
+        f"right={counts.get('right', 0)}:"
+        f"dtepass={counts.get('dte', 0)}:"
+        f"strike_block={counts.get('min_strike', 0)}:"
+        f"itm_block={counts.get('itm', 0)}:"
+        f"delta_missing={counts.get('delta_none', 0)}:"
+        f"delta_block={counts.get('tolerance', 0)}:"
+        f"premium_block={counts.get('premium', 0)}:"
+        f"suitable={stats.get('suitable_count', 0)}"
+    )
+
+
 def calculate_dynamic_max_positions(algo) -> int:
     """Dynamically calculate max positions based on capital and stock prices.
     
@@ -363,6 +389,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         selection_tiers=getattr(signal, "selection_tiers", None))
     if not selected:
         algo.Log(f"No suitable options for {signal.symbol} delta ~{target_delta:.2f}")
+        _log_option_selection_failure(algo, signal, target_right, target_delta)
         increment_debug_counter(algo, "no_suitable_options")
         return
     if signal.action == "SELL_CALL" and selected.get("selection_tier") and selected["selection_tier"] != "primary":
@@ -377,6 +404,7 @@ def execute_signal(algo, signal: StrategySignal, find_option_func):
         shares_available = shares_held - shares_covered
         quantity = min(max(0, shares_available // 100), algo.max_positions)
         if quantity <= 0:
+            increment_debug_counter(algo, "cc_share_block")
             algo.Log(f"No available shares for {signal.symbol} call: held={shares_held}, covered={shares_covered}")
             return
     if quantity <= 0: return

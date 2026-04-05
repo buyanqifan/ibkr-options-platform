@@ -84,8 +84,10 @@ def try_sell_cc_immediately(algo, symbol):
             execute_signal(algo, signal, find_option_by_greeks)
             algo.Log(f"IMMEDIATE_CC: Executed CC for {symbol}")
         else:
+            increment_debug_counter(algo, "cc_confidence_block")
             algo.Log(f"IMMEDIATE_CC: Confidence {signal.confidence:.2f} < min {algo.ml_min_confidence}")
     else:
+        increment_debug_counter(algo, "cc_signal_missing")
         algo.Log(f"IMMEDIATE_CC: No valid CC signal for {symbol}")
 
 
