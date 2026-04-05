@@ -107,10 +107,10 @@ def init_parameters(algo):
         1.0,
     )
     algo.defensive_put_roll_enabled = _as_bool(_get_param(algo, "defensive_put_roll_enabled", True), True)
-    algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 85), 85.0)
-    algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.04), 0.04)
+    algo.defensive_put_roll_loss_pct = _as_float(_get_param(algo, "defensive_put_roll_loss_pct", 150), 150.0)
+    algo.defensive_put_roll_itm_buffer_pct = _as_float(_get_param(algo, "defensive_put_roll_itm_buffer_pct", 0.10), 0.10)
     algo.defensive_put_roll_min_dte = _as_int(_get_param(algo, "defensive_put_roll_min_dte", 7), 7)
-    algo.defensive_put_roll_max_dte = _as_int(_get_param(algo, "defensive_put_roll_max_dte", 21), 21)
+    algo.defensive_put_roll_max_dte = _as_int(_get_param(algo, "defensive_put_roll_max_dte", 10), 10)
     algo.defensive_put_roll_dte_min = _as_int(_get_param(algo, "defensive_put_roll_dte_min", 21), 21)
     algo.defensive_put_roll_dte_max = _as_int(_get_param(algo, "defensive_put_roll_dte_max", 60), 60)
     algo.defensive_put_roll_delta = _clamp(_as_float(_get_param(algo, "defensive_put_roll_delta", 0.20), 0.20), 0.10, 0.40)
@@ -163,7 +163,7 @@ def init_parameters(algo):
     algo.ml_exploration_rate = _as_float(_get_param(algo, "ml_exploration_rate", 0.1), 0.1)
     algo.ml_learning_rate = _as_float(_get_param(algo, "ml_learning_rate", 0.01), 0.01)
     algo.ml_adoption_rate = _as_float(_get_param(algo, "ml_adoption_rate", 0.5), 0.5)
-    algo.ml_min_confidence = _as_float(_get_param(algo, "ml_min_confidence", 0.4), 0.4)
+    algo.ml_min_confidence = _as_float(_get_param(algo, "ml_min_confidence", 0.55), 0.55)
     algo.stock_pool = str(_get_param(algo, "stock_pool", ",".join(MAG7_STOCKS))).split(",")
     algo.weights = {"iv_rank": 0.25, "technical": 0.30, "momentum": 0.25, "pe_score": 0.20}
     # Target margin utilization for position sizing (60% of capital)
