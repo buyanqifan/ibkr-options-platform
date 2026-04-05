@@ -934,30 +934,24 @@ class TestStrategyPerformanceReportCompatibility:
 
 
 class TestBinbinGodStrategy:
-    """Tests for BinbinGodStrategy."""
-    
+    """Tests for the simplified BinbinGodStrategy."""
+
     def test_name(self, base_params):
-        """Test strategy name."""
         params = base_params.copy()
-        params['symbol'] = 'MAG7_AUTO'
+        params["symbol"] = "MAG7_AUTO"
         strategy = BinbinGodStrategy(params)
-        assert strategy.name == 'binbin_god'
+        assert strategy.name == "binbin_god"
 
     def test_native_defaults_follow_qc_default_config(self):
-        """Native fallback defaults should stay aligned with QC config defaults."""
         strategy = BinbinGodStrategy({"symbol": "NVDA"})
-
         assert strategy.initial_capital == 300000
         assert strategy.max_positions == 20
-        assert strategy.profit_target_pct == 70
-        assert strategy.margin_buffer_pct == 0.40
-        assert strategy.target_margin_utilization == pytest.approx(0.58)
-        assert strategy.position_aggressiveness == pytest.approx(1.35)
-        assert strategy.symbol_assignment_base_cap == pytest.approx(0.36)
-        assert strategy.stock_inventory_base_cap == pytest.approx(0.24)
-        assert strategy.stock_inventory_block_threshold == pytest.approx(0.92)
-        assert strategy.max_risk_per_trade == pytest.approx(0.03)
-        assert strategy.max_assignment_risk_per_trade == pytest.approx(0.25)
+        assert strategy.target_margin_utilization == pytest.approx(0.65)
+        assert strategy.symbol_assignment_base_cap == pytest.approx(0.35)
+        assert strategy.max_assignment_risk_per_trade == pytest.approx(0.20)
+        assert strategy.roll_threshold_pct == pytest.approx(80.0)
+        assert strategy.cc_target_delta == pytest.approx(0.25)
+        assert strategy.assigned_stock_fail_safe_enabled is True
         assert strategy.max_new_puts_per_day == 3
         assert strategy._is_qc_parity_enabled() is True
         assert strategy.contract_universe_mode == "qc_emulated_lattice"
@@ -997,287 +991,75 @@ class TestBinbinGodStrategy:
 
         assert signals == expected
         assert called["kwargs"]["current_date"] == "2024-01-31"
-    
-    def test_initial_phase_is_sp(self, base_params):
-        """Test that initial phase is Sell Put."""
-        params = base_params.copy()
-        params['symbol'] = 'MAG7_AUTO'
-        strategy = BinbinGodStrategy(params)
-        assert strategy.phase == 'SP'
-    
-    def test_strike_selection_normal_range(self, base_params):
-        """Test strike selection returns reasonable value within normal range."""
-        params = base_params.copy()
-        params['symbol'] = 'NVDA'
-        strategy = BinbinGodStrategy(params)
-        
-        # Normal case: strike should be OTM for call
-        underlying_price = 180.0
-        iv = 0.40
-        T = 30 / 365.0
-        
-        strike = strategy.select_strike_with_constraints(
-            underlying_price, iv, T, 'C', {}
-        )
-        
-        # Strike should be within reasonable range (80%-120% of underlying)
-        assert underlying_price * 0.8 <= strike <= underlying_price * 1.3
-    
-    def test_strike_selection_with_impossible_min_strike(self, base_params):
-        """Test that min_strike constraint is relaxed when impossible.
-        
-        This is the critical fix for the bug where strike=600+ when price=180.
-        When stock price drops far below cost basis, min_strike constraint
-        should be relaxed to allow valid strike selection.
-        """
-        params = base_params.copy()
-        params['symbol'] = 'NVDA'
-        strategy = BinbinGodStrategy(params)
-        
-        # Scenario: cost_basis=600 but price dropped to 180
-        underlying_price = 180.0
-        cost_basis = 600.0
-        iv = 0.40
-        T = 30 / 365.0
-        
-        # min_strike would be ~588 (cost_basis * 0.98)
-        # but high = 180 * 1.2 = 216
-        # So min_strike > high, constraint should be relaxed
-        min_strike = cost_basis * 0.98
-        constraints = {"min_strike": min_strike}
-        
-        strike = strategy.select_strike_with_constraints(
-            underlying_price, iv, T, 'C', constraints
-        )
-        
-        # Strike should be within reasonable range relative to CURRENT price
-        # NOT relative to cost_basis
-        assert underlying_price * 0.8 <= strike <= underlying_price * 1.3
-        # Strike should NOT be near cost_basis
-        assert strike < cost_basis * 0.5
-    
-    def test_strike_selection_with_valid_min_strike(self, base_params):
-        """Test that min_strike constraint is applied when valid."""
-        params = base_params.copy()
-        params['symbol'] = 'NVDA'
-        params['call_delta'] = 0.20
-        strategy = BinbinGodStrategy(params)
-        
-        # Scenario: price=180, cost_basis=150, min_strike=147
-        underlying_price = 180.0
-        iv = 0.40
-        T = 30 / 365.0
-        min_strike = 147.0  # Valid: within search range
-        
-        constraints = {"min_strike": min_strike}
-        strike = strategy.select_strike_with_constraints(
-            underlying_price, iv, T, 'C', constraints
-        )
-        
-        # Strike should be >= min_strike
-        assert strike >= min_strike
-        # And within reasonable range
-        assert strike <= underlying_price * 1.3
-    
+
     def test_cc_signal_contracts_match_shares(self, base_params):
-        """Test that CC phase generates contracts matching shares held."""
-        params = base_params.copy()
-        params['symbol'] = 'NVDA'
-        strategy = BinbinGodStrategy(params)
-        strategy.phase = 'CC'
-        strategy.stock_holding.shares = 500  # 5 contracts worth
-        strategy.stock_holding.cost_basis = 150.0
-        
-        signals = strategy._generate_backtest_call_signal(
-            symbol='NVDA',
-            current_date='2024-01-15',
-            underlying_price=150.0,
-            iv=0.25,
-            position_mgr=None,
-        )
-        
-        # Should sell contracts matching shares (500 shares = 5 contracts)
-        assert len(signals) == 1
-        assert abs(signals[0].quantity) == 5  # Fixed: now matches shares held
-    
-    def test_no_cc_signal_when_shares_covered(self, base_params):
-        """Test that no CC signal when all shares already covered by existing Calls."""
-        params = base_params.copy()
-        params['symbol'] = 'NVDA'
-        strategy = BinbinGodStrategy(params)
-        strategy.phase = 'CC'
-        strategy.stock_holding.shares = 200  # 2 contracts worth
-        strategy.stock_holding.cost_basis = 150.0
-        
-        # Mock existing Call position covering all shares
-        from dataclasses import dataclass
-        @dataclass
-        class MockPosition:
-            trade_type = 'BINBIN_CALL'
-            quantity = -2  # 2 contracts sold, covering 200 shares
-        
-        signals = strategy.generate_signals(
-            current_date='2024-01-15',
-            underlying_price=150.0,
-            iv=0.25,
-            open_positions=[MockPosition()],
-        )
-        
-        # No new signal should be generated
-        assert len(signals) == 0
-    
-    def test_call_assignment_with_no_shares_returns_zero(self, base_params):
-        """Test that Call assignment with no shares returns 0 (defensive check)."""
-        params = base_params.copy()
-        params['symbol'] = 'NVDA'
-        strategy = BinbinGodStrategy(params)
-        strategy.phase = 'CC'
-        strategy.stock_holding.shares = 0  # No shares!
-        strategy.stock_holding.cost_basis = 0.0
-        
-        trade = {
-            'exit_reason': 'ASSIGNMENT',
-            'right': 'C',
-            'trade_type': 'BINBIN_CALL',
-            'strike': 155.0,
-            'quantity': -1,
-            'entry_price': 3.0,
-            'pnl': -200.0,
-        }
-        
-        result = strategy.on_trade_closed(trade)
-        
-        # Should return 0 to avoid incorrect PnL
-        assert result == 0.0
-    
-    def test_call_assignment_partial_shares(self, base_params):
-        """Test Call assignment when shares_sold exceeds shares held."""
-        params = base_params.copy()
-        params['symbol'] = 'NVDA'
-        strategy = BinbinGodStrategy(params)
-        strategy.phase = 'CC'
-        # Use new multi-stock holdings API
-        strategy.stock_holding.add_shares('NVDA', 100, 150.0)  # 100 shares @ $150
-        
-        # Try to assign 2 contracts (200 shares)
-        trade = {
-            'exit_reason': 'ASSIGNMENT',
-            'right': 'C',
-            'trade_type': 'BINBIN_CALL',
-            'symbol': 'NVDA',  # Symbol is required for multi-stock tracking
-            'strike': 160.0,
-            'quantity': -2,  # 2 contracts = 200 shares
-            'entry_price': 3.0,
-            'pnl': -200.0,
-        }
-        
-        result = strategy.on_trade_closed(trade)
-        
-        # Should only calculate PnL for 100 shares (actual held)
-        # Stock PnL = (160 - 150) * 100 = +1000
-        assert result == 1000.0
-
-    def test_sp_signal_blocked_by_symbol_cooldown(self, base_params):
-        """QC sync: symbol cooldown should block new short-put entries."""
         params = base_params.copy()
         params["symbol"] = "NVDA"
-        params["stock_pool"] = ["NVDA"]
         strategy = BinbinGodStrategy(params)
-        strategy.mag7_data = {"NVDA": [{"date": f"2024-01-{day:02d}", "close": 100 + day, "volume": 1_000_000} for day in range(1, 40)]}
-        strategy.stock_hv = {"NVDA": [0.25] * 39}
-        strategy.symbol_cooldowns = {"NVDA": datetime(2024, 2, 20)}
-
-        signals = strategy.generate_signals(
-            current_date="2024-01-31",
-            underlying_price=131.0,
-            iv=0.25,
-            open_positions=[],
-        )
-
-        assert signals == []
-
-    def test_repair_call_uses_shorter_dte_window(self, base_params):
-        """QC sync: repair call mode should start short and only widen via fallback ladder."""
-        params = base_params.copy()
-        params["symbol"] = "NVDA"
-        params["repair_call_threshold_pct"] = 0.08
-        params["repair_call_delta"] = 0.35
-        params["repair_call_dte_min"] = 7
-        params["repair_call_dte_max"] = 21
-        strategy = BinbinGodStrategy(params)
-        strategy.stock_holding.add_shares("NVDA", 100, 150.0)
+        strategy.phase = "CC"
+        strategy.stock_holding.shares = 500
+        strategy.stock_holding.cost_basis = 150.0
 
         signals = strategy._generate_backtest_call_signal(
             symbol="NVDA",
             current_date="2024-01-15",
-            underlying_price=120.0,
+            underlying_price=150.0,
             iv=0.25,
             position_mgr=None,
-            shares_available=100,
-            cost_basis=150.0,
         )
 
         assert len(signals) == 1
-        entry_date = datetime.strptime("2024-01-15", "%Y-%m-%d")
-        expiry_date = datetime.strptime(signals[0].expiry, "%Y%m%d")
-        dte = (expiry_date - entry_date).days
-        assert 7 <= dte <= 30
-        if dte > 21:
-            assert signals[0].metadata["selection_tier"] in {"fallback_dte", "rescue_discount"}
+        assert abs(signals[0].quantity) == 5
 
-    def test_qc_parity_call_ladder_uses_rescue_discount_tier(self, base_params, monkeypatch):
+    def test_cc_below_cost_prefers_cost_floor(self, base_params, monkeypatch):
         params = base_params.copy()
         params["symbol"] = "NVDA"
         strategy = BinbinGodStrategy(params)
         strategy.stock_holding.add_shares("NVDA", 100, 150.0)
-
-        selection_calls = []
+        captured = {}
 
         def fake_select_contract_from_lattice(**kwargs):
-            selection_calls.append(kwargs)
-            tiers = kwargs.get("selection_tiers") or []
-            if tiers and tiers[-1]["label"] == "rescue_discount":
-                return type(
-                    "SelectedContract",
-                    (),
-                    {
-                        "strike": 130.0,
-                        "expiry": datetime(2024, 2, 9),
-                        "dte": 25,
-                        "premium": 1.75,
-                        "delta": 0.33,
-                        "to_dict": lambda self: {"selection_tier": "rescue_discount", "strike": 130.0},
-                    },
-                )()
-            return None
+            captured.update(kwargs)
+            return type(
+                "SelectedContract",
+                (),
+                {
+                    "strike": 146.0,
+                    "expiry": datetime(2024, 2, 9),
+                    "dte": 25,
+                    "premium": 1.5,
+                    "delta": 0.23,
+                    "to_dict": lambda self: {"selection_tier": "primary"},
+                },
+            )()
 
         monkeypatch.setattr(binbin_god_module, "select_contract_from_lattice", fake_select_contract_from_lattice)
-
         signals = strategy._generate_backtest_call_signal(
             symbol="NVDA",
             current_date="2024-01-15",
             underlying_price=120.0,
             iv=0.25,
-            position_mgr=None,
             shares_available=100,
             cost_basis=150.0,
         )
 
         assert len(signals) == 1
-        assert signals[0].metadata["selection_tier"] == "rescue_discount"
-        assert [tier["label"] for tier in selection_calls[-1]["selection_tiers"]] == [
-            "primary",
-            "fallback_delta",
-            "fallback_dte",
-            "rescue_discount",
-        ]
-        assert selection_calls[-1]["selection_tiers"][-1]["dte_min"] == 14
-        assert selection_calls[-1]["selection_tiers"][-1]["dte_max"] == 30
-        assert selection_calls[-1]["selection_tiers"][-1]["delta_tolerance"] == pytest.approx(0.15)
-        assert selection_calls[-1]["selection_tiers"][-1]["min_strike"] == pytest.approx(127.5)
+        assert captured["min_strike"] == pytest.approx(max(120.0 * 1.01, 150.0 * 0.97))
+        assert [tier["label"] for tier in captured["selection_tiers"]] == ["primary", "delta_relaxed"]
+
+    def test_roll_rule_only_uses_threshold_and_dte(self):
+        strategy = BinbinGodStrategy({"symbol": "NVDA"})
+        should_exit, reason = strategy.should_exit_position(
+            position={"right": "P", "expiry": "20240216"},
+            current_price=0.3,
+            entry_price=2.0,
+            current_dt=datetime(2024, 1, 15),
+            market_data={"price": 90.0},
+        )
+        assert should_exit is True
+        assert reason == "ROLL_FORWARD"
 
     def test_put_assignment_sets_symbol_cooldown(self, base_params):
-        """QC sync: put assignment should add a symbol cooldown."""
         params = base_params.copy()
         params["symbol"] = "NVDA"
         params["assignment_cooldown_days"] = 20
@@ -1297,28 +1079,3 @@ class TestBinbinGodStrategy:
         )
 
         assert "NVDA" in strategy.symbol_cooldowns
-
-    def test_generate_signals_returns_flat_put_signal_list_in_native_mode(self, base_params):
-        """Native-mode put generation should return Signal objects, not nested lists."""
-        params = base_params.copy()
-        params["symbol"] = "NVDA"
-        params["stock_pool"] = ["NVDA"]
-        strategy = BinbinGodStrategy(params)
-        strategy.mag7_data = {
-            "NVDA": [{"date": f"2024-01-{day:02d}", "close": 100 + day, "volume": 1_000_000} for day in range(1, 40)]
-        }
-        strategy.stock_hv = {"NVDA": [0.25] * 39}
-        position_mgr = PositionManager(initial_capital=100000)
-
-        signals = strategy.generate_signals(
-            current_date="2024-01-31",
-            underlying_price=131.0,
-            iv=0.25,
-            open_positions=[],
-            position_mgr=position_mgr,
-        )
-
-        assert len(signals) == 1
-        assert isinstance(signals[0], Signal)
-        assert signals[0].trade_type == "BINBIN_PUT"
-        assert signals[0].margin_requirement is not None

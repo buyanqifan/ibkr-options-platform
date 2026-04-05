@@ -22,57 +22,28 @@ _QC_PARAMETER_FALLBACKS = {
     "initial_capital": 100000.0,
     "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
     "max_positions_ceiling": 20,
-    "profit_target_pct": 50.0,
-    "stop_loss_pct": 999999.0,
-    "margin_buffer_pct": 0.50,
-    "margin_rate_per_contract": 0.25,
-    "target_margin_utilization": 0.58,
-    "position_aggressiveness": 1.35,
-    "max_risk_per_trade": 0.02,
-    "max_assignment_risk_per_trade": 0.25,
-    "symbol_assignment_base_cap": 0.36,
-    "stock_inventory_base_cap": 0.24,
-    "stock_inventory_block_threshold": 0.92,
-    "cc_fallback_delta_tolerance_1": 0.12,
-    "cc_fallback_delta_tolerance_2": 0.15,
-    "cc_fallback_dte_min": 14,
-    "cc_fallback_dte_max": 30,
-    "cc_fallback_min_cost_basis_ratio": 0.85,
+    "target_margin_utilization": 0.65,
+    "symbol_assignment_base_cap": 0.35,
+    "max_assignment_risk_per_trade": 0.20,
+    "roll_threshold_pct": 80.0,
+    "min_dte_for_roll": 7,
+    "roll_target_dte_min": 21,
+    "roll_target_dte_max": 45,
+    "cc_below_cost_enabled": True,
+    "cc_target_delta": 0.25,
+    "cc_target_dte_min": 10,
+    "cc_target_dte_max": 28,
+    "cc_max_discount_to_cost": 0.03,
+    "assigned_stock_fail_safe_enabled": True,
+    "assigned_stock_min_days_held": 5,
+    "assigned_stock_drawdown_pct": 0.12,
+    "assigned_stock_force_exit_pct": 1.0,
     "max_new_puts_per_day": 3,
-    "defensive_put_roll_loss_pct": 85.0,
-    "defensive_put_roll_itm_buffer_pct": 0.04,
-    "defensive_put_roll_max_dte": 21,
     "ml_enabled": True,
-    "dte_min": 21,
-    "dte_max": 60,
-    "put_delta": 0.30,
-    "call_delta": 0.30,
-    "repair_call_threshold_pct": 0.08,
-    "repair_call_delta": 0.35,
-    "repair_call_dte_min": 7,
-    "repair_call_dte_max": 21,
-    "repair_call_max_discount_pct": 0.08,
-    "defensive_put_roll_enabled": True,
-    "defensive_put_roll_min_dte": 7,
-    "defensive_put_roll_dte_min": 21,
-    "defensive_put_roll_dte_max": 60,
-    "defensive_put_roll_delta": 0.20,
-    "assignment_cooldown_days": 20,
-    "large_loss_cooldown_days": 15,
-    "large_loss_cooldown_pct": 100.0,
-    "volatility_cap_floor": 0.35,
-    "volatility_cap_ceiling": 1.0,
-    "volatility_lookback": 20,
-    "dynamic_symbol_risk_enabled": True,
-    "symbol_state_cap_floor": 0.20,
-    "symbol_state_cap_ceiling": 1.0,
-    "symbol_drawdown_lookback": 60,
-    "symbol_drawdown_sensitivity": 1.20,
-    "symbol_downtrend_sensitivity": 1.50,
-    "symbol_volatility_sensitivity": 0.75,
-    "symbol_exposure_sensitivity": 1.25,
-    "stock_inventory_cap_enabled": True,
-    "stock_inventory_cap_floor": 0.50,
+    "ml_min_confidence": 0.45,
+    "ml_adoption_rate": 0.5,
+    "ml_exploration_rate": 0.1,
+    "ml_learning_rate": 0.01,
 }
 
 
@@ -176,59 +147,28 @@ QC_PARAMETER_DEFAULTS = _load_quantconnect_parameter_defaults()
 QC_BINBIN_DEFAULTS = {
     "initial_capital": float(QC_PARAMETER_DEFAULTS["initial_capital"]),
     "max_positions_ceiling": int(QC_PARAMETER_DEFAULTS["max_positions_ceiling"]),
-    "profit_target_pct": float(QC_PARAMETER_DEFAULTS["profit_target_pct"]),
-    "stop_loss_pct": 999999.0,
-    "margin_buffer_pct": float(QC_PARAMETER_DEFAULTS["margin_buffer_pct"]),
-    "margin_rate_per_contract": float(QC_PARAMETER_DEFAULTS["margin_rate_per_contract"]),
     "target_margin_utilization": float(QC_PARAMETER_DEFAULTS["target_margin_utilization"]),
-    "position_aggressiveness": float(QC_PARAMETER_DEFAULTS["position_aggressiveness"]),
-    "max_risk_per_trade": float(QC_PARAMETER_DEFAULTS["max_risk_per_trade"]),
     "max_assignment_risk_per_trade": float(QC_PARAMETER_DEFAULTS["max_assignment_risk_per_trade"]),
-    "max_leverage": 1.0,
-    "ml_enabled": bool(QC_PARAMETER_DEFAULTS["ml_enabled"]),
-    "ml_min_confidence": 0.40,
-    "dte_min": int(QC_PARAMETER_DEFAULTS["dte_min"]),
-    "dte_max": int(QC_PARAMETER_DEFAULTS["dte_max"]),
-    "put_delta": float(QC_PARAMETER_DEFAULTS["put_delta"]),
-    "call_delta": float(QC_PARAMETER_DEFAULTS["call_delta"]),
-    "repair_call_threshold_pct": float(QC_PARAMETER_DEFAULTS["repair_call_threshold_pct"]),
-    "repair_call_delta": float(QC_PARAMETER_DEFAULTS["repair_call_delta"]),
-    "repair_call_dte_min": int(QC_PARAMETER_DEFAULTS["repair_call_dte_min"]),
-    "repair_call_dte_max": int(QC_PARAMETER_DEFAULTS["repair_call_dte_max"]),
-    "repair_call_max_discount_pct": float(QC_PARAMETER_DEFAULTS["repair_call_max_discount_pct"]),
-    "cc_fallback_delta_tolerance_1": float(QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_1"]),
-    "cc_fallback_delta_tolerance_2": float(QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_2"]),
-    "cc_fallback_dte_min": int(QC_PARAMETER_DEFAULTS["cc_fallback_dte_min"]),
-    "cc_fallback_dte_max": int(QC_PARAMETER_DEFAULTS["cc_fallback_dte_max"]),
-    "cc_fallback_min_cost_basis_ratio": float(QC_PARAMETER_DEFAULTS["cc_fallback_min_cost_basis_ratio"]),
-    "defensive_put_roll_enabled": bool(QC_PARAMETER_DEFAULTS["defensive_put_roll_enabled"]),
-    "defensive_put_roll_loss_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_loss_pct"]),
-    "defensive_put_roll_itm_buffer_pct": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_itm_buffer_pct"]),
-    "defensive_put_roll_min_dte": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_min_dte"]),
-    "defensive_put_roll_max_dte": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_max_dte"]),
-    "defensive_put_roll_dte_min": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_dte_min"]),
-    "defensive_put_roll_dte_max": int(QC_PARAMETER_DEFAULTS["defensive_put_roll_dte_max"]),
-    "defensive_put_roll_delta": float(QC_PARAMETER_DEFAULTS["defensive_put_roll_delta"]),
-    "assignment_cooldown_days": int(QC_PARAMETER_DEFAULTS["assignment_cooldown_days"]),
-    "large_loss_cooldown_days": int(QC_PARAMETER_DEFAULTS["large_loss_cooldown_days"]),
-    "large_loss_cooldown_pct": float(QC_PARAMETER_DEFAULTS["large_loss_cooldown_pct"]),
-    "volatility_cap_floor": float(QC_PARAMETER_DEFAULTS["volatility_cap_floor"]),
-    "volatility_cap_ceiling": float(QC_PARAMETER_DEFAULTS["volatility_cap_ceiling"]),
-    "volatility_lookback": int(QC_PARAMETER_DEFAULTS["volatility_lookback"]),
-    "dynamic_symbol_risk_enabled": bool(QC_PARAMETER_DEFAULTS["dynamic_symbol_risk_enabled"]),
-    "symbol_state_cap_floor": float(QC_PARAMETER_DEFAULTS["symbol_state_cap_floor"]),
-    "symbol_state_cap_ceiling": float(QC_PARAMETER_DEFAULTS["symbol_state_cap_ceiling"]),
-    "symbol_drawdown_lookback": int(QC_PARAMETER_DEFAULTS["symbol_drawdown_lookback"]),
-    "symbol_drawdown_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_drawdown_sensitivity"]),
-    "symbol_downtrend_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_downtrend_sensitivity"]),
-    "symbol_volatility_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_volatility_sensitivity"]),
-    "symbol_exposure_sensitivity": float(QC_PARAMETER_DEFAULTS["symbol_exposure_sensitivity"]),
     "symbol_assignment_base_cap": float(QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"]),
-    "stock_inventory_cap_enabled": bool(QC_PARAMETER_DEFAULTS["stock_inventory_cap_enabled"]),
-    "stock_inventory_base_cap": float(QC_PARAMETER_DEFAULTS["stock_inventory_base_cap"]),
-    "stock_inventory_cap_floor": float(QC_PARAMETER_DEFAULTS["stock_inventory_cap_floor"]),
-    "stock_inventory_block_threshold": float(QC_PARAMETER_DEFAULTS["stock_inventory_block_threshold"]),
+    "roll_threshold_pct": float(QC_PARAMETER_DEFAULTS["roll_threshold_pct"]),
+    "min_dte_for_roll": int(QC_PARAMETER_DEFAULTS["min_dte_for_roll"]),
+    "roll_target_dte_min": int(QC_PARAMETER_DEFAULTS["roll_target_dte_min"]),
+    "roll_target_dte_max": int(QC_PARAMETER_DEFAULTS["roll_target_dte_max"]),
+    "cc_below_cost_enabled": bool(QC_PARAMETER_DEFAULTS["cc_below_cost_enabled"]),
+    "cc_target_delta": float(QC_PARAMETER_DEFAULTS["cc_target_delta"]),
+    "cc_target_dte_min": int(QC_PARAMETER_DEFAULTS["cc_target_dte_min"]),
+    "cc_target_dte_max": int(QC_PARAMETER_DEFAULTS["cc_target_dte_max"]),
+    "cc_max_discount_to_cost": float(QC_PARAMETER_DEFAULTS["cc_max_discount_to_cost"]),
+    "assigned_stock_fail_safe_enabled": bool(QC_PARAMETER_DEFAULTS["assigned_stock_fail_safe_enabled"]),
+    "assigned_stock_min_days_held": int(QC_PARAMETER_DEFAULTS["assigned_stock_min_days_held"]),
+    "assigned_stock_drawdown_pct": float(QC_PARAMETER_DEFAULTS["assigned_stock_drawdown_pct"]),
+    "assigned_stock_force_exit_pct": float(QC_PARAMETER_DEFAULTS["assigned_stock_force_exit_pct"]),
     "max_new_puts_per_day": int(QC_PARAMETER_DEFAULTS["max_new_puts_per_day"]),
+    "ml_enabled": bool(QC_PARAMETER_DEFAULTS["ml_enabled"]),
+    "ml_min_confidence": float(QC_PARAMETER_DEFAULTS["ml_min_confidence"]),
+    "ml_adoption_rate": float(QC_PARAMETER_DEFAULTS["ml_adoption_rate"]),
+    "ml_exploration_rate": float(QC_PARAMETER_DEFAULTS["ml_exploration_rate"]),
+    "ml_learning_rate": float(QC_PARAMETER_DEFAULTS["ml_learning_rate"]),
 }
 
 
@@ -256,65 +196,31 @@ class BinbinGodParityConfig:
 
     parity_mode: str = "qc"
     contract_universe_mode: str = "qc_emulated_lattice"
-    ml_confidence_gate: float = 0.40
+    ml_confidence_gate: float = QC_BINBIN_DEFAULTS["ml_min_confidence"]
     initial_capital: float = QC_BINBIN_DEFAULTS["initial_capital"]
     max_positions_ceiling: int = QC_BINBIN_DEFAULTS["max_positions_ceiling"]
-    profit_target_pct: float = QC_BINBIN_DEFAULTS["profit_target_pct"]
-    stop_loss_pct: float = QC_BINBIN_DEFAULTS["stop_loss_pct"]
-    margin_buffer_pct: float = QC_BINBIN_DEFAULTS["margin_buffer_pct"]
-    margin_rate_per_contract: float = QC_BINBIN_DEFAULTS["margin_rate_per_contract"]
     target_margin_utilization: float = QC_BINBIN_DEFAULTS["target_margin_utilization"]
-    position_aggressiveness: float = QC_BINBIN_DEFAULTS["position_aggressiveness"]
-    max_risk_per_trade: float = QC_BINBIN_DEFAULTS["max_risk_per_trade"]
     max_assignment_risk_per_trade: float = QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"]
-    max_leverage: float = QC_BINBIN_DEFAULTS["max_leverage"]
+    symbol_assignment_base_cap: float = QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"]
+    roll_threshold_pct: float = QC_BINBIN_DEFAULTS["roll_threshold_pct"]
+    min_dte_for_roll: int = QC_BINBIN_DEFAULTS["min_dte_for_roll"]
+    roll_target_dte_min: int = QC_BINBIN_DEFAULTS["roll_target_dte_min"]
+    roll_target_dte_max: int = QC_BINBIN_DEFAULTS["roll_target_dte_max"]
+    cc_below_cost_enabled: bool = bool(QC_BINBIN_DEFAULTS["cc_below_cost_enabled"])
+    cc_target_delta: float = QC_BINBIN_DEFAULTS["cc_target_delta"]
+    cc_target_dte_min: int = QC_BINBIN_DEFAULTS["cc_target_dte_min"]
+    cc_target_dte_max: int = QC_BINBIN_DEFAULTS["cc_target_dte_max"]
+    cc_max_discount_to_cost: float = QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"]
+    assigned_stock_fail_safe_enabled: bool = bool(QC_BINBIN_DEFAULTS["assigned_stock_fail_safe_enabled"])
+    assigned_stock_min_days_held: int = QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"]
+    assigned_stock_drawdown_pct: float = QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"]
+    assigned_stock_force_exit_pct: float = QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"]
+    max_new_puts_per_day: int = QC_BINBIN_DEFAULTS["max_new_puts_per_day"]
     ml_enabled: bool = bool(QC_BINBIN_DEFAULTS["ml_enabled"])
     ml_min_confidence: float = QC_BINBIN_DEFAULTS["ml_min_confidence"]
-    dte_min: int = QC_BINBIN_DEFAULTS["dte_min"]
-    dte_max: int = QC_BINBIN_DEFAULTS["dte_max"]
-    put_delta: float = QC_BINBIN_DEFAULTS["put_delta"]
-    call_delta: float = QC_BINBIN_DEFAULTS["call_delta"]
-    max_put_contracts_per_symbol: int = 1
-    max_put_contracts_total: int = 2
-    max_contracts_per_trade: int = 1
-    repair_call_threshold_pct: float = QC_BINBIN_DEFAULTS["repair_call_threshold_pct"]
-    repair_call_delta: float = QC_BINBIN_DEFAULTS["repair_call_delta"]
-    repair_call_dte_min: int = QC_BINBIN_DEFAULTS["repair_call_dte_min"]
-    repair_call_dte_max: int = QC_BINBIN_DEFAULTS["repair_call_dte_max"]
-    repair_call_max_discount_pct: float = QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]
-    cc_fallback_delta_tolerance_1: float = QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]
-    cc_fallback_delta_tolerance_2: float = QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]
-    cc_fallback_dte_min: int = QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]
-    cc_fallback_dte_max: int = QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]
-    cc_fallback_min_cost_basis_ratio: float = QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"]
-    defensive_put_roll_enabled: bool = bool(QC_BINBIN_DEFAULTS["defensive_put_roll_enabled"])
-    defensive_put_roll_loss_pct: float = QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]
-    defensive_put_roll_itm_buffer_pct: float = QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]
-    defensive_put_roll_min_dte: int = QC_BINBIN_DEFAULTS["defensive_put_roll_min_dte"]
-    defensive_put_roll_max_dte: int = QC_BINBIN_DEFAULTS["defensive_put_roll_max_dte"]
-    defensive_put_roll_dte_min: int = QC_BINBIN_DEFAULTS["defensive_put_roll_dte_min"]
-    defensive_put_roll_dte_max: int = QC_BINBIN_DEFAULTS["defensive_put_roll_dte_max"]
-    defensive_put_roll_delta: float = QC_BINBIN_DEFAULTS["defensive_put_roll_delta"]
-    assignment_cooldown_days: int = QC_BINBIN_DEFAULTS["assignment_cooldown_days"]
-    large_loss_cooldown_days: int = QC_BINBIN_DEFAULTS["large_loss_cooldown_days"]
-    large_loss_cooldown_pct: float = QC_BINBIN_DEFAULTS["large_loss_cooldown_pct"]
-    volatility_cap_floor: float = QC_BINBIN_DEFAULTS["volatility_cap_floor"]
-    volatility_cap_ceiling: float = QC_BINBIN_DEFAULTS["volatility_cap_ceiling"]
-    volatility_lookback: int = QC_BINBIN_DEFAULTS["volatility_lookback"]
-    dynamic_symbol_risk_enabled: bool = bool(QC_BINBIN_DEFAULTS["dynamic_symbol_risk_enabled"])
-    symbol_state_cap_floor: float = QC_BINBIN_DEFAULTS["symbol_state_cap_floor"]
-    symbol_state_cap_ceiling: float = QC_BINBIN_DEFAULTS["symbol_state_cap_ceiling"]
-    symbol_drawdown_lookback: int = QC_BINBIN_DEFAULTS["symbol_drawdown_lookback"]
-    symbol_drawdown_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_drawdown_sensitivity"]
-    symbol_downtrend_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_downtrend_sensitivity"]
-    symbol_volatility_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_volatility_sensitivity"]
-    symbol_exposure_sensitivity: float = QC_BINBIN_DEFAULTS["symbol_exposure_sensitivity"]
-    symbol_assignment_base_cap: float = QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"]
-    stock_inventory_cap_enabled: bool = bool(QC_BINBIN_DEFAULTS["stock_inventory_cap_enabled"])
-    stock_inventory_base_cap: float = QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]
-    stock_inventory_cap_floor: float = QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]
-    stock_inventory_block_threshold: float = QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]
-    max_new_puts_per_day: int = QC_BINBIN_DEFAULTS["max_new_puts_per_day"]
+    ml_adoption_rate: float = QC_BINBIN_DEFAULTS["ml_adoption_rate"]
+    ml_exploration_rate: float = QC_BINBIN_DEFAULTS["ml_exploration_rate"]
+    ml_learning_rate: float = QC_BINBIN_DEFAULTS["ml_learning_rate"]
 
     @property
     def enabled(self) -> bool:
@@ -337,25 +243,10 @@ class BinbinGodParityConfig:
             contract_universe_mode = "qc_emulated_lattice"
         defaults = dict(QC_BINBIN_DEFAULTS if parity_mode == "qc" else {})
         merged = {**defaults, **params}
-
-        if parity_mode == "qc":
-            max_positions_ceiling = _to_int(
-                merged.get("max_positions_ceiling", QC_BINBIN_DEFAULTS["max_positions_ceiling"]),
-                QC_BINBIN_DEFAULTS["max_positions_ceiling"],
-            )
-        else:
-            max_positions_ceiling = _to_int(
-                merged.get("max_positions_ceiling", merged.get("max_positions", QC_BINBIN_DEFAULTS["max_positions_ceiling"])),
-                QC_BINBIN_DEFAULTS["max_positions_ceiling"],
-            )
-        position_aggressiveness = _clamp(
-            _to_float(merged.get("position_aggressiveness", QC_BINBIN_DEFAULTS["position_aggressiveness"]), QC_BINBIN_DEFAULTS["position_aggressiveness"]),
-            0.3,
-            2.0,
+        max_positions_ceiling = _to_int(
+            merged.get("max_positions_ceiling", merged.get("max_positions", QC_BINBIN_DEFAULTS["max_positions_ceiling"])),
+            QC_BINBIN_DEFAULTS["max_positions_ceiling"],
         )
-        symbol_cap_factor = 0.30 + 0.30 * position_aggressiveness
-        total_cap_factor = 1.20 + 0.80 * position_aggressiveness
-        trade_cap_factor = 0.60 + 0.40 * position_aggressiveness
         ml_min_confidence = _to_float(
             merged.get("ml_min_confidence", QC_BINBIN_DEFAULTS["ml_min_confidence"]),
             QC_BINBIN_DEFAULTS["ml_min_confidence"],
@@ -367,79 +258,35 @@ class BinbinGodParityConfig:
             ml_confidence_gate=_to_float(merged.get("ml_confidence_gate", ml_min_confidence), ml_min_confidence),
             initial_capital=_to_float(merged.get("initial_capital", QC_BINBIN_DEFAULTS["initial_capital"]), QC_BINBIN_DEFAULTS["initial_capital"]),
             max_positions_ceiling=max_positions_ceiling,
-            profit_target_pct=_to_float(merged.get("profit_target_pct", QC_BINBIN_DEFAULTS["profit_target_pct"]), QC_BINBIN_DEFAULTS["profit_target_pct"]),
-            stop_loss_pct=_to_float(merged.get("stop_loss_pct", QC_BINBIN_DEFAULTS["stop_loss_pct"]), QC_BINBIN_DEFAULTS["stop_loss_pct"]),
-            margin_buffer_pct=_to_float(merged.get("margin_buffer_pct", QC_BINBIN_DEFAULTS["margin_buffer_pct"]), QC_BINBIN_DEFAULTS["margin_buffer_pct"]),
-            margin_rate_per_contract=_to_float(merged.get("margin_rate_per_contract", QC_BINBIN_DEFAULTS["margin_rate_per_contract"]), QC_BINBIN_DEFAULTS["margin_rate_per_contract"]),
             target_margin_utilization=_to_float(
                 merged.get("target_margin_utilization", QC_BINBIN_DEFAULTS["target_margin_utilization"]),
                 QC_BINBIN_DEFAULTS["target_margin_utilization"],
             ),
-            position_aggressiveness=position_aggressiveness,
-            max_risk_per_trade=_to_float(merged.get("max_risk_per_trade", QC_BINBIN_DEFAULTS["max_risk_per_trade"]), QC_BINBIN_DEFAULTS["max_risk_per_trade"]),
             max_assignment_risk_per_trade=_to_float(merged.get("max_assignment_risk_per_trade", QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"]), QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"]),
-            max_leverage=_to_float(merged.get("max_leverage", QC_BINBIN_DEFAULTS["max_leverage"]), QC_BINBIN_DEFAULTS["max_leverage"]),
-            ml_enabled=bool(merged.get("ml_enabled", QC_BINBIN_DEFAULTS["ml_enabled"])),
-            ml_min_confidence=ml_min_confidence,
-            dte_min=_to_int(merged.get("dte_min", QC_BINBIN_DEFAULTS["dte_min"]), QC_BINBIN_DEFAULTS["dte_min"]),
-            dte_max=_to_int(merged.get("dte_max", QC_BINBIN_DEFAULTS["dte_max"]), QC_BINBIN_DEFAULTS["dte_max"]),
-            put_delta=_to_float(merged.get("put_delta", QC_BINBIN_DEFAULTS["put_delta"]), QC_BINBIN_DEFAULTS["put_delta"]),
-            call_delta=_to_float(merged.get("call_delta", QC_BINBIN_DEFAULTS["call_delta"]), QC_BINBIN_DEFAULTS["call_delta"]),
-            max_put_contracts_per_symbol=max(1, int(max_positions_ceiling * symbol_cap_factor)),
-            max_put_contracts_total=max(2, int(max_positions_ceiling * total_cap_factor)),
-            max_contracts_per_trade=max(1, int(max(1, int(max_positions_ceiling * symbol_cap_factor)) * trade_cap_factor)),
-            repair_call_threshold_pct=_to_float(merged.get("repair_call_threshold_pct", QC_BINBIN_DEFAULTS["repair_call_threshold_pct"]), QC_BINBIN_DEFAULTS["repair_call_threshold_pct"]),
-            repair_call_delta=_clamp(_to_float(merged.get("repair_call_delta", QC_BINBIN_DEFAULTS["repair_call_delta"]), QC_BINBIN_DEFAULTS["repair_call_delta"]), 0.20, 0.60),
-            repair_call_dte_min=_to_int(merged.get("repair_call_dte_min", QC_BINBIN_DEFAULTS["repair_call_dte_min"]), QC_BINBIN_DEFAULTS["repair_call_dte_min"]),
-            repair_call_dte_max=_to_int(merged.get("repair_call_dte_max", QC_BINBIN_DEFAULTS["repair_call_dte_max"]), QC_BINBIN_DEFAULTS["repair_call_dte_max"]),
-            repair_call_max_discount_pct=_to_float(merged.get("repair_call_max_discount_pct", QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]), QC_BINBIN_DEFAULTS["repair_call_max_discount_pct"]),
-            cc_fallback_delta_tolerance_1=_to_float(merged.get("cc_fallback_delta_tolerance_1", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]), QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]),
-            cc_fallback_delta_tolerance_2=_to_float(merged.get("cc_fallback_delta_tolerance_2", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]), QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]),
-            cc_fallback_dte_min=_to_int(merged.get("cc_fallback_dte_min", QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]), QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]),
-            cc_fallback_dte_max=_to_int(merged.get("cc_fallback_dte_max", QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]), QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]),
-            cc_fallback_min_cost_basis_ratio=_clamp(
-                _to_float(
-                    merged.get("cc_fallback_min_cost_basis_ratio", QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"]),
-                    QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"],
-                ),
-                0.50,
-                1.0,
-            ),
-            defensive_put_roll_enabled=bool(merged.get("defensive_put_roll_enabled", QC_BINBIN_DEFAULTS["defensive_put_roll_enabled"])),
-            defensive_put_roll_loss_pct=_to_float(merged.get("defensive_put_roll_loss_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]), QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"]),
-            defensive_put_roll_itm_buffer_pct=_to_float(merged.get("defensive_put_roll_itm_buffer_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]), QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"]),
-            defensive_put_roll_min_dte=_to_int(merged.get("defensive_put_roll_min_dte", QC_BINBIN_DEFAULTS["defensive_put_roll_min_dte"]), QC_BINBIN_DEFAULTS["defensive_put_roll_min_dte"]),
-            defensive_put_roll_max_dte=_to_int(merged.get("defensive_put_roll_max_dte", QC_BINBIN_DEFAULTS["defensive_put_roll_max_dte"]), QC_BINBIN_DEFAULTS["defensive_put_roll_max_dte"]),
-            defensive_put_roll_dte_min=_to_int(merged.get("defensive_put_roll_dte_min", QC_BINBIN_DEFAULTS["defensive_put_roll_dte_min"]), QC_BINBIN_DEFAULTS["defensive_put_roll_dte_min"]),
-            defensive_put_roll_dte_max=_to_int(merged.get("defensive_put_roll_dte_max", QC_BINBIN_DEFAULTS["defensive_put_roll_dte_max"]), QC_BINBIN_DEFAULTS["defensive_put_roll_dte_max"]),
-            defensive_put_roll_delta=_clamp(_to_float(merged.get("defensive_put_roll_delta", QC_BINBIN_DEFAULTS["defensive_put_roll_delta"]), QC_BINBIN_DEFAULTS["defensive_put_roll_delta"]), 0.10, 0.40),
-            assignment_cooldown_days=_to_int(merged.get("assignment_cooldown_days", QC_BINBIN_DEFAULTS["assignment_cooldown_days"]), QC_BINBIN_DEFAULTS["assignment_cooldown_days"]),
-            large_loss_cooldown_days=_to_int(merged.get("large_loss_cooldown_days", QC_BINBIN_DEFAULTS["large_loss_cooldown_days"]), QC_BINBIN_DEFAULTS["large_loss_cooldown_days"]),
-            large_loss_cooldown_pct=_to_float(merged.get("large_loss_cooldown_pct", QC_BINBIN_DEFAULTS["large_loss_cooldown_pct"]), QC_BINBIN_DEFAULTS["large_loss_cooldown_pct"]),
-            volatility_cap_floor=_clamp(_to_float(merged.get("volatility_cap_floor", QC_BINBIN_DEFAULTS["volatility_cap_floor"]), QC_BINBIN_DEFAULTS["volatility_cap_floor"]), 0.10, 1.0),
-            volatility_cap_ceiling=_clamp(_to_float(merged.get("volatility_cap_ceiling", QC_BINBIN_DEFAULTS["volatility_cap_ceiling"]), QC_BINBIN_DEFAULTS["volatility_cap_ceiling"]), 1.0, 3.0),
-            volatility_lookback=_to_int(merged.get("volatility_lookback", QC_BINBIN_DEFAULTS["volatility_lookback"]), QC_BINBIN_DEFAULTS["volatility_lookback"]),
-            dynamic_symbol_risk_enabled=bool(merged.get("dynamic_symbol_risk_enabled", QC_BINBIN_DEFAULTS["dynamic_symbol_risk_enabled"])),
-            symbol_state_cap_floor=_clamp(_to_float(merged.get("symbol_state_cap_floor", QC_BINBIN_DEFAULTS["symbol_state_cap_floor"]), QC_BINBIN_DEFAULTS["symbol_state_cap_floor"]), 0.05, 1.0),
-            symbol_state_cap_ceiling=_clamp(_to_float(merged.get("symbol_state_cap_ceiling", QC_BINBIN_DEFAULTS["symbol_state_cap_ceiling"]), QC_BINBIN_DEFAULTS["symbol_state_cap_ceiling"]), 0.50, 1.0),
-            symbol_drawdown_lookback=_to_int(merged.get("symbol_drawdown_lookback", QC_BINBIN_DEFAULTS["symbol_drawdown_lookback"]), QC_BINBIN_DEFAULTS["symbol_drawdown_lookback"]),
-            symbol_drawdown_sensitivity=_to_float(merged.get("symbol_drawdown_sensitivity", QC_BINBIN_DEFAULTS["symbol_drawdown_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_drawdown_sensitivity"]),
-            symbol_downtrend_sensitivity=_to_float(merged.get("symbol_downtrend_sensitivity", QC_BINBIN_DEFAULTS["symbol_downtrend_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_downtrend_sensitivity"]),
-            symbol_volatility_sensitivity=_to_float(merged.get("symbol_volatility_sensitivity", QC_BINBIN_DEFAULTS["symbol_volatility_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_volatility_sensitivity"]),
-            symbol_exposure_sensitivity=_to_float(merged.get("symbol_exposure_sensitivity", QC_BINBIN_DEFAULTS["symbol_exposure_sensitivity"]), QC_BINBIN_DEFAULTS["symbol_exposure_sensitivity"]),
             symbol_assignment_base_cap=_clamp(
-                _to_float(
-                    merged.get("symbol_assignment_base_cap", QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"]),
-                    QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"],
-                ),
+                _to_float(merged.get("symbol_assignment_base_cap", QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"]), QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"]),
                 0.05,
                 1.5,
             ),
-            stock_inventory_cap_enabled=bool(merged.get("stock_inventory_cap_enabled", QC_BINBIN_DEFAULTS["stock_inventory_cap_enabled"])),
-            stock_inventory_base_cap=_clamp(_to_float(merged.get("stock_inventory_base_cap", QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]), QC_BINBIN_DEFAULTS["stock_inventory_base_cap"]), 0.05, 1.0),
-            stock_inventory_cap_floor=_clamp(_to_float(merged.get("stock_inventory_cap_floor", QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]), QC_BINBIN_DEFAULTS["stock_inventory_cap_floor"]), 0.10, 1.0),
-            stock_inventory_block_threshold=_clamp(_to_float(merged.get("stock_inventory_block_threshold", QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]), QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"]), 0.50, 1.20),
+            roll_threshold_pct=_to_float(merged.get("roll_threshold_pct", QC_BINBIN_DEFAULTS["roll_threshold_pct"]), QC_BINBIN_DEFAULTS["roll_threshold_pct"]),
+            min_dte_for_roll=_to_int(merged.get("min_dte_for_roll", QC_BINBIN_DEFAULTS["min_dte_for_roll"]), QC_BINBIN_DEFAULTS["min_dte_for_roll"]),
+            roll_target_dte_min=_to_int(merged.get("roll_target_dte_min", QC_BINBIN_DEFAULTS["roll_target_dte_min"]), QC_BINBIN_DEFAULTS["roll_target_dte_min"]),
+            roll_target_dte_max=_to_int(merged.get("roll_target_dte_max", QC_BINBIN_DEFAULTS["roll_target_dte_max"]), QC_BINBIN_DEFAULTS["roll_target_dte_max"]),
+            cc_below_cost_enabled=bool(merged.get("cc_below_cost_enabled", QC_BINBIN_DEFAULTS["cc_below_cost_enabled"])),
+            cc_target_delta=_clamp(_to_float(merged.get("cc_target_delta", QC_BINBIN_DEFAULTS["cc_target_delta"]), QC_BINBIN_DEFAULTS["cc_target_delta"]), 0.10, 0.60),
+            cc_target_dte_min=_to_int(merged.get("cc_target_dte_min", QC_BINBIN_DEFAULTS["cc_target_dte_min"]), QC_BINBIN_DEFAULTS["cc_target_dte_min"]),
+            cc_target_dte_max=_to_int(merged.get("cc_target_dte_max", QC_BINBIN_DEFAULTS["cc_target_dte_max"]), QC_BINBIN_DEFAULTS["cc_target_dte_max"]),
+            cc_max_discount_to_cost=_clamp(_to_float(merged.get("cc_max_discount_to_cost", QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"]), QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"]), 0.0, 0.30),
+            assigned_stock_fail_safe_enabled=bool(merged.get("assigned_stock_fail_safe_enabled", QC_BINBIN_DEFAULTS["assigned_stock_fail_safe_enabled"])),
+            assigned_stock_min_days_held=_to_int(merged.get("assigned_stock_min_days_held", QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"]), QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"]),
+            assigned_stock_drawdown_pct=_to_float(merged.get("assigned_stock_drawdown_pct", QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"]), QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"]),
+            assigned_stock_force_exit_pct=_clamp(_to_float(merged.get("assigned_stock_force_exit_pct", QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"]), QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"]), 0.0, 1.0),
             max_new_puts_per_day=max(1, _to_int(merged.get("max_new_puts_per_day", QC_BINBIN_DEFAULTS["max_new_puts_per_day"]), QC_BINBIN_DEFAULTS["max_new_puts_per_day"])),
+            ml_enabled=bool(merged.get("ml_enabled", QC_BINBIN_DEFAULTS["ml_enabled"])),
+            ml_min_confidence=ml_min_confidence,
+            ml_adoption_rate=_to_float(merged.get("ml_adoption_rate", QC_BINBIN_DEFAULTS["ml_adoption_rate"]), QC_BINBIN_DEFAULTS["ml_adoption_rate"]),
+            ml_exploration_rate=_to_float(merged.get("ml_exploration_rate", QC_BINBIN_DEFAULTS["ml_exploration_rate"]), QC_BINBIN_DEFAULTS["ml_exploration_rate"]),
+            ml_learning_rate=_to_float(merged.get("ml_learning_rate", QC_BINBIN_DEFAULTS["ml_learning_rate"]), QC_BINBIN_DEFAULTS["ml_learning_rate"]),
         )
 
     def apply_to_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -452,59 +299,28 @@ class BinbinGodParityConfig:
                 "ml_confidence_gate": self.ml_confidence_gate,
                 "initial_capital": self.initial_capital,
                 "max_positions_ceiling": self.max_positions_ceiling,
-                "profit_target_pct": self.profit_target_pct,
-                "stop_loss_pct": self.stop_loss_pct,
-                "margin_buffer_pct": self.margin_buffer_pct,
-                "margin_rate_per_contract": self.margin_rate_per_contract,
                 "target_margin_utilization": self.target_margin_utilization,
-                "position_aggressiveness": self.position_aggressiveness,
-                "max_risk_per_trade": self.max_risk_per_trade,
                 "max_assignment_risk_per_trade": self.max_assignment_risk_per_trade,
-                "max_leverage": self.max_leverage,
+                "symbol_assignment_base_cap": self.symbol_assignment_base_cap,
+                "roll_threshold_pct": self.roll_threshold_pct,
+                "min_dte_for_roll": self.min_dte_for_roll,
+                "roll_target_dte_min": self.roll_target_dte_min,
+                "roll_target_dte_max": self.roll_target_dte_max,
+                "cc_below_cost_enabled": self.cc_below_cost_enabled,
+                "cc_target_delta": self.cc_target_delta,
+                "cc_target_dte_min": self.cc_target_dte_min,
+                "cc_target_dte_max": self.cc_target_dte_max,
+                "cc_max_discount_to_cost": self.cc_max_discount_to_cost,
+                "assigned_stock_fail_safe_enabled": self.assigned_stock_fail_safe_enabled,
+                "assigned_stock_min_days_held": self.assigned_stock_min_days_held,
+                "assigned_stock_drawdown_pct": self.assigned_stock_drawdown_pct,
+                "assigned_stock_force_exit_pct": self.assigned_stock_force_exit_pct,
+                "max_new_puts_per_day": self.max_new_puts_per_day,
                 "ml_enabled": self.ml_enabled,
                 "ml_min_confidence": self.ml_min_confidence,
-                "dte_min": self.dte_min,
-                "dte_max": self.dte_max,
-                "put_delta": self.put_delta,
-                "call_delta": self.call_delta,
-                "repair_call_threshold_pct": self.repair_call_threshold_pct,
-                "repair_call_delta": self.repair_call_delta,
-                "repair_call_dte_min": self.repair_call_dte_min,
-                "repair_call_dte_max": self.repair_call_dte_max,
-                "repair_call_max_discount_pct": self.repair_call_max_discount_pct,
-                "cc_fallback_delta_tolerance_1": self.cc_fallback_delta_tolerance_1,
-                "cc_fallback_delta_tolerance_2": self.cc_fallback_delta_tolerance_2,
-                "cc_fallback_dte_min": self.cc_fallback_dte_min,
-                "cc_fallback_dte_max": self.cc_fallback_dte_max,
-                "cc_fallback_min_cost_basis_ratio": self.cc_fallback_min_cost_basis_ratio,
-                "defensive_put_roll_enabled": self.defensive_put_roll_enabled,
-                "defensive_put_roll_loss_pct": self.defensive_put_roll_loss_pct,
-                "defensive_put_roll_itm_buffer_pct": self.defensive_put_roll_itm_buffer_pct,
-                "defensive_put_roll_min_dte": self.defensive_put_roll_min_dte,
-                "defensive_put_roll_max_dte": self.defensive_put_roll_max_dte,
-                "defensive_put_roll_dte_min": self.defensive_put_roll_dte_min,
-                "defensive_put_roll_dte_max": self.defensive_put_roll_dte_max,
-                "defensive_put_roll_delta": self.defensive_put_roll_delta,
-                "assignment_cooldown_days": self.assignment_cooldown_days,
-                "large_loss_cooldown_days": self.large_loss_cooldown_days,
-                "large_loss_cooldown_pct": self.large_loss_cooldown_pct,
-                "volatility_cap_floor": self.volatility_cap_floor,
-                "volatility_cap_ceiling": self.volatility_cap_ceiling,
-                "volatility_lookback": self.volatility_lookback,
-                "dynamic_symbol_risk_enabled": self.dynamic_symbol_risk_enabled,
-                "symbol_state_cap_floor": self.symbol_state_cap_floor,
-                "symbol_state_cap_ceiling": self.symbol_state_cap_ceiling,
-                "symbol_drawdown_lookback": self.symbol_drawdown_lookback,
-                "symbol_drawdown_sensitivity": self.symbol_drawdown_sensitivity,
-                "symbol_downtrend_sensitivity": self.symbol_downtrend_sensitivity,
-                "symbol_volatility_sensitivity": self.symbol_volatility_sensitivity,
-                "symbol_exposure_sensitivity": self.symbol_exposure_sensitivity,
-                "symbol_assignment_base_cap": self.symbol_assignment_base_cap,
-                "stock_inventory_cap_enabled": self.stock_inventory_cap_enabled,
-                "stock_inventory_base_cap": self.stock_inventory_base_cap,
-                "stock_inventory_cap_floor": self.stock_inventory_cap_floor,
-                "stock_inventory_block_threshold": self.stock_inventory_block_threshold,
-                "max_new_puts_per_day": self.max_new_puts_per_day,
+                "ml_adoption_rate": self.ml_adoption_rate,
+                "ml_exploration_rate": self.ml_exploration_rate,
+                "ml_learning_rate": self.ml_learning_rate,
                 "max_positions": self.max_positions_ceiling if self.enabled else params.get("max_positions", self.max_positions_ceiling),
             }
         )
@@ -592,13 +408,6 @@ def build_cc_selection_tiers_qc(
     primary_delta_tolerance: float,
     primary_min_strike: float | None,
 ) -> List[Dict[str, float]]:
-    if cost_basis <= 0 or primary_min_strike is None:
-        return []
-
-    rescue_min_strike = max(
-        underlying_price * 1.01,
-        cost_basis * config.cc_fallback_min_cost_basis_ratio,
-    )
     return [
         {
             "label": "primary",
@@ -608,25 +417,11 @@ def build_cc_selection_tiers_qc(
             "min_strike": primary_min_strike,
         },
         {
-            "label": "fallback_delta",
-            "delta_tolerance": config.cc_fallback_delta_tolerance_1,
+            "label": "delta_relaxed",
+            "delta_tolerance": 0.16,
             "dte_min": primary_dte_min,
             "dte_max": primary_dte_max,
             "min_strike": primary_min_strike,
-        },
-        {
-            "label": "fallback_dte",
-            "delta_tolerance": config.cc_fallback_delta_tolerance_1,
-            "dte_min": config.cc_fallback_dte_min,
-            "dte_max": config.cc_fallback_dte_max,
-            "min_strike": primary_min_strike,
-        },
-        {
-            "label": "rescue_discount",
-            "delta_tolerance": config.cc_fallback_delta_tolerance_2,
-            "dte_min": config.cc_fallback_dte_min,
-            "dte_max": config.cc_fallback_dte_max,
-            "min_strike": rescue_min_strike,
         },
     ]
 
@@ -795,28 +590,8 @@ def calculate_volatility_weighted_symbol_cap_qc(
     symbol_history_bars: Sequence[Dict[str, Any]] | None,
     pool_history_bars: Dict[str, Sequence[Dict[str, Any]]] | None,
 ) -> int:
-    base_cap = max(1, int(config.max_put_contracts_per_symbol))
-    lookback = max(5, int(config.volatility_lookback))
-    symbol_vol = _calculate_historical_vol_from_bars(symbol_history_bars or [], window=lookback)
-    if symbol_vol <= 0:
-        return base_cap
-
-    pool_vols = []
-    for bars in (pool_history_bars or {}).values():
-        if bars and len(bars) >= lookback + 1:
-            vol = _calculate_historical_vol_from_bars(bars, window=lookback)
-            if vol > 0:
-                pool_vols.append(vol)
-    if not pool_vols:
-        return base_cap
-
-    avg_pool_vol = sum(pool_vols) / len(pool_vols)
-    raw_multiplier = avg_pool_vol / symbol_vol if symbol_vol > 0 else 1.0
-    multiplier = max(
-        config.volatility_cap_floor,
-        min(raw_multiplier, min(1.0, config.volatility_cap_ceiling)),
-    )
-    return max(1, int(round(base_cap * multiplier)))
+    del symbol, symbol_history_bars, pool_history_bars
+    return max(1, int(config.max_positions_ceiling))
 
 
 def calculate_symbol_state_risk_multiplier_qc(
@@ -828,49 +603,18 @@ def calculate_symbol_state_risk_multiplier_qc(
     symbol_stock_notional: float,
     portfolio_value: float,
 ) -> tuple[float, Dict[str, float]]:
-    if not config.dynamic_symbol_risk_enabled:
-        return 1.0, {
-            "vol_ratio": 1.0,
-            "drawdown": 0.0,
-            "momentum_20d": 0.0,
-            "exposure_ratio": 0.0,
-        }
-
-    lookback = max(5, int(config.volatility_lookback))
-    symbol_bars = list(symbol_history_bars or [])
-    symbol_vol = _calculate_historical_vol_from_bars(symbol_bars, window=lookback) if len(symbol_bars) >= lookback + 1 else 0.25
-
-    pool_vols = []
-    for bars in (pool_history_bars or {}).values():
-        if bars and len(bars) >= lookback + 1:
-            pool_vols.append(_calculate_historical_vol_from_bars(bars, window=lookback))
-    avg_pool_vol = (sum(pool_vols) / len(pool_vols)) if pool_vols else max(symbol_vol, 0.25)
-    vol_ratio = symbol_vol / avg_pool_vol if avg_pool_vol > 0 else 1.0
-
-    closes = [float(bar.get("close", 0.0)) for bar in symbol_bars if bar.get("close", 0)]
-    momentum_20d = 0.0
-    if len(closes) >= 20 and closes[-20] > 0:
-        momentum_20d = underlying_price / closes[-20] - 1.0
-
-    dd_lookback = max(20, int(config.symbol_drawdown_lookback))
-    recent_closes = closes[-dd_lookback:] if closes else []
-    peak_price = max(recent_closes) if recent_closes else max(underlying_price, 1.0)
-    drawdown = max(0.0, (peak_price - underlying_price) / peak_price) if peak_price > 0 else 0.0
-
-    assignment_exposure = symbol_put_notional + symbol_stock_notional
-    exposure_ratio = assignment_exposure / portfolio_value if portfolio_value > 0 else 0.0
-
-    volatility_penalty = max(0.35, 1.0 - max(0.0, vol_ratio - 1.0) * config.symbol_volatility_sensitivity)
-    downtrend_penalty = max(0.35, 1.0 - max(0.0, -momentum_20d) * config.symbol_downtrend_sensitivity)
-    drawdown_penalty = max(0.25, 1.0 - drawdown * config.symbol_drawdown_sensitivity)
-    exposure_penalty = max(0.20, 1.0 - exposure_ratio * config.symbol_exposure_sensitivity)
-
-    raw_multiplier = volatility_penalty * downtrend_penalty * drawdown_penalty * exposure_penalty
-    multiplier = max(config.symbol_state_cap_floor, min(raw_multiplier, config.symbol_state_cap_ceiling))
+    drawdown = 0.0
+    symbol_bars = [float(bar.get("close", 0.0)) for bar in list(symbol_history_bars or []) if bar.get("close", 0)]
+    if symbol_bars:
+        peak_price = max(symbol_bars[-60:] or [underlying_price])
+        if peak_price > 0:
+            drawdown = max(0.0, (peak_price - underlying_price) / peak_price)
+    exposure_ratio = (symbol_put_notional + symbol_stock_notional) / portfolio_value if portfolio_value > 0 else 0.0
+    multiplier = 1.0
     return multiplier, {
-        "vol_ratio": vol_ratio,
+        "vol_ratio": 1.0,
         "drawdown": drawdown,
-        "momentum_20d": momentum_20d,
+        "momentum_20d": 0.0,
         "exposure_ratio": exposure_ratio,
     }
 
@@ -880,11 +624,8 @@ def calculate_stock_inventory_cap_qc(
     portfolio_value: float,
     symbol_state_multiplier: float,
 ) -> float:
-    if not config.stock_inventory_cap_enabled:
-        return portfolio_value
-    base_cap = portfolio_value * config.stock_inventory_base_cap
-    dynamic_multiplier = max(config.stock_inventory_cap_floor, min(1.0, symbol_state_multiplier))
-    return max(0.0, base_cap * dynamic_multiplier)
+    del config, symbol_state_multiplier
+    return portfolio_value
 
 
 def calculate_put_quantity_qc(
@@ -906,22 +647,13 @@ def calculate_put_quantity_qc(
 ) -> tuple[int, Dict[str, float]]:
     strike = selected_contract.strike
     premium = selected_contract.premium
-    otm_amount = max(0.0, underlying_price - strike)
-    margin_method_1 = 0.20 * underlying_price * 100 - otm_amount * 100
-    margin_method_2 = 0.10 * strike * 100
-    estimated_margin_per_contract = max(margin_method_1, margin_method_2) + premium * 100
-    fallback_margin = strike * 100 * config.margin_rate_per_contract
-    estimated_margin_per_contract = max(estimated_margin_per_contract, fallback_margin)
+    estimated_margin_per_contract = estimate_put_margin_qc(
+        strike=strike,
+        premium=premium,
+        underlying_price=underlying_price,
+        margin_rate_per_contract=0.25,
+    )
 
-    usable_margin = max(0.0, margin_remaining * (1 - config.margin_buffer_pct))
-    adjusted_max_positions = dynamic_max_positions - stock_holding_count
-    stock_value_ratio = stock_holdings_value / config.initial_capital if config.initial_capital > 0 else 0
-    if stock_value_ratio > 0.30:
-        reduction_factor = min(0.5, stock_value_ratio)
-        adjusted_max_positions = max(1, int(adjusted_max_positions * (1 - reduction_factor)))
-
-    total_put_contracts = 0
-    symbol_put_contracts = 0
     total_put_notional = 0.0
     symbol_put_notional = 0.0
     for pos in open_option_positions:
@@ -930,19 +662,11 @@ def calculate_put_quantity_qc(
         contracts = abs(int(getattr(pos, "quantity", 0)))
         strike_h = float(getattr(pos, "strike", 0.0))
         notional = contracts * strike_h * 100
-        total_put_contracts += contracts
         total_put_notional += notional
         if getattr(pos, "symbol", "") == symbol:
-            symbol_put_contracts += contracts
             symbol_put_notional += notional
 
     symbol_stock_notional = shares_held * max(underlying_price, 0.0)
-    symbol_cap = calculate_volatility_weighted_symbol_cap_qc(
-        config,
-        symbol,
-        symbol_history_bars,
-        pool_history_bars,
-    )
     symbol_state_multiplier, symbol_state = calculate_symbol_state_risk_multiplier_qc(
         config,
         symbol_history_bars,
@@ -952,75 +676,38 @@ def calculate_put_quantity_qc(
         symbol_stock_notional,
         portfolio_value,
     )
-    symbol_cap = max(1, int(symbol_cap * symbol_state_multiplier))
-    max_by_symbol_contracts = max(0, symbol_cap - symbol_put_contracts)
-    max_by_total_contracts = max(0, config.max_put_contracts_total - total_put_contracts)
-    max_by_trade_cap = max(0, min(config.max_contracts_per_trade, symbol_cap))
-    max_by_margin = int(usable_margin / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
-    max_by_limit = max(0, adjusted_max_positions - current_positions)
-
     margin_budget = portfolio_value * config.target_margin_utilization
     remaining_budget = max(0.0, margin_budget - total_margin_used)
-    max_by_budget = int(remaining_budget / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
-
-    leverage_budget = portfolio_value * config.max_leverage
-    remaining_leverage_budget = max(0.0, leverage_budget - total_margin_used)
-    max_by_leverage = int(remaining_leverage_budget / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
-
-    aggr = config.position_aggressiveness
-    base_symbol_notional_cap = portfolio_value * config.symbol_assignment_base_cap
-    per_symbol_notional_cap = base_symbol_notional_cap * symbol_state_multiplier
-    total_notional_cap = portfolio_value * (0.70 + 0.90 * aggr)
     candidate_notional = strike * 100
-    remaining_symbol_notional = max(0.0, per_symbol_notional_cap - (symbol_put_notional + symbol_stock_notional))
-    remaining_total_notional = max(0.0, total_notional_cap - (total_put_notional + stock_holdings_value))
-    max_by_symbol_notional = int(remaining_symbol_notional / candidate_notional) if candidate_notional > 0 else 0
-    max_by_total_notional = int(remaining_total_notional / candidate_notional) if candidate_notional > 0 else 0
-
-    stock_inventory_cap = calculate_stock_inventory_cap_qc(config, portfolio_value, symbol_state_multiplier)
-    remaining_stock_inventory = max(0.0, stock_inventory_cap - symbol_stock_notional)
-    max_by_stock_inventory = int(remaining_stock_inventory / candidate_notional) if candidate_notional > 0 else 0
+    remaining_symbol_notional = max(
+        0.0,
+        portfolio_value * config.symbol_assignment_base_cap * symbol_state_multiplier - (symbol_put_notional + symbol_stock_notional),
+    )
     assignment_trade_cap = portfolio_value * config.max_assignment_risk_per_trade
-    max_by_assignment_trade = int(assignment_trade_cap / candidate_notional) if candidate_notional > 0 else 0
-    max_by_risk = max_by_trade_cap
-    if premium > 0 and portfolio_value > 0 and config.max_risk_per_trade > 0:
-        max_by_risk = int((portfolio_value * config.max_risk_per_trade) / (premium * 100))
-
-    diagnostics = {
-        "margin": max_by_margin,
-        "slots": max_by_limit,
-        "budget": max_by_budget,
-        "leverage": max_by_leverage,
-        "symbol_contracts": max_by_symbol_contracts,
-        "total_contracts": max_by_total_contracts,
-        "trade_cap": max_by_trade_cap,
-        "symbol_notional": max_by_symbol_notional,
-        "total_notional": max_by_total_notional,
-        "stock_inventory": max_by_stock_inventory,
-        "assignment_trade": max_by_assignment_trade,
-        "risk": max_by_risk,
-        "symbol_cap": symbol_cap,
+    diagnostics: Dict[str, float] = {
+        "portfolio_margin_capacity": int(remaining_budget / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0,
+        "symbol_assignment_capacity": int(remaining_symbol_notional / candidate_notional) if candidate_notional > 0 else 0,
+        "trade_assignment_capacity": int(assignment_trade_cap / candidate_notional) if candidate_notional > 0 else 0,
+        "position_slot_capacity": max(0, dynamic_max_positions - current_positions),
         "state_multiplier": round(symbol_state_multiplier, 4),
         "vol_ratio": round(symbol_state["vol_ratio"], 4),
         "drawdown": round(symbol_state["drawdown"], 4),
         "momentum_20d": round(symbol_state["momentum_20d"], 4),
         "exposure_ratio": round(symbol_state["exposure_ratio"], 4),
     }
-    limit_keys = (
-        "margin",
-        "slots",
-        "budget",
-        "leverage",
-        "symbol_contracts",
-        "total_contracts",
-        "trade_cap",
-        "symbol_notional",
-        "total_notional",
-        "stock_inventory",
-        "assignment_trade",
-        "risk",
+    block_sequence = (
+        ("portfolio_margin", "portfolio_margin_capacity"),
+        ("symbol_assignment", "symbol_assignment_capacity"),
+        ("trade_assignment", "trade_assignment_capacity"),
+        ("position_slots", "position_slot_capacity"),
     )
-    quantity = min(diagnostics[key] for key in limit_keys) if diagnostics else 0
+    for reason, key in block_sequence:
+        if diagnostics[key] <= 0:
+            diagnostics["block_reason"] = reason
+            return 0, diagnostics
+
+    diagnostics["block_reason"] = ""
+    quantity = min(int(diagnostics[key]) for _, key in block_sequence)
     return max(0, quantity), diagnostics
 
 

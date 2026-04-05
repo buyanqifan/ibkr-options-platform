@@ -153,25 +153,21 @@ class BinbinGodStrategy(BaseStrategy):
         self.parity_config = parity_config
         self.parity_mode = parity_config.parity_mode
         self.contract_universe_mode = parity_config.contract_universe_mode
-        self.dte_min = resolved_config.get("dte_min", QC_BINBIN_DEFAULTS["dte_min"])
-        self.dte_max = resolved_config.get("dte_max", QC_BINBIN_DEFAULTS["dte_max"])
-        self.delta_target = resolved_config.get("delta_target", QC_BINBIN_DEFAULTS["put_delta"])
-        self.profit_target_pct = resolved_config.get("profit_target_pct", QC_BINBIN_DEFAULTS["profit_target_pct"])
-        self.stop_loss_pct = resolved_config.get("stop_loss_pct", QC_BINBIN_DEFAULTS["stop_loss_pct"])  # Disabled by default - Wheel strategy doesn't use traditional stop loss
+        self.dte_min = int(resolved_config.get("dte_min", 21))
+        self.dte_max = int(resolved_config.get("dte_max", 45))
+        self.delta_target = float(resolved_config.get("delta_target", 0.30))
         self.initial_capital = resolved_config.get("initial_capital", QC_BINBIN_DEFAULTS["initial_capital"])
-        self.max_risk_per_trade = resolved_config.get("max_risk_per_trade", 0.02)
         self.max_assignment_risk_per_trade = resolved_config.get("max_assignment_risk_per_trade", QC_BINBIN_DEFAULTS["max_assignment_risk_per_trade"])
-        self.max_leverage = resolved_config.get("max_leverage", QC_BINBIN_DEFAULTS["max_leverage"])
         self.target_margin_utilization = resolved_config.get(
             "target_margin_utilization",
             QC_BINBIN_DEFAULTS["target_margin_utilization"],
         )
-        self.position_aggressiveness = resolved_config.get(
-            "position_aggressiveness",
-            QC_BINBIN_DEFAULTS["position_aggressiveness"],
-        )
         self.ml_enabled = resolved_config.get("ml_enabled", QC_BINBIN_DEFAULTS["ml_enabled"])
         self.ml_min_confidence = resolved_config.get("ml_confidence_gate", resolved_config.get("ml_min_confidence", QC_BINBIN_DEFAULTS["ml_min_confidence"]))
+        self.roll_threshold_pct = resolved_config.get("roll_threshold_pct", QC_BINBIN_DEFAULTS["roll_threshold_pct"])
+        self.min_dte_for_roll = resolved_config.get("min_dte_for_roll", QC_BINBIN_DEFAULTS["min_dte_for_roll"])
+        self.roll_target_dte_min = resolved_config.get("roll_target_dte_min", QC_BINBIN_DEFAULTS["roll_target_dte_min"])
+        self.roll_target_dte_max = resolved_config.get("roll_target_dte_max", QC_BINBIN_DEFAULTS["roll_target_dte_max"])
 
         self.config = resolved_config
         self.symbol = resolved_config.get("symbol", "MAG7_AUTO")
@@ -182,85 +178,49 @@ class BinbinGodStrategy(BaseStrategy):
         self.use_synthetic_data = resolved_config.get("use_synthetic_data", False)
         
         # Wheel-specific parameters
-        self.put_delta = resolved_config.get("put_delta", QC_BINBIN_DEFAULTS["put_delta"])
-        self.call_delta = resolved_config.get("call_delta", QC_BINBIN_DEFAULTS["call_delta"])
-        
-        # CC optimization parameters
-        self.cc_optimization_enabled = resolved_config.get("cc_optimization_enabled", True)
-        self.cc_min_delta_cost = resolved_config.get("cc_min_delta_cost", 0.15)  # Min delta when cost > price
-        self.cc_cost_basis_threshold = resolved_config.get("cc_cost_basis_threshold", 0.05)  # 5% below cost to trigger optimization
-        self.cc_min_strike_premium = resolved_config.get("cc_min_strike_premium", 0.02)  # Min premium as % of cost basis
-        self.repair_call_threshold_pct = resolved_config.get("repair_call_threshold_pct", 0.08)
-        self.repair_call_delta = resolved_config.get("repair_call_delta", 0.35)
-        self.repair_call_dte_min = resolved_config.get("repair_call_dte_min", 7)
-        self.repair_call_dte_max = resolved_config.get("repair_call_dte_max", 21)
-        self.repair_call_max_discount_pct = resolved_config.get("repair_call_max_discount_pct", 0.08)
-        self.cc_fallback_delta_tolerance_1 = resolved_config.get(
-            "cc_fallback_delta_tolerance_1",
-            QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"],
-        )
-        self.cc_fallback_delta_tolerance_2 = resolved_config.get(
-            "cc_fallback_delta_tolerance_2",
-            QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"],
-        )
-        self.cc_fallback_dte_min = resolved_config.get(
-            "cc_fallback_dte_min",
-            QC_BINBIN_DEFAULTS["cc_fallback_dte_min"],
-        )
-        self.cc_fallback_dte_max = resolved_config.get(
-            "cc_fallback_dte_max",
-            QC_BINBIN_DEFAULTS["cc_fallback_dte_max"],
-        )
-        self.cc_fallback_min_cost_basis_ratio = resolved_config.get(
-            "cc_fallback_min_cost_basis_ratio",
-            QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"],
-        )
-        self.defensive_put_roll_enabled = resolved_config.get("defensive_put_roll_enabled", True)
-        self.defensive_put_roll_loss_pct = resolved_config.get("defensive_put_roll_loss_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_loss_pct"])
-        self.defensive_put_roll_itm_buffer_pct = resolved_config.get("defensive_put_roll_itm_buffer_pct", QC_BINBIN_DEFAULTS["defensive_put_roll_itm_buffer_pct"])
-        self.defensive_put_roll_min_dte = resolved_config.get("defensive_put_roll_min_dte", 7)
-        self.defensive_put_roll_max_dte = resolved_config.get("defensive_put_roll_max_dte", 14)
-        self.defensive_put_roll_dte_min = resolved_config.get("defensive_put_roll_dte_min", 21)
-        self.defensive_put_roll_dte_max = resolved_config.get("defensive_put_roll_dte_max", 60)
-        self.defensive_put_roll_delta = resolved_config.get("defensive_put_roll_delta", 0.20)
-        self.assignment_cooldown_days = resolved_config.get("assignment_cooldown_days", 20)
-        self.large_loss_cooldown_days = resolved_config.get("large_loss_cooldown_days", 15)
-        self.large_loss_cooldown_pct = resolved_config.get("large_loss_cooldown_pct", 100.0)
-        self.volatility_cap_floor = resolved_config.get("volatility_cap_floor", 0.35)
-        self.volatility_cap_ceiling = resolved_config.get("volatility_cap_ceiling", 1.0)
-        self.volatility_lookback = resolved_config.get("volatility_lookback", 20)
-        self.dynamic_symbol_risk_enabled = resolved_config.get("dynamic_symbol_risk_enabled", True)
-        self.symbol_state_cap_floor = resolved_config.get("symbol_state_cap_floor", 0.20)
-        self.symbol_state_cap_ceiling = resolved_config.get("symbol_state_cap_ceiling", 1.0)
-        self.symbol_drawdown_lookback = resolved_config.get("symbol_drawdown_lookback", 60)
-        self.symbol_drawdown_sensitivity = resolved_config.get("symbol_drawdown_sensitivity", 1.20)
-        self.symbol_downtrend_sensitivity = resolved_config.get("symbol_downtrend_sensitivity", 1.50)
-        self.symbol_volatility_sensitivity = resolved_config.get("symbol_volatility_sensitivity", 0.75)
-        self.symbol_exposure_sensitivity = resolved_config.get("symbol_exposure_sensitivity", 1.25)
+        self.put_delta = float(resolved_config.get("put_delta", 0.30))
+        self.call_delta = float(resolved_config.get("cc_target_delta", QC_BINBIN_DEFAULTS["cc_target_delta"]))
+        self.cc_below_cost_enabled = resolved_config.get("cc_below_cost_enabled", QC_BINBIN_DEFAULTS["cc_below_cost_enabled"])
+        self.cc_target_delta = resolved_config.get("cc_target_delta", QC_BINBIN_DEFAULTS["cc_target_delta"])
+        self.cc_target_dte_min = resolved_config.get("cc_target_dte_min", QC_BINBIN_DEFAULTS["cc_target_dte_min"])
+        self.cc_target_dte_max = resolved_config.get("cc_target_dte_max", QC_BINBIN_DEFAULTS["cc_target_dte_max"])
+        self.cc_max_discount_to_cost = resolved_config.get("cc_max_discount_to_cost", QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"])
         self.symbol_assignment_base_cap = resolved_config.get(
             "symbol_assignment_base_cap",
             QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"],
         )
-        self.stock_inventory_cap_enabled = resolved_config.get("stock_inventory_cap_enabled", True)
-        self.stock_inventory_base_cap = resolved_config.get("stock_inventory_base_cap", QC_BINBIN_DEFAULTS["stock_inventory_base_cap"])
-        self.stock_inventory_cap_floor = resolved_config.get("stock_inventory_cap_floor", 0.50)
-        self.stock_inventory_block_threshold = resolved_config.get("stock_inventory_block_threshold", QC_BINBIN_DEFAULTS["stock_inventory_block_threshold"])
+        self.assigned_stock_fail_safe_enabled = resolved_config.get(
+            "assigned_stock_fail_safe_enabled",
+            QC_BINBIN_DEFAULTS["assigned_stock_fail_safe_enabled"],
+        )
+        self.assigned_stock_min_days_held = resolved_config.get(
+            "assigned_stock_min_days_held",
+            QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"],
+        )
+        self.assigned_stock_drawdown_pct = resolved_config.get(
+            "assigned_stock_drawdown_pct",
+            QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"],
+        )
+        self.assigned_stock_force_exit_pct = resolved_config.get(
+            "assigned_stock_force_exit_pct",
+            QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"],
+        )
+        self.assignment_cooldown_days = int(resolved_config.get("assignment_cooldown_days", 0))
+        self.margin_rate_per_contract = float(resolved_config.get("margin_rate_per_contract", 0.25))
+        self.margin_buffer_pct = float(resolved_config.get("margin_buffer_pct", 0.0))
         self.max_new_puts_per_day = resolved_config.get("max_new_puts_per_day", QC_BINBIN_DEFAULTS["max_new_puts_per_day"])
-        # Margin management parameters
-        self.margin_buffer_pct = resolved_config.get("margin_buffer_pct", QC_BINBIN_DEFAULTS["margin_buffer_pct"])  # % of margin to reserve as buffer
-        self.margin_rate_per_contract = resolved_config.get("margin_rate_per_contract", QC_BINBIN_DEFAULTS["margin_rate_per_contract"])  # margin rate per contract
         
         # ML delta optimization parameters - use BaseStrategy's implementation
         self.ml_delta_optimization = resolved_config.get("ml_delta_optimization", False)
         self.ml_dte_optimization = resolved_config.get("ml_dte_optimization", False)  # Add DTE optimization flag
-        self.ml_adoption_rate = resolved_config.get("ml_adoption_rate", 0.5)
+        self.ml_adoption_rate = resolved_config.get("ml_adoption_rate", QC_BINBIN_DEFAULTS["ml_adoption_rate"])
         self.ml_integration = None
         self.ml_dte_optimizer = None  # Add DTE optimizer
 
-        # ML roll optimization parameters (replaces traditional stop loss / profit target)
-        self.ml_roll_optimization = resolved_config.get("ml_roll_optimization", False)
+        # Roll management is rule-based in the simplified flow.
+        self.ml_roll_optimization = False
         self.ml_roll_optimizer = None
-        self.ml_roll_confidence_threshold = resolved_config.get("ml_roll_confidence_threshold", 0.6)
+        self.ml_roll_confidence_threshold = 0.6
 
         # ML Position Optimization
         self.ml_position_optimization = resolved_config.get("ml_position_optimization", False)
@@ -365,9 +325,8 @@ class BinbinGodStrategy(BaseStrategy):
             "best_pick": None,
         }
         
-        # Check if profit target/stop loss are disabled
-        self._profit_target_disabled = self.profit_target_pct >= 999999
-        self._stop_loss_disabled = self.stop_loss_pct >= 999999
+        self._profit_target_disabled = True
+        self._stop_loss_disabled = True
 
     @property
     def phase(self) -> str:
@@ -899,21 +858,6 @@ class BinbinGodStrategy(BaseStrategy):
                 )
                 continue
             actual_price, actual_iv, _ = self._get_symbol_market_state(stock_symbol, current_date, underlying_price, iv)
-            if self.stock_inventory_cap_enabled:
-                stock_notional = self.stock_holding.get_shares(stock_symbol) * max(actual_price, 0.0)
-                inventory_cap = portfolio_value * self.stock_inventory_base_cap
-                if inventory_cap > 0 and stock_notional >= inventory_cap * self.stock_inventory_block_threshold:
-                    self._record_event(
-                        current_date,
-                        "order_deferred",
-                        symbol=stock_symbol,
-                        action="SELL_PUT",
-                        right="P",
-                        reason="sp_stock_block",
-                        stock_notional=round(stock_notional, 2),
-                        inventory_cap=round(inventory_cap, 2),
-                    )
-                    continue
             sp_signals.extend(
                 self._generate_backtest_put_signal(
                     stock_symbol,
@@ -1233,173 +1177,54 @@ class BinbinGodStrategy(BaseStrategy):
         shares_available: int = None,
         cost_basis: float = None,
     ) -> list[Signal]:
-        """Generate Covered Call signal for backtesting.
-        
-        Args:
-            symbol: Stock symbol
-            current_date: Current date string
-            underlying_price: Current stock price
-            iv: Implied volatility
-            position_mgr: Position manager
-            shares_available: Maximum shares that can be covered by new calls.
-            cost_basis: Cost basis for this specific stock. If None, get from holdings.
-        """
+        """Generate simplified covered-call signals for backtesting."""
         from datetime import timedelta
         from core.backtesting.pricing import OptionsPricer
-        
-        logger.info(f"_generate_backtest_call_signal: symbol={symbol}, date={current_date}, "
-                   f"price={underlying_price:.2f}, iv={iv:.3f}, shares_avail={shares_available}, cost={cost_basis}")
-        
-        # Get cost basis for this specific stock
+
         if cost_basis is None:
             cost_basis = self.stock_holding.holdings.get(symbol, {}).get("cost_basis", 0)
-        
-        # Determine shares available for covering new calls
         if shares_available is None:
             shares_available = self.stock_holding.get_shares(symbol)
-        
-        # Can only sell calls for shares we own
         if shares_available <= 0:
-            # No shares available, cannot sell call
             logger.warning(f"No shares available for {symbol}, cannot generate Call signal")
             return []
-        
-        # Default DTE values
-        dte_window_min = int(self.dte_min)
-        dte_window_max = int(self.dte_max)
-        dte_days = int(self.dte_max)
+
+        dte_window_min = int(self.cc_target_dte_min)
+        dte_window_max = int(self.cc_target_dte_max)
+        dte_days = int(self.cc_target_dte_max)
         T = dte_days / 365.0
         entry = datetime.strptime(current_date, "%Y-%m-%d")
         expiry_date = entry + timedelta(days=dte_days)
         expiry_str = expiry_date.strftime("%Y%m%d")
-        
-        # Get historical bars for ML optimization (backtest mode)
-        pool_data = getattr(self, 'mag7_data', {})
+        pool_data = getattr(self, "mag7_data", {})
         ml_bars = pool_data.get(symbol, [])
-        # Filter bars up to current_date
         if ml_bars:
             ml_bars = [bar for bar in ml_bars if str(bar.get("date", ""))[:10] <= current_date]
-        
-        # Check if we need CC optimization
-        call_delta_target = self.call_delta
-        additional_constraints = {}
-        repair_mode = False
-        
-        # ML DTE optimization for Covered Calls
-        ml_dte_result = None
-        if self.ml_dte_optimization and self.ml_integration:
-            try:
-                ml_dte_result = self.ml_integration.optimize_call_dte(
-                    symbol=symbol,
-                    current_price=underlying_price,
-                    cost_basis=cost_basis,
-                    bars=ml_bars,  # Pass actual bars for backtest
-                    options_data=[],  # Will be populated by real-time interface
-                    iv=iv,
-                    strategy_phase="CC"
-                )
-                logger.info(f"ML optimized DTE for CC: {ml_dte_result.optimal_dte_min}-{ml_dte_result.optimal_dte_max} days "
-                           f"(confidence: {ml_dte_result.confidence:.2f})")
-                
-                # Update DTE values based on ML recommendation
-                if ml_dte_result.confidence >= 0.4:  # Lowered from 0.6 to allow ML to work during learning
-                    dte_days = int((ml_dte_result.optimal_dte_min + ml_dte_result.optimal_dte_max) / 2)
-                    T = dte_days / 365.0
-                    expiry_date = entry + timedelta(days=dte_days)
-                    expiry_str = expiry_date.strftime("%Y%m%d")
-                    logger.info(f"Updated DTE to {dte_days} days based on ML recommendation")
-            except Exception as e:
-                logger.warning(f"ML DTE optimization failed: {e}")
-                ml_dte_result = None
-        
-        # ML Delta optimization
-        ml_result = None
-        if self.ml_delta_optimization and self.ml_integration:
-            try:
-                ml_result = self.ml_integration.optimize_call_delta(
-                    symbol=symbol,
-                    current_price=underlying_price,
-                    cost_basis=cost_basis,
-                    bars=ml_bars,  # Pass actual bars for backtest
-                    options_data=[],  # Will be populated by real-time interface
-                    iv=iv
-                )
-                logger.info(f"ML optimized delta: {ml_result.optimal_delta:.3f} (confidence: {ml_result.confidence:.2f})")
-            except Exception as e:
-                logger.warning(f"ML optimization failed: {e}")
-                ml_result = None
-        
-        if self.cc_optimization_enabled and cost_basis > 0:
-            # Check if current price is below cost basis (loss position)
-            price_cost_ratio = underlying_price / cost_basis
-            
-            if price_cost_ratio < (1 - self.cc_cost_basis_threshold):
-                # We're in a loss position, optimize for higher strike price
-                logger.info(
-                    f"CC optimization: Stock price ${underlying_price:.2f} below cost basis "
-                    f"${cost_basis:.2f} (ratio: {price_cost_ratio:.2f}). "
-                )
-                
-                # Combine CC optimization with ML if available
-                # Lowered threshold from 0.8 to 0.5 to allow ML to work during learning phase
-                if ml_result and ml_result.confidence >= 0.5:
-                    # Use ML result with CC protective adjustments
-                    call_delta_target = max(self.cc_min_delta_cost, ml_result.optimal_delta)
-                    logger.info(f"Combined ML + CC optimization: delta = {call_delta_target:.3f} (confidence: {ml_result.confidence:.2f})")
-                else:
-                    # Traditional CC optimization
-                    call_delta_target = self.cc_min_delta_cost
-                    if ml_result:
-                        logger.info(f"ML delta confidence {ml_result.confidence:.2f} < 0.5, using CC fallback delta")
-                    
-                # Add minimum strike constraint: try to get strike close to cost basis
-                min_strike_desired = cost_basis * (1 - self.cc_min_strike_premium)
-                additional_constraints["min_strike"] = min_strike_desired
-                logger.info(f"CC optimization: Setting minimum strike target to ${min_strike_desired:.2f}")
 
-            drawdown_vs_cost = (cost_basis - underlying_price) / cost_basis if cost_basis > 0 else 0.0
-            if drawdown_vs_cost >= self.repair_call_threshold_pct:
-                repair_mode = True
-                call_delta_target = max(call_delta_target, self.repair_call_delta)
-                dte_window_min = int(self.repair_call_dte_min)
-                dte_window_max = int(self.repair_call_dte_max)
-                dte_days = max(self.repair_call_dte_min, min(dte_days, self.repair_call_dte_max))
-                T = dte_days / 365.0
-                expiry_date = entry + timedelta(days=dte_days)
-                expiry_str = expiry_date.strftime("%Y%m%d")
-                repair_min_strike = max(underlying_price * 1.01, cost_basis * (1 - self.repair_call_max_discount_pct))
-                if "min_strike" in additional_constraints:
-                    additional_constraints["min_strike"] = max(
-                        underlying_price * 1.01,
-                        min(additional_constraints["min_strike"], repair_min_strike),
-                    )
-                else:
-                    additional_constraints["min_strike"] = repair_min_strike
-        
-        # Apply ML adaptive strategy if available
-        if self.ml_delta_optimization and self.ml_integration and ml_result:
-            # Use adaptive strategy to combine traditional and ML approaches
-            final_delta = self.adaptive_strategy.select_call_delta(
-                traditional_delta=call_delta_target,
-                ml_result=ml_result
+        final_delta = float(self.cc_target_delta)
+        min_strike = underlying_price * 1.01
+        if cost_basis > 0 and self.cc_below_cost_enabled and underlying_price < cost_basis:
+            min_strike = max(min_strike, cost_basis * (1 - self.cc_max_discount_to_cost))
+            self._record_event(
+                current_date,
+                "cc_floor_applied",
+                symbol=symbol,
+                action="SELL_CALL",
+                right="C",
+                min_strike=round(min_strike, 2),
+                cost_basis=round(cost_basis, 2),
+                underlying_price=round(underlying_price, 2),
             )
-            logger.info(f"Adaptive final delta: {final_delta:.3f}")
-        else:
-            final_delta = call_delta_target
 
-        if repair_mode:
-            final_delta = max(final_delta, self.repair_call_delta)
-        
         contract_metadata = None
         if self._is_qc_parity_enabled():
-            min_strike = additional_constraints.get("min_strike")
             selection_tiers = build_cc_selection_tiers_qc(
                 config=self.parity_config,
                 underlying_price=underlying_price,
                 cost_basis=cost_basis,
                 primary_dte_min=dte_window_min,
                 primary_dte_max=dte_window_max,
-                primary_delta_tolerance=0.05,
+                primary_delta_tolerance=0.08,
                 primary_min_strike=min_strike,
             )
             selected_contract = select_contract_from_lattice(
@@ -1411,7 +1236,7 @@ class BinbinGodStrategy(BaseStrategy):
                 target_delta=abs(final_delta),
                 dte_min=dte_window_min,
                 dte_max=dte_window_max,
-                delta_tolerance=0.05,
+                delta_tolerance=0.08,
                 min_strike=min_strike,
                 selection_tiers=selection_tiers or None,
             )
@@ -1423,6 +1248,8 @@ class BinbinGodStrategy(BaseStrategy):
                     action="SELL_CALL",
                     right="C",
                     reason="no_lattice_contract",
+                    min_strike=round(min_strike, 2),
+                    target_delta=round(final_delta, 2),
                     strategy_phase="CC",
                 )
                 return []
@@ -1434,10 +1261,15 @@ class BinbinGodStrategy(BaseStrategy):
             delta = selected_contract.delta
             contract_metadata = selected_contract.to_dict()
         else:
-            # Use optimized call-specific delta
             original_delta = self.delta_target
             self.delta_target = final_delta
-            strike = self.select_strike_with_constraints(underlying_price, iv, T, "C", additional_constraints)
+            strike = self.select_strike_with_constraints(
+                underlying_price,
+                iv,
+                T,
+                "C",
+                {"min_strike": min_strike},
+            )
             self.delta_target = original_delta
             premium = OptionsPricer.call_price(underlying_price, strike, T, iv)
             delta = OptionsPricer.delta(underlying_price, strike, T, iv, "C")
@@ -1454,10 +1286,6 @@ class BinbinGodStrategy(BaseStrategy):
         # CC has no additional risk (stock is collateral), so maximize premium income
         max_by_shares = shares_available // 100
         
-        delta_confidence = ml_result.confidence if ml_result is not None else 1.0
-        dte_confidence = ml_dte_result.confidence if ml_dte_result is not None else 1.0
-        position_confidence = 0.5
-
         confidence, ml_score_adjustment = (1.0, 0.0)
         if self._is_qc_parity_enabled():
             confidence, ml_score_adjustment = self._calculate_signal_confidence(
@@ -1465,35 +1293,11 @@ class BinbinGodStrategy(BaseStrategy):
                 ml_bars,
                 underlying_price,
                 "CC",
-                delta_confidence=delta_confidence,
-                dte_confidence=dte_confidence,
-                position_confidence=position_confidence,
+                delta_confidence=1.0,
+                dte_confidence=1.0,
+                position_confidence=0.5,
             )
-        if self.ml_position_optimization and self.ml_position_optimizer:
-            # ML can provide risk assessment, but CC should default to full coverage
-            ml_contracts = self._calculate_ml_position_size(
-                symbol=symbol,
-                underlying_price=underlying_price,
-                iv=iv,
-                strike=strike,
-                premium=premium,
-                dte=dte_days,
-                delta=delta,
-                position_mgr=position_mgr,
-                strategy_phase="CC",
-                shares_available=shares_available,
-            )
-            # For CC: use ML as a lower bound only if it suggests extreme caution
-            # Otherwise, use all available shares to maximize premium income
-            if ml_contracts < max_by_shares:
-                self.logger.info(
-                    f"CC phase: ML suggests {ml_contracts} contracts, but using {max_by_shares} "
-                    f"to cover all {shares_available} shares (CC has no additional risk)"
-                )
-            max_contracts = max_by_shares  # Always use all available shares for CC
-        else:
-            # Traditional: Covered call: use all shares available
-            max_contracts = min(max_by_shares, self.max_positions)
+        max_contracts = min(max_by_shares, self.max_positions)
 
         if max_contracts <= 0:
             logger.warning(f"CC signal: {symbol} max_contracts={max_contracts} (shares_available={shares_available}, max_positions={self.max_positions})")
@@ -1788,33 +1592,7 @@ class BinbinGodStrategy(BaseStrategy):
         current_dt: datetime,
         market_data: Dict[str, Any] = None,
     ) -> tuple[bool, str]:
-        """Check if position should be closed (for Wheel strategy, this means roll).
-
-        For Wheel strategy, we don't use traditional stop loss. Instead:
-        - Roll Forward: Premium captured > 80%, roll to new position
-        - Roll Out: Near assignment risk, extend expiry
-        - Let Expire: Hold to expiry for max theta (time is our friend)
-        - Profit Target: Optional, close early at 50%+ profit
-
-        Stop loss is DISABLED by default (stop_loss_pct=999999).
-        Can be enabled as extreme safety net if needed.
-
-        Args:
-            position: Position dictionary
-            current_price: Current option price
-            entry_price: Entry option price
-            current_dt: Current datetime
-            market_data: Current market data (for ML features)
-
-        Returns:
-            (should_close, reason) tuple
-        """
-
-        # Calculate premium capture
-        pnl = current_price - entry_price
-        premium_captured_pct = abs(pnl) / abs(entry_price) * 100 if entry_price else 0
-
-        # ML-based roll optimization
+        """Simple rule engine: roll on premium capture, otherwise hold to expiry."""
         option_right = position.get("right", "")
         expiry = position.get("expiry")
         if expiry:
@@ -1829,94 +1607,11 @@ class BinbinGodStrategy(BaseStrategy):
         else:
             dte = 0
 
-        pnl_pct = ((entry_price - current_price) / abs(entry_price) * 100) if entry_price else 0.0
-        underlying_from_market = (market_data or {}).get("price", 0.0) if market_data else 0.0
-        if option_right == "P" and self.defensive_put_roll_enabled:
-            strike = position.get("strike", 0.0)
-            itm_pct = max(0.0, (strike - underlying_from_market) / strike) if strike and underlying_from_market > 0 else 0.0
-            if (
-                dte >= self.defensive_put_roll_min_dte
-                and (self.defensive_put_roll_max_dte <= 0 or dte <= self.defensive_put_roll_max_dte)
-                and (
-                    itm_pct >= self.defensive_put_roll_itm_buffer_pct
-                    or pnl_pct <= -self.defensive_put_roll_loss_pct
-                )
-            ):
-                return True, "DEFENSIVE_PUT_ROLL"
-
-        if self.ml_roll_optimization and self.ml_roll_optimizer and market_data:
-            try:
-                current_date = current_dt.strftime('%Y-%m-%d') if isinstance(current_dt, datetime) else str(current_dt)[:10]
-
-                # Add strategy phase to position for ML features (holdings-driven)
-                # If we have shares, it's CC; otherwise SP
-                strategy_phase = "CC" if self.stock_holding.shares > 0 else "SP"
-                position_with_phase = {**position, 'strategy_phase': strategy_phase}
-
-                # Get roll recommendation
-                should_roll, recommendation = self.ml_roll_optimizer.should_roll(
-                    position=position_with_phase,
-                    market_data=market_data,
-                    current_date=current_date,
-                    min_confidence=self.ml_roll_confidence_threshold
-                )
-
-                if should_roll:
-                    self.logger.info(
-                        f"ML Roll recommendation: {recommendation.action} "
-                        f"(confidence: {recommendation.confidence:.0%}, "
-                        f"expected improvement: ${recommendation.expected_pnl_improvement:.2f})"
-                    )
-
-                    # Store roll parameters for execution
-                    position['_roll_recommendation'] = recommendation
-
-                    # Map roll actions to close reasons
-                    action_map = {
-                        "ROLL_FORWARD": "ML_ROLL_FORWARD",
-                        "ROLL_OUT": "ML_ROLL_OUT",
-                        "CLOSE_EARLY": "ML_CLOSE_EARLY",
-                    }
-                    return True, action_map.get(recommendation.action, "ML_ROLL")
-
-                self.logger.debug(
-                    f"ML Roll: {recommendation.action} - {recommendation.reasoning}"
-                )
-
-            except Exception as e:
-                self.logger.warning(f"ML roll optimization failed: {e}")
-                # Fall through to rule-based logic
-
-        # Rule-based roll logic (fallback when ML disabled or failed)
-        # For Wheel strategy, we only close early in specific cases
-
-        # Expiry check
-        if expiry:
-            # Roll Forward: High premium capture with time remaining
-            if premium_captured_pct >= 80 and dte > 7:
-                return True, "ROLL_FORWARD"
-
-            # Near expiry - let it expire (Wheel strategy: time is our friend)
-            if dte <= 0:
-                return True, "EXPIRY"
-
-        # Traditional profit target (user may have disabled it for pure Wheel)
-        if not self._profit_target_disabled:
-            profit_threshold = self.profit_target_pct / 100.0 * abs(entry_price)
-            if abs(pnl) >= profit_threshold and pnl < 0:
-                return True, "PROFIT_TARGET"
-
-        # Traditional stop loss (DISABLED by default for Wheel strategy)
-        # Can be enabled by setting stop_loss_pct < 999999 as extreme safety net
-        if not self._stop_loss_disabled:
-            loss_threshold = self.stop_loss_pct / 100.0 * abs(entry_price)
-            if pnl >= loss_threshold:
-                self.logger.warning(
-                    f"Stop loss triggered for {position.get('symbol')}. "
-                    f"Note: Stop loss is typically disabled for Wheel strategy."
-                )
-                return True, "STOP_LOSS"
-
+        premium_captured_pct = ((entry_price - current_price) / abs(entry_price) * 100) if entry_price else 0.0
+        if option_right == "P" and premium_captured_pct >= self.roll_threshold_pct and dte > self.min_dte_for_roll:
+            return True, "ROLL_FORWARD"
+        if dte <= 0:
+            return True, "EXPIRY"
         return False, ""
 
     def get_roll_parameters(self, position: Dict[str, Any]) -> Optional[Dict[str, Any]]:
