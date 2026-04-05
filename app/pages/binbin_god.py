@@ -21,8 +21,14 @@ from app.components.monitoring import (
 from app.components.tables import create_data_table, metric_card
 from app.pages.binbin_god_shared import (
     ALL_FORM_FIELDS,
+    CC_REPAIR_FIELDS,
+    CORE_WHEEL_FIELDS,
     DEFAULT_STOCK_POOL,
+    DEFENSIVE_FIELDS,
+    ML_FIELDS,
     QC_UI_DEFAULTS,
+    RUN_SETUP_FIELDS,
+    SYMBOL_RISK_FIELDS,
     _build_rows,
     _form_values_from_params,
     _section_card,
