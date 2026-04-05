@@ -1,6 +1,6 @@
 # BinbinGod Strategy for QuantConnect
 
-A dynamic stock selection Wheel strategy for MAG7 stocks with ML optimization.
+A simplified, rules-first Wheel strategy for MAG7 stocks.
 
 ## Files
 
@@ -10,7 +10,6 @@ A dynamic stock selection Wheel strategy for MAG7 stocks with ML optimization.
 | `ml_integration.py` | ML integration module |
 | `ml_delta_optimizer.py` | Delta optimization using Q-learning |
 | `ml_dte_optimizer.py` | DTE optimization using Q-learning |
-| `ml_roll_optimizer.py` | Roll decision optimization |
 | `ml_position_optimizer.py` | Position sizing with Kelly criterion |
 | `ml_volatility_model.py` | Volatility prediction model |
 | `option_pricing.py` | Black-Scholes option pricing |
@@ -29,23 +28,38 @@ A dynamic stock selection Wheel strategy for MAG7 stocks with ML optimization.
     "initial_capital": 300000,
     "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
     "max_positions_ceiling": 20,
-    "target_margin_utilization": 0.35,
-    "margin_buffer_pct": 0.50,
-    "position_aggressiveness": 1.0,
+    "target_margin_utilization": 0.65,
+    "symbol_assignment_base_cap": 0.35,
+    "max_assignment_risk_per_trade": 0.20,
+    "roll_threshold_pct": 80,
+    "min_dte_for_roll": 7,
+    "cc_target_delta": 0.25,
+    "cc_target_dte_min": 10,
+    "cc_target_dte_max": 28,
+    "cc_max_discount_to_cost": 0.03,
+    "assigned_stock_min_days_held": 5,
+    "assigned_stock_drawdown_pct": 0.12,
+    "assigned_stock_force_exit_pct": 1.0,
     "ml_enabled": true,
-    "stop_loss_pct": 999999,
-    "max_risk_per_trade": 0.02
+    "ml_min_confidence": 0.45
 }
 ```
 
 ## Strategy Logic
 
-### Phase 1: Sell Put (SP)
-- Sell OTM puts on best-scoring stock
-- If expires worthless: keep premium, continue
-- If assigned: buy shares, switch to CC phase
+### Sell Put (SP)
+- Open short puts using one signal layer and one sizing function
+- Only three active opening caps remain: portfolio margin, per-symbol assignment, per-trade assignment
+- Open short puts are managed by one rule engine:
+  - `ROLL` when premium captured >= threshold and DTE is still above the minimum
+  - `EXPIRY` when DTE <= 0
+  - otherwise `HOLD`
 
-### Phase 2: Covered Call (CC)
-- Sell OTM calls against held shares
-- If expires worthless: keep premium and shares
-- If assigned: sell shares, return to SP phase
+### Covered Call (CC)
+- Assignment immediately records stock state and attempts a covered call
+- When stock is below cost, CC strike selection still prefers the cost line:
+  - `strike >= cost_basis * (1 - cc_max_discount_to_cost)`
+- If no call fits that floor, the selector only relaxes delta once instead of walking a fallback ladder
+
+### Assigned Stock Fail-Safe
+- If assigned stock has no covered call for long enough and drawdown exceeds the configured threshold, a single emergency exit sells the configured fraction of shares

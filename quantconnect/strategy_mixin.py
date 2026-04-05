@@ -31,14 +31,12 @@ _SUMMARY_COUNTER_GROUPS = (
         (
             "assigned_stock_track",
             "immediate_cc",
-            "assigned_repair_attempt",
-            "assigned_repair_fail",
             "assigned_stock_exit",
         ),
     ),
     (
         "SUMMARY_STOCK_FILLS:",
-        ("stock_buy", "stock_sell", "sp_quality_block", "sp_stock_block", "sp_held_block"),
+        ("stock_buy", "stock_sell", "sp_held_block"),
     ),
 )
 

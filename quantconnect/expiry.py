@@ -14,7 +14,6 @@ from qc_portfolio import (
 )
 from signal_generation import generate_signal_for_symbol, get_portfolio_state
 from option_selector import find_option_by_greeks
-from helpers import set_symbol_cooldown
 
 
 def _build_assignment_key(symbol: str, expiry, strike: float, right: str) -> str:
@@ -53,11 +52,9 @@ def _track_assigned_stock(algo, symbol: str, assignment_cost_basis: float):
     if not hasattr(algo, "assigned_stock_state"):
         algo.assigned_stock_state = {}
     algo.assigned_stock_state[symbol] = {
-        "source": "put_assignment",
         "assignment_date": algo.Time,
         "assignment_cost_basis": assignment_cost_basis,
-        "repair_failures": 0,
-        "last_repair_attempt": None,
+        "has_covered_call": False,
         "force_exit_triggered": False,
     }
     increment_debug_counter(algo, "assigned_stock_track")
@@ -118,7 +115,6 @@ def handle_assignment_order_event(algo, order_event):
     if right == "P":
         algo.Log(f"Put assigned (event): +{quantity * 100} {symbol} @ ${strike:.2f}")
         _track_assigned_stock(algo, symbol, cost_basis)
-        set_symbol_cooldown(algo, symbol, algo.assignment_cooldown_days, "put_assignment")
         try_sell_cc_immediately(algo, symbol)
     else:
         algo.Log(f"Call assigned (event): {symbol} @ ${strike:.2f}")
@@ -185,7 +181,6 @@ def check_expired_options(algo):
                 algo.Log(f"Put assigned: +{shares_acquired} {symbol} @ ${strike:.2f}")
                 assignment_cost_basis = get_cost_basis(algo, symbol) or strike
                 _track_assigned_stock(algo, symbol, assignment_cost_basis)
-                set_symbol_cooldown(algo, symbol, algo.assignment_cooldown_days, "put_assignment")
                 
                 # CRITICAL: Immediately try to sell CC to protect stock from margin call
                 try_sell_cc_immediately(algo, symbol)

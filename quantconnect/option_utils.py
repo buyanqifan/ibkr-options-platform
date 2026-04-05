@@ -188,84 +188,17 @@ def get_premium_from_security(security: Any) -> float:
 def should_roll_position(
     premium_captured_pct: float,
     dte: int,
-    pnl_pct: float,
-    profit_target_pct: float,
-    profit_target_disabled: bool,
-    stop_loss_pct: float,
-    stop_loss_disabled: bool,
     roll_threshold_pct: float = 80,
     min_dte_for_roll: int = 7,
-    strategy_phase: str = "SP",
 ) -> Tuple[str, str]:
-    """Determine if position should be rolled or closed.
-    
-    This matches the original binbin_god.py logic:
-    1. Roll Forward when premium_captured >= 80% and DTE > 7
-    2. Profit target when pnl_pct >= profit_target_pct (if enabled)
-    3. Stop loss when pnl_pct <= -stop_loss_pct (if enabled)
-    
-    Args:
-        premium_captured_pct: Premium captured percentage (same as pnl_pct for short options)
-        dte: Days to expiry
-        pnl_pct: P&L percentage (for short options, equals premium_captured_pct)
-        profit_target_pct: Profit target percentage (e.g., 50 means capture 50% of premium)
-        profit_target_disabled: Whether profit target is disabled
-        stop_loss_pct: Stop loss percentage
-        stop_loss_disabled: Whether stop loss is disabled
-        roll_threshold_pct: Threshold for rolling (default 80%)
-        min_dte_for_roll: Minimum DTE to consider roll
-        
-    Returns:
-        Tuple of (action, reasoning)
-        action: "ROLL", "CLOSE_PROFIT", "CLOSE_LOSS", or "HOLD"
-    """
-    # PRIORITY 1: Roll Forward - capture 80%+ premium with time remaining
+    """Return the single wheel decision for an open short option."""
     if premium_captured_pct >= roll_threshold_pct and dte > min_dte_for_roll:
         return "ROLL", f"Roll: {premium_captured_pct:.0f}% premium captured, {dte} DTE"
-    
-    # PRIORITY 2: Expiry check - let it expire when DTE <= 0
+
     if dte <= 0:
         return "EXPIRY", f"Option expired, DTE={dte}"
-    
-    # PRIORITY 3: Profit target - DISABLED for Wheel strategy
-    # Wheel strategy should ROLL to capture more premium (handled by PRIORITY 1)
-    # Closing at profit_target would break the Wheel cycle
-    # if not profit_target_disabled:
-    #     if pnl_pct >= profit_target_pct:
-    #         return "CLOSE_PROFIT", f"Profit target: {pnl_pct:.0f}% captured (target: {profit_target_pct:.0f}%)"
-    
-    # PRIORITY 4: Stop loss (disabled by default for Wheel)
-    # Strategy design: SP phase should not stop-loss; accept assignment in wheel cycle.
-    if strategy_phase != "SP" and not stop_loss_disabled and pnl_pct <= -stop_loss_pct:
-        return "CLOSE_LOSS", f"Stop loss: {pnl_pct:.0f}% loss"
-    
+
     return "HOLD", "Position within normal parameters"
-
-
-def should_defensively_roll_short_put(
-    underlying_price: float,
-    strike: float,
-    dte: int,
-    pnl_pct: float,
-    min_dte: int,
-    max_dte: int,
-    itm_buffer_pct: float,
-    max_loss_pct: float,
-) -> Tuple[bool, str]:
-    """Determine whether a short put should be rolled defensively."""
-    if underlying_price <= 0 or strike <= 0 or dte < min_dte:
-        return False, ""
-    if max_dte > 0 and dte > max_dte:
-        return False, ""
-
-    itm_pct = max(0.0, (strike - underlying_price) / strike)
-    if itm_pct >= itm_buffer_pct:
-        return True, f"Defensive roll: underlying {itm_pct:.1%} below strike with {dte} DTE"
-
-    if pnl_pct <= -max_loss_pct:
-        return True, f"Defensive roll: option loss {pnl_pct:.0f}% exceeds {max_loss_pct:.0f}%"
-
-    return False, ""
 
 
 def calculate_dte(expiry: Any, current_time: datetime) -> int:
