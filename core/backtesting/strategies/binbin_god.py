@@ -500,9 +500,18 @@ class BinbinGodStrategy(BaseStrategy):
             # Check if this is backtest mode (data is list of bars)
             if isinstance(data, list):
                 # Backtest mode: calculate metrics from price bars
-                # Use minimum 20 days for technical indicators
+                # QC parity: return default score 50.0 when insufficient data
                 if len(data) < 20:
-                    continue  # Need at least 20 days for meaningful calculations
+                    scores.append(StockScore(
+                        symbol=symbol,
+                        iv_rank=50.0,
+                        technical_score=50.0,
+                        momentum=50.0,
+                        pe_score=50.0,
+                        liquidity_score=70.0,
+                        total_score=50.0,
+                    ))
+                    continue
                 
                 # Extract latest bar
                 latest_bar = data[-1]

@@ -420,9 +420,16 @@ class BacktestEngine:
                 warmup_iv = [value for value in hv[:warmup_bars] if value and value > 0.01]
                 avg_iv = float(np.mean(warmup_iv)) if warmup_iv else 0.25
                 avg_iv = max(0.15, min(0.50, avg_iv))
+                warmup_pool_data = None
+                if strategy_name == "binbin_god" and hasattr(strategy, "mag7_data"):
+                    warmup_pool_data = {
+                        sym: data[:warmup_bars] if data else []
+                        for sym, data in strategy.mag7_data.items()
+                    }
                 pretrain_stats = strategy.pretrain_ml_model(
                     warmup_history,
                     iv_estimate=avg_iv,
+                    stock_pool_data=warmup_pool_data,
                 )
                 logger.info(f"ML Delta pretraining after warmup: {pretrain_stats}")
                 warmup_pretrained = True

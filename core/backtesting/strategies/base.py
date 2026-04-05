@@ -73,7 +73,7 @@ class BaseStrategy(ABC):
                 self.ml_delta_optimization = False
                 self.ml_dte_optimization = False  # Also disable DTE optimization
     
-    def pretrain_ml_model(self, historical_bars: list, iv_estimate: float = 0.25) -> dict:
+    def pretrain_ml_model(self, historical_bars: list, iv_estimate: float = 0.25, stock_pool_data: dict = None) -> dict:
         """
         Pretrain ML model with historical data before backtesting.
         
@@ -82,6 +82,7 @@ class BaseStrategy(ABC):
         Args:
             historical_bars: List of historical price bars
             iv_estimate: Estimated implied volatility
+            stock_pool_data: Dict of {symbol: bars} for multi-stock pretraining (QC parity)
             
         Returns:
             Dict with pretraining statistics
@@ -93,40 +94,65 @@ class BaseStrategy(ABC):
             return {"status": "skipped", "reason": "insufficient_data"}
         
         try:
-            # Access the optimizer from the integration
             optimizer = self.ml_integration.optimizer
             
             if optimizer is None:
                 return {"status": "skipped", "reason": "no_optimizer"}
             
-            symbol = self.params.get("symbol", "UNKNOWN")
+            total_put_sims = 0
+            total_call_sims = 0
+            symbols_trained = []
             
-            # Pretrain for both puts and calls
-            stats_put = optimizer.pretrain_with_history(
-                symbol=symbol,
-                historical_bars=historical_bars,
-                iv_estimate=iv_estimate,
-                right="P",
-                training_ratio=0.5  # Use 50% of history for pretraining
-            )
+            if stock_pool_data:
+                for symbol, bars in stock_pool_data.items():
+                    if bars and len(bars) >= 60:
+                        stats_put = optimizer.pretrain_with_history(
+                            symbol=symbol,
+                            historical_bars=bars,
+                            iv_estimate=iv_estimate,
+                            right="P",
+                            training_ratio=0.5
+                        )
+                        stats_call = optimizer.pretrain_with_history(
+                            symbol=symbol,
+                            historical_bars=bars,
+                            iv_estimate=iv_estimate,
+                            right="C",
+                            training_ratio=0.5
+                        )
+                        total_put_sims += stats_put.get('total_simulations', 0)
+                        total_call_sims += stats_call.get('total_simulations', 0)
+                        symbols_trained.append(symbol)
+                        self.logger.info(f"ML model pretrained for {symbol}: Put={stats_put.get('total_simulations', 0)} sims, "
+                                       f"Call={stats_call.get('total_simulations', 0)} sims")
+            else:
+                symbol = self.params.get("symbol", "UNKNOWN")
+                stats_put = optimizer.pretrain_with_history(
+                    symbol=symbol,
+                    historical_bars=historical_bars,
+                    iv_estimate=iv_estimate,
+                    right="P",
+                    training_ratio=0.5
+                )
+                stats_call = optimizer.pretrain_with_history(
+                    symbol=symbol,
+                    historical_bars=historical_bars,
+                    iv_estimate=iv_estimate,
+                    right="C",
+                    training_ratio=0.5
+                )
+                total_put_sims = stats_put.get('total_simulations', 0)
+                total_call_sims = stats_call.get('total_simulations', 0)
+                symbols_trained.append(symbol)
             
-            stats_call = optimizer.pretrain_with_history(
-                symbol=symbol,
-                historical_bars=historical_bars,
-                iv_estimate=iv_estimate,
-                right="C",
-                training_ratio=0.5
-            )
-            
-            self.logger.info(f"ML model pretrained: Put={stats_put.get('total_simulations', 0)} sims, "
-                           f"Call={stats_call.get('total_simulations', 0)} sims")
+            self.logger.info(f"ML model pretrained for {len(symbols_trained)} symbols: "
+                           f"Put={total_put_sims} sims, Call={total_call_sims} sims")
             
             return {
                 "status": "success",
-                "put_simulations": stats_put.get("total_simulations", 0),
-                "call_simulations": stats_call.get("total_simulations", 0),
-                "regimes_tested": stats_put.get("regimes_tested", []),
-                "best_delta_by_regime": stats_put.get("best_delta_by_regime", {})
+                "symbols_trained": symbols_trained,
+                "put_simulations": total_put_sims,
+                "call_simulations": total_call_sims,
             }
             
         except Exception as e:
