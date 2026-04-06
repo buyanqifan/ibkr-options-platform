@@ -79,6 +79,7 @@ def display_page(pathname):
         layout = page.get("layout", html.Div(f"Missing page: {page_key}", className="text-danger"))
         return layout() if callable(layout) else layout
 
+    # 404 fallback
     return html.Div([
         html.H3("404 - Page Not Found", className="text-danger"),
         html.P(f"The path '{pathname}' does not exist."),
