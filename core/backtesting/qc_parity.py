@@ -29,6 +29,9 @@ _QC_PARAMETER_FALLBACKS = {
     "min_dte_for_roll": 7,
     "roll_target_dte_min": 21,
     "roll_target_dte_max": 45,
+    "sp_primary_delta_tolerance": 0.12,
+    "sp_relaxed_delta_tolerance": 0.22,
+    "sp_min_option_premium": 0.05,
     "cc_below_cost_enabled": True,
     "cc_target_delta": 0.25,
     "cc_target_dte_min": 10,
@@ -166,6 +169,9 @@ QC_BINBIN_DEFAULTS = {
     "assigned_stock_drawdown_pct": float(QC_PARAMETER_DEFAULTS["assigned_stock_drawdown_pct"]),
     "assigned_stock_force_exit_pct": float(QC_PARAMETER_DEFAULTS["assigned_stock_force_exit_pct"]),
     "max_new_puts_per_day": int(QC_PARAMETER_DEFAULTS["max_new_puts_per_day"]),
+    "sp_primary_delta_tolerance": float(QC_PARAMETER_DEFAULTS["sp_primary_delta_tolerance"]),
+    "sp_relaxed_delta_tolerance": float(QC_PARAMETER_DEFAULTS["sp_relaxed_delta_tolerance"]),
+    "sp_min_option_premium": float(QC_PARAMETER_DEFAULTS["sp_min_option_premium"]),
     "ml_enabled": bool(QC_PARAMETER_DEFAULTS["ml_enabled"]),
     "ml_min_confidence": float(QC_PARAMETER_DEFAULTS["ml_min_confidence"]),
     "ml_adoption_rate": float(QC_PARAMETER_DEFAULTS["ml_adoption_rate"]),
@@ -220,6 +226,9 @@ class BinbinGodParityConfig:
     assigned_stock_drawdown_pct: float = QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"]
     assigned_stock_force_exit_pct: float = QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"]
     max_new_puts_per_day: int = QC_BINBIN_DEFAULTS["max_new_puts_per_day"]
+    sp_primary_delta_tolerance: float = QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]
+    sp_relaxed_delta_tolerance: float = QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"]
+    sp_min_option_premium: float = QC_BINBIN_DEFAULTS["sp_min_option_premium"]
     ml_enabled: bool = bool(QC_BINBIN_DEFAULTS["ml_enabled"])
     ml_min_confidence: float = QC_BINBIN_DEFAULTS["ml_min_confidence"]
     ml_adoption_rate: float = QC_BINBIN_DEFAULTS["ml_adoption_rate"]
@@ -291,6 +300,9 @@ class BinbinGodParityConfig:
             ml_adoption_rate=_to_float(merged.get("ml_adoption_rate", QC_BINBIN_DEFAULTS["ml_adoption_rate"]), QC_BINBIN_DEFAULTS["ml_adoption_rate"]),
             ml_exploration_rate=_to_float(merged.get("ml_exploration_rate", QC_BINBIN_DEFAULTS["ml_exploration_rate"]), QC_BINBIN_DEFAULTS["ml_exploration_rate"]),
             ml_learning_rate=_to_float(merged.get("ml_learning_rate", QC_BINBIN_DEFAULTS["ml_learning_rate"]), QC_BINBIN_DEFAULTS["ml_learning_rate"]),
+            sp_primary_delta_tolerance=_clamp(_to_float(merged.get("sp_primary_delta_tolerance", QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), 0.04, 0.40),
+            sp_relaxed_delta_tolerance=_clamp(_to_float(merged.get("sp_relaxed_delta_tolerance", QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"]), QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"]), _clamp(_to_float(merged.get("sp_primary_delta_tolerance", QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), 0.04, 0.40), 0.45),
+            sp_min_option_premium=_clamp(_to_float(merged.get("sp_min_option_premium", QC_BINBIN_DEFAULTS["sp_min_option_premium"]), QC_BINBIN_DEFAULTS["sp_min_option_premium"]), 0.01, 1.0),
         )
 
     def apply_to_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -325,6 +337,9 @@ class BinbinGodParityConfig:
                 "ml_adoption_rate": self.ml_adoption_rate,
                 "ml_exploration_rate": self.ml_exploration_rate,
                 "ml_learning_rate": self.ml_learning_rate,
+                "sp_primary_delta_tolerance": self.sp_primary_delta_tolerance,
+                "sp_relaxed_delta_tolerance": self.sp_relaxed_delta_tolerance,
+                "sp_min_option_premium": self.sp_min_option_premium,
                 "max_positions": self.max_positions_ceiling if self.enabled else params.get("max_positions", self.max_positions_ceiling),
             }
         )
@@ -430,6 +445,28 @@ def build_cc_selection_tiers_qc(
     ]
 
 
+def build_sp_selection_tiers_qc(
+    *,
+    config: BinbinGodParityConfig,
+    primary_dte_min: int,
+    primary_dte_max: int,
+) -> List[Dict[str, float]]:
+    return [
+        {
+            "label": "primary",
+            "delta_tolerance": config.sp_primary_delta_tolerance,
+            "dte_min": primary_dte_min,
+            "dte_max": primary_dte_max,
+        },
+        {
+            "label": "delta_relaxed",
+            "delta_tolerance": config.sp_relaxed_delta_tolerance,
+            "dte_min": primary_dte_min,
+            "dte_max": primary_dte_max,
+        },
+    ]
+
+
 def filter_option_by_itm_protection(strike: float, underlying_price: float, right: str, itm_buffer_pct: float = 0.01) -> bool:
     if right == "C":
         if strike < underlying_price:
@@ -490,7 +527,8 @@ def build_contract_lattice(
             if delta is None or abs(delta - target_delta) > delta_tolerance:
                 continue
             premium = OptionsPricer.put_price(underlying_price, strike, T, iv) if right == "P" else OptionsPricer.call_price(underlying_price, strike, T, iv)
-            if premium <= 0.10:
+            min_premium_threshold = 0.05 if right == "P" else 0.10
+            if premium <= min_premium_threshold:
                 continue
             contracts.append(
                 LatticeContract(
@@ -727,7 +765,7 @@ def estimate_put_margin_qc(
     margin_method_1 = 0.20 * underlying_price * 100 - otm_amount * 100
     margin_method_2 = 0.10 * strike * 100
     estimated_margin_per_contract = max(margin_method_1, margin_method_2) + premium * 100
-    fallback_margin = strike * 100 * margin_rate_per_contract
+    fallback_margin = strike * 100 * 0.20
     return max(estimated_margin_per_contract, fallback_margin)
 
 

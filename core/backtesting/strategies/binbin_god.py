@@ -14,6 +14,7 @@ from core.backtesting.qc_parity import (
     BinbinGodParityConfig,
     QC_BINBIN_DEFAULTS,
     build_cc_selection_tiers_qc,
+    build_sp_selection_tiers_qc,
     calculate_dynamic_max_positions_from_prices,
     calculate_put_quantity_qc,
     select_contract_from_lattice,
@@ -488,8 +489,9 @@ class BinbinGodStrategy(BaseStrategy):
                 returns = [(prices_30[i] - prices_30[i-1]) / prices_30[i-1] 
                           for i in range(1, len(prices_30))]
                 if returns and len(returns) > 1:
-                    import statistics
-                    vol = statistics.stdev(returns)
+                    mean = sum(returns) / len(returns)
+                    variance = sum((r - mean) ** 2 for r in returns) / len(returns)
+                    vol = variance ** 0.5
                     iv_rank = min(100, max(0, vol * 200))
                 else:
                     iv_rank = 50.0
@@ -1025,6 +1027,11 @@ class BinbinGodStrategy(BaseStrategy):
         contract_metadata = None
         selected_contract_obj = None
         if self._is_qc_parity_enabled():
+            sp_selection_tiers = build_sp_selection_tiers_qc(
+                config=self.parity_config,
+                primary_dte_min=dte_window_min,
+                primary_dte_max=dte_window_max,
+            )
             selected_contract_obj = select_contract_from_lattice(
                 symbol=symbol,
                 current_date=current_date,
@@ -1034,7 +1041,8 @@ class BinbinGodStrategy(BaseStrategy):
                 target_delta=-abs(effective_delta),
                 dte_min=dte_window_min,
                 dte_max=dte_window_max,
-                delta_tolerance=0.05,
+                delta_tolerance=self.parity_config.sp_primary_delta_tolerance,
+                selection_tiers=sp_selection_tiers,
             )
             if selected_contract_obj is None:
                 self._record_event(
