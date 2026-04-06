@@ -5,13 +5,9 @@ from dash import html, dcc, callback, Output, Input, State
 import dash_bootstrap_components as dbc
 from app.components.navbar import create_navbar
 
-def _page_layout(key: str):
-    page = dash.page_registry.get(key, {})
-    return page.get("layout", html.Div(f"Missing page: {key}", className="text-danger"))
 
-
-# Route mapping - store page keys only, get layout will be retrieved dynamically
-_ROUTE_KEYS = {
+# Route mapping - just URL to page name mapping
+_ROUTE_MAP = {
     "/": "pages.dashboard",
     "/market-data": "pages.market_data",
     "/screener": "pages.screener",
@@ -77,10 +73,11 @@ def create_layout():
 @callback(Output("page-content", "children"), Input("url", "pathname"))
 def display_page(pathname):
     """Route to the appropriate page based on URL pathname."""
-    if pathname in _ROUTE_KEYS:
-        page_key = _ROUTE_KEYS[pathname]
-        page = _page_layout(page_key)
-        return page() if callable(page) else page
+    if pathname in _ROUTE_MAP:
+        page_key = _ROUTE_MAP[pathname]
+        page = dash.page_registry.get(page_key, {})
+        layout = page.get("layout", html.Div(f"Missing page: {page_key}", className="text-danger"))
+        return layout() if callable(layout) else layout
 
     return html.Div([
         html.H3("404 - Page Not Found", className="text-danger"),
