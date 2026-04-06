@@ -5,7 +5,6 @@ from dash import html, dcc, callback, Output, Input, State
 import dash_bootstrap_components as dbc
 from app.components.navbar import create_navbar
 
-
 # Route mapping - just URL to page name mapping
 _ROUTE_MAP = {
     "/": "pages.dashboard",
