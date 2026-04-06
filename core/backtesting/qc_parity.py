@@ -302,7 +302,12 @@ class BinbinGodParityConfig:
             ml_exploration_rate=_to_float(merged.get("ml_exploration_rate", QC_BINBIN_DEFAULTS["ml_exploration_rate"]), QC_BINBIN_DEFAULTS["ml_exploration_rate"]),
             ml_learning_rate=_to_float(merged.get("ml_learning_rate", QC_BINBIN_DEFAULTS["ml_learning_rate"]), QC_BINBIN_DEFAULTS["ml_learning_rate"]),
             sp_primary_delta_tolerance=_clamp(_to_float(merged.get("sp_primary_delta_tolerance", QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), 0.04, 0.40),
-            sp_relaxed_delta_tolerance=_clamp(_to_float(merged.get("sp_relaxed_delta_tolerance", QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"]), QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"]), _clamp(_to_float(merged.get("sp_primary_delta_tolerance", QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), 0.04, 0.40), 0.45),
+            sp_relaxed_delta_tolerance=_clamp(
+                _to_float(merged.get("sp_relaxed_delta_tolerance", QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"])),
+                QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"],
+                _clamp(_to_float(merged.get("sp_primary_delta_tolerance", QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"])), QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]), 0.04, 0.40),
+                0.45
+            ),
             sp_min_option_premium=_clamp(_to_float(merged.get("sp_min_option_premium", QC_BINBIN_DEFAULTS["sp_min_option_premium"]), QC_BINBIN_DEFAULTS["sp_min_option_premium"]), 0.01, 1.0),
         )
 
