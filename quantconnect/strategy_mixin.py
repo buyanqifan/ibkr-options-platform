@@ -24,6 +24,8 @@ _SUMMARY_COUNTER_GROUPS = (
             "sp_signals",
             "put_block",
             "no_suitable_options",
+            "sp_assignment_cooldown_block",
+            "sp_weak_filter_block",
         ),
     ),
     (

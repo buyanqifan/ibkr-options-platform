@@ -2,7 +2,7 @@
 
 No phase concept - QC handles assignment automatically, we just log and record.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from AlgorithmImports import OptionRight, SecurityType
 from option_utils import calculate_dte
 from execution import record_trade, execute_signal
@@ -54,11 +54,15 @@ def _track_assigned_stock(algo, symbol: str, assignment_cost_basis: float):
     algo.assigned_stock_state[symbol] = {
         "assignment_date": algo.Time,
         "assignment_cost_basis": assignment_cost_basis,
+        "sp_reentry_block_until": algo.Time + timedelta(days=max(0, getattr(algo, "sp_assignment_cooldown_days", 7))),
         "has_covered_call": False,
         "force_exit_triggered": False,
     }
     increment_debug_counter(algo, "assigned_stock_track")
-    algo.Log(f"ASSIGNED_STOCK_TRACK:{symbol}:cost_basis={assignment_cost_basis:.2f}")
+    algo.Log(
+        f"ASSIGNED_STOCK_TRACK:{symbol}:cost_basis={assignment_cost_basis:.2f}:"
+        f"sp_block_until={algo.assigned_stock_state[symbol]['sp_reentry_block_until'].strftime('%Y-%m-%d')}"
+    )
 
 
 def try_sell_cc_immediately(algo, symbol):

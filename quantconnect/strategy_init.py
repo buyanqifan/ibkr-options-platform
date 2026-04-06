@@ -73,7 +73,7 @@ def init_parameters(algo):
 
     algo.target_margin_utilization = _as_float(_get_param(algo, "target_margin_utilization", 0.65), 0.65)
     algo.symbol_assignment_base_cap = _clamp(
-        _as_float(_get_param(algo, "symbol_assignment_base_cap", 0.35), 0.35),
+        _as_float(_get_param(algo, "symbol_assignment_base_cap", 0.45), 0.45),
         0.05,
         1.5,
     )
@@ -97,6 +97,18 @@ def init_parameters(algo):
         _as_float(_get_param(algo, "sp_min_option_premium", 0.05), 0.05),
         0.01,
         1.0,
+    )
+    algo.sp_assignment_cooldown_days = max(0, _as_int(_get_param(algo, "sp_assignment_cooldown_days", 7), 7))
+    algo.sp_weak_filter_enabled = _as_bool(_get_param(algo, "sp_weak_filter_enabled", True), True)
+    algo.sp_weak_filter_ma20_break_pct = _clamp(
+        _as_float(_get_param(algo, "sp_weak_filter_ma20_break_pct", 0.03), 0.03),
+        0.0,
+        0.20,
+    )
+    algo.sp_weak_filter_vol_spike_ratio = _clamp(
+        _as_float(_get_param(algo, "sp_weak_filter_vol_spike_ratio", 1.25), 1.25),
+        1.0,
+        3.0,
     )
 
     algo.cc_below_cost_enabled = _as_bool(_get_param(algo, "cc_below_cost_enabled", True), True)
@@ -193,6 +205,10 @@ def log_effective_parameters(algo):
         f"roll_target_dte={algo.roll_target_dte_min}-{algo.roll_target_dte_max}, "
         f"sp_delta_tolerance={algo.sp_primary_delta_tolerance}/{algo.sp_relaxed_delta_tolerance}, "
         f"sp_min_option_premium={algo.sp_min_option_premium}, "
+        f"sp_assignment_cooldown_days={algo.sp_assignment_cooldown_days}, "
+        f"sp_weak_filter_enabled={algo.sp_weak_filter_enabled}, "
+        f"sp_weak_filter_ma20_break_pct={algo.sp_weak_filter_ma20_break_pct}, "
+        f"sp_weak_filter_vol_spike_ratio={algo.sp_weak_filter_vol_spike_ratio}, "
         f"cc_target_delta={algo.cc_target_delta}, "
         f"cc_target_dte={algo.cc_target_dte_min}-{algo.cc_target_dte_max}, "
         f"cc_max_discount_to_cost={algo.cc_max_discount_to_cost}, "

@@ -10,6 +10,8 @@ DEFAULT_DEBUG_COUNTERS = {
     "sp_signals": 0,
     "put_block": 0,
     "sp_held_block": 0,
+    "sp_assignment_cooldown_block": 0,
+    "sp_weak_filter_block": 0,
     "assigned_stock_track": 0,
     "assigned_stock_exit": 0,
     "immediate_cc": 0,

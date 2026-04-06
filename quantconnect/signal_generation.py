@@ -6,14 +6,14 @@ No phase concept - signals are generated based on actual holdings:
 - Both can happen simultaneously
 """
 import math
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from ml_integration import StrategySignal
 from scoring import score_single_stock
 from debug_counters import increment_debug_counter
 from qc_portfolio import (
     get_symbols_with_holdings, get_cost_basis,
     get_position_for_symbol, get_option_position_count, get_call_position_contracts,
-    get_shares_held
+    get_shares_held, get_put_position_symbols
 )
 
 
@@ -91,6 +91,67 @@ def _build_sp_selection_tiers(algo, target_dte_min: int, target_dte_max: int) ->
     ]
 
 
+def _extract_closes(bars: List[Dict]) -> List[float]:
+    closes = []
+    for bar in bars:
+        close = bar.get("close") if isinstance(bar, dict) else None
+        if close is None:
+            continue
+        close = float(close)
+        if close > 0:
+            closes.append(close)
+    return closes
+
+
+def _is_symbol_in_assignment_cooldown(algo, symbol: str) -> Tuple[bool, Optional[object]]:
+    state = getattr(algo, "assigned_stock_state", {}).get(symbol)
+    if not isinstance(state, dict):
+        return False, None
+    block_until = state.get("sp_reentry_block_until")
+    if block_until is None:
+        return False, None
+    return algo.Time < block_until, block_until
+
+
+def _should_block_sp_for_weakness(algo, symbol: str, underlying_price: float, bars: List[Dict]) -> Tuple[bool, Dict]:
+    diagnostics = {
+        "inventory_risk": False,
+        "trend_breakdown": False,
+        "vol_spike": False,
+        "price": underlying_price,
+        "ma20": 0.0,
+        "rv10": 0.0,
+        "rv20": 0.0,
+    }
+    if not getattr(algo, "sp_weak_filter_enabled", False):
+        return False, diagnostics
+
+    has_shares = get_shares_held(algo, symbol) > 0
+    has_short_put = symbol in get_put_position_symbols(algo)
+    in_assignment_state = symbol in getattr(algo, "assigned_stock_state", {})
+    diagnostics["inventory_risk"] = has_shares or has_short_put or in_assignment_state
+    if not diagnostics["inventory_risk"]:
+        return False, diagnostics
+
+    closes = _extract_closes(bars)
+    if len(closes) < 20:
+        return False, diagnostics
+
+    ma20 = sum(closes[-20:]) / 20.0
+    rv10 = _annualized_realized_volatility(closes[-10:])
+    rv20 = _annualized_realized_volatility(closes[-20:])
+    diagnostics["ma20"] = ma20
+    diagnostics["rv10"] = rv10
+    diagnostics["rv20"] = rv20
+
+    if ma20 > 0:
+        diagnostics["trend_breakdown"] = underlying_price < ma20 * (1 - getattr(algo, "sp_weak_filter_ma20_break_pct", 0.03))
+    if rv20 > 0:
+        diagnostics["vol_spike"] = rv10 >= rv20 * getattr(algo, "sp_weak_filter_vol_spike_ratio", 1.25)
+
+    return diagnostics["inventory_risk"] and diagnostics["trend_breakdown"] and diagnostics["vol_spike"], diagnostics
+
+
 def get_current_position(algo, symbol: str) -> Optional[Dict]:
     return get_position_for_symbol(algo, symbol)
 
@@ -126,6 +187,14 @@ def generate_ml_signals(algo) -> List[StrategySignal]:
             increment_debug_counter(algo, "sp_held_block")
             algo.Log(f"SP_HELD_BLOCK:{symbol}:shares={shares_held}")
             continue
+        in_cooldown, block_until = _is_symbol_in_assignment_cooldown(algo, symbol)
+        if in_cooldown:
+            increment_debug_counter(algo, "sp_assignment_cooldown_block")
+            algo.Log(
+                f"SP_ASSIGNMENT_COOLDOWN:{symbol}:until={block_until.strftime('%Y-%m-%d')}:"
+                f"shares={get_shares_held(algo, symbol)}"
+            )
+            continue
         sig = generate_signal_for_symbol(algo, symbol, "SP", portfolio_state)
         if sig: signals.append(sig)
     
@@ -147,6 +216,15 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
             increment_debug_counter(algo, "cc_signal_missing")
             algo.Log(f"CC_SKIP:{symbol}:insufficient_history={len(bars)}")
         return None
+    if strategy_phase == "SP":
+        weak_filter_block, diagnostics = _should_block_sp_for_weakness(algo, symbol, underlying_price, bars)
+        if weak_filter_block:
+            increment_debug_counter(algo, "sp_weak_filter_block")
+            algo.Log(
+                f"SP_WEAK_FILTER:{symbol}:price={diagnostics['price']:.2f}:ma20={diagnostics['ma20']:.2f}:"
+                f"rv10={diagnostics['rv10']:.4f}:rv20={diagnostics['rv20']:.4f}:inventory_risk=1"
+            )
+            return None
     cost_basis = get_cost_basis(algo, symbol)
     preferred_right = "C" if strategy_phase == "CC" else "P"
     current_position = get_position_for_symbol(algo, symbol, preferred_right=preferred_right)
