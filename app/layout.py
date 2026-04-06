@@ -1,4 +1,4 @@
-"""Top-level layout: navbar + page container with manual URL routing."""
+"""Top-level layout: navbar + Dash page container."""
 
 import dash
 from dash import html, dcc, callback, Output, Input
@@ -48,25 +48,15 @@ TRANSLATIONS = {
 
 def create_layout():
     return html.Div([
-        # URL location for routing
         dcc.Location(id="url", refresh=False),
-
-        # Stores for shared state
         dcc.Store(id="connection-state-store", data={"state": "disconnected", "message": ""}),
         dcc.Store(id="account-store", data={}),
         dcc.Store(id="positions-store", data=[]),
-        
-        # Language store - default to English
         dcc.Store(id="language-store", data="en"),
-
-        # Interval for periodic data refresh
         dcc.Interval(id="global-interval", interval=5000, n_intervals=0),
-
-        # Navbar with language selector
         create_navbar(),
-
-        # Page content (manually routed)
         dbc.Container(
+            dash.page_container,
             id="page-content",
             fluid=True,
             className="px-4",
@@ -74,14 +64,12 @@ def create_layout():
     ])
 
 
-@callback(Output("page-content", "children"), Input("url", "pathname"))
 def display_page(pathname):
-    """Route to the appropriate page based on URL pathname."""
+    """Compatibility helper for routing tests and manual inspection."""
     if pathname in _ROUTE_KEYS:
         layout = _page_layout(_ROUTE_KEYS[pathname])
         return layout() if callable(layout) else layout
 
-    # 404 fallback
     return html.Div([
         html.H3("404 - Page Not Found", className="text-danger"),
         html.P(f"The path '{pathname}' does not exist."),
