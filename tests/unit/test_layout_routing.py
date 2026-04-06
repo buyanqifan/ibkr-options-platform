@@ -18,6 +18,7 @@ def _load_layout_module(monkeypatch):
         "pages.backtester": {"layout": html.Div("backtester")},
         "pages.backtest_history": {"layout": html.Div("backtest-history")},
         "pages.binbin_god": {"layout": lambda: html.Div("binbin-god")},
+        "pages.binbin_god_live": {"layout": html.Div("binbin-god-live")},
         "pages.settings": {"layout": html.Div("settings")},
     }
     monkeypatch.setattr(dash, "page_registry", fake_registry, raising=False)
