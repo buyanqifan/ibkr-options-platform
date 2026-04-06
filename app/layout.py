@@ -1,4 +1,4 @@
-"""Top-level layout: navbar + Dash page container."""
+"""Top-level layout with resilient manual routing over Dash page registry."""
 
 import dash
 from dash import html, dcc, callback, Output, Input
@@ -56,7 +56,6 @@ def create_layout():
         dcc.Interval(id="global-interval", interval=5000, n_intervals=0),
         create_navbar(),
         dbc.Container(
-            dash.page_container,
             id="page-content",
             fluid=True,
             className="px-4",
@@ -64,17 +63,48 @@ def create_layout():
     ])
 
 
+def _render_page(pathname):
+    if pathname not in _ROUTE_KEYS:
+        return html.Div([
+            html.H3("404 - Page Not Found", className="text-danger"),
+            html.P(f"The path '{pathname}' does not exist."),
+            dbc.Button("Go to Dashboard", href="/", color="primary"),
+        ], className="text-center mt-5")
+
+    page_key = _ROUTE_KEYS[pathname]
+    layout = _page_layout(page_key)
+    if getattr(layout, "children", None) == f"Missing page: {page_key}":
+        registered = sorted(dash.page_registry.keys())
+        return dbc.Alert(
+            [
+                html.H5("Page registration error", className="alert-heading"),
+                html.P(f"Missing page key: {page_key}"),
+                html.P(f"Registered pages: {', '.join(registered) if registered else '(none)'}"),
+            ],
+            color="danger",
+            className="mt-4",
+        )
+    return layout() if callable(layout) else layout
+
+
 def display_page(pathname):
     """Compatibility helper for routing tests and manual inspection."""
-    if pathname in _ROUTE_KEYS:
-        layout = _page_layout(_ROUTE_KEYS[pathname])
-        return layout() if callable(layout) else layout
+    try:
+        return _render_page(pathname)
+    except Exception as exc:
+        return dbc.Alert(
+            [
+                html.H5("Page render error", className="alert-heading"),
+                html.P(str(exc)),
+            ],
+            color="danger",
+            className="mt-4",
+        )
 
-    return html.Div([
-        html.H3("404 - Page Not Found", className="text-danger"),
-        html.P(f"The path '{pathname}' does not exist."),
-        dbc.Button("Go to Dashboard", href="/", color="primary"),
-    ], className="text-center mt-5")
+
+@callback(Output("page-content", "children"), Input("url", "pathname"))
+def route_page(pathname):
+    return display_page(pathname)
 
 
 @callback(
