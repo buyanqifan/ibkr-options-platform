@@ -26,6 +26,8 @@ _SUMMARY_COUNTER_GROUPS = (
             "no_suitable_options",
             "sp_assignment_cooldown_block",
             "sp_weak_filter_block",
+            "sp_close_early",
+            "assigned_stock_inventory_block",
         ),
     ),
     (
@@ -34,6 +36,7 @@ _SUMMARY_COUNTER_GROUPS = (
             "assigned_stock_track",
             "immediate_cc",
             "assigned_stock_exit",
+            "assigned_stock_cc_miss_exit",
         ),
     ),
     (

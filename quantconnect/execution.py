@@ -271,6 +271,15 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
 
     portfolio_value = max(algo.Portfolio.TotalPortfolioValue, 0.0)
     remaining_margin_budget = max(0.0, portfolio_value * algo.target_margin_utilization - algo.Portfolio.TotalMarginUsed)
+    current_inventory_value = 0.0
+    for holding in algo.Portfolio.Values:
+        if not holding.Invested:
+            continue
+        hs = holding.Symbol
+        if not (hasattr(hs, "SecurityType") and hs.SecurityType == SecurityType.Equity):
+            continue
+        current_inventory_value += abs(float(getattr(holding, "HoldingsValue", 0.0) or 0.0))
+    remaining_inventory_budget = max(0.0, portfolio_value * getattr(algo, "assigned_stock_inventory_cap_pct", 0.30) - current_inventory_value)
 
     symbol_assignment_exposure = get_shares_held(algo, symbol) * max(underlying_price, 0)
     for holding in algo.Portfolio.Values:
@@ -290,23 +299,27 @@ def calculate_put_quantity(algo, selected: Dict, current_positions: int, underly
     remaining_slot_count = max(0, algo.max_positions - current_positions)
 
     portfolio_qty = int(remaining_margin_budget / estimated_margin_per_contract) if estimated_margin_per_contract > 0 else 0
+    inventory_qty = int(remaining_inventory_budget / candidate_assignment) if candidate_assignment > 0 else 0
     symbol_qty = int(remaining_symbol_cap / candidate_assignment) if candidate_assignment > 0 else 0
     trade_qty = int(remaining_trade_cap / candidate_assignment) if candidate_assignment > 0 else 0
-    quantity = min(portfolio_qty, symbol_qty, trade_qty, remaining_slot_count)
+    quantity = min(portfolio_qty, inventory_qty, symbol_qty, trade_qty, remaining_slot_count)
     if quantity > 0:
         return quantity
 
     reasons = {
         "portfolio_margin": portfolio_qty,
+        "inventory_cap": inventory_qty,
         "symbol_assignment": symbol_qty,
         "trade_assignment": trade_qty,
         "position_slots": remaining_slot_count,
     }
     block_reason = min(reasons.items(), key=lambda item: item[1])[0]
     increment_debug_counter(algo, "put_block")
+    if block_reason == "inventory_cap":
+        increment_debug_counter(algo, "assigned_stock_inventory_block")
     algo.Log(
         f"PUT_BLOCK:{symbol}:reason={block_reason}:"
-        f"portfolio={portfolio_qty}:symbol={symbol_qty}:trade={trade_qty}:slots={remaining_slot_count}"
+        f"portfolio={portfolio_qty}:inventory={inventory_qty}:symbol={symbol_qty}:trade={trade_qty}:slots={remaining_slot_count}"
     )
     return 0
 

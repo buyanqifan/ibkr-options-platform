@@ -190,10 +190,18 @@ def should_roll_position(
     dte: int,
     roll_threshold_pct: float = 80,
     min_dte_for_roll: int = 7,
+    close_early_dte: int = 5,
+    close_early_loss_limit_pct: float = 150,
 ) -> Tuple[str, str]:
     """Return the single wheel decision for an open short option."""
     if premium_captured_pct >= roll_threshold_pct and dte > min_dte_for_roll:
         return "ROLL", f"Roll: {premium_captured_pct:.0f}% premium captured, {dte} DTE"
+
+    if premium_captured_pct <= -abs(close_early_loss_limit_pct):
+        return "CLOSE", f"Close early: loss {premium_captured_pct:.0f}% breached limit, {dte} DTE"
+
+    if 0 < dte <= close_early_dte:
+        return "CLOSE", f"Close early: {dte} DTE without target capture"
 
     if dte <= 0:
         return "EXPIRY", f"Option expired, DTE={dte}"

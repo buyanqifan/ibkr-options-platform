@@ -51,17 +51,22 @@ def _track_assigned_stock(algo, symbol: str, assignment_cost_basis: float):
     """Track stock inventory created by put assignment for later fail-safe checks."""
     if not hasattr(algo, "assigned_stock_state"):
         algo.assigned_stock_state = {}
+    repair_deadline = algo.Time + timedelta(days=max(1, getattr(algo, "assigned_stock_max_repair_days", 7)))
     algo.assigned_stock_state[symbol] = {
         "assignment_date": algo.Time,
         "assignment_cost_basis": assignment_cost_basis,
         "sp_reentry_block_until": algo.Time + timedelta(days=max(0, getattr(algo, "sp_assignment_cooldown_days", 7))),
+        "inventory_mode": "repair",
+        "repair_deadline": repair_deadline,
+        "cc_miss_count": 0,
         "has_covered_call": False,
         "force_exit_triggered": False,
     }
     increment_debug_counter(algo, "assigned_stock_track")
     algo.Log(
         f"ASSIGNED_STOCK_TRACK:{symbol}:cost_basis={assignment_cost_basis:.2f}:"
-        f"sp_block_until={algo.assigned_stock_state[symbol]['sp_reentry_block_until'].strftime('%Y-%m-%d')}"
+        f"sp_block_until={algo.assigned_stock_state[symbol]['sp_reentry_block_until'].strftime('%Y-%m-%d')}:"
+        f"repair_deadline={repair_deadline.strftime('%Y-%m-%d')}:mode=repair"
     )
 
 

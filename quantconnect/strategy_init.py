@@ -79,10 +79,15 @@ def init_parameters(algo):
     )
     algo.max_assignment_risk_per_trade = _as_float(_get_param(algo, "max_assignment_risk_per_trade", 0.20), 0.20)
 
-    algo.roll_threshold_pct = _as_float(_get_param(algo, "roll_threshold_pct", 80), 80.0)
+    algo.roll_threshold_pct = _as_float(_get_param(algo, "roll_threshold_pct", 78), 78.0)
     algo.min_dte_for_roll = _as_int(_get_param(algo, "min_dte_for_roll", 7), 7)
     algo.roll_target_dte_min = _as_int(_get_param(algo, "roll_target_dte_min", 21), 21)
     algo.roll_target_dte_max = _as_int(_get_param(algo, "roll_target_dte_max", 45), 45)
+    algo.sp_close_early_dte = max(0, _as_int(_get_param(algo, "sp_close_early_dte", 3), 3))
+    algo.sp_close_early_loss_limit_pct = _as_float(
+        _get_param(algo, "sp_close_early_loss_limit_pct", 999999),
+        999999.0,
+    )
     algo.sp_primary_delta_tolerance = _clamp(
         _as_float(_get_param(algo, "sp_primary_delta_tolerance", 0.12), 0.12),
         0.04,
@@ -122,6 +127,24 @@ def init_parameters(algo):
     )
 
     algo.assigned_stock_fail_safe_enabled = _as_bool(_get_param(algo, "assigned_stock_fail_safe_enabled", True), True)
+    algo.assigned_stock_inventory_cap_pct = _clamp(
+        _as_float(_get_param(algo, "assigned_stock_inventory_cap_pct", 0.30), 0.30),
+        0.0,
+        1.0,
+    )
+    algo.assigned_stock_max_repair_days = max(
+        1,
+        _as_int(_get_param(algo, "assigned_stock_max_repair_days", 5), 5),
+    )
+    algo.assigned_stock_cc_miss_limit = max(
+        1,
+        _as_int(_get_param(algo, "assigned_stock_cc_miss_limit", 2), 2),
+    )
+    algo.assigned_stock_exit_fraction = _clamp(
+        _as_float(_get_param(algo, "assigned_stock_exit_fraction", 1.0), 1.0),
+        0.0,
+        1.0,
+    )
     algo.assigned_stock_min_days_held = _as_int(_get_param(algo, "assigned_stock_min_days_held", 5), 5)
     algo.assigned_stock_drawdown_pct = _as_float(_get_param(algo, "assigned_stock_drawdown_pct", 0.12), 0.12)
     algo.assigned_stock_force_exit_pct = _clamp(
@@ -203,6 +226,8 @@ def log_effective_parameters(algo):
         f"roll_threshold_pct={algo.roll_threshold_pct}, "
         f"min_dte_for_roll={algo.min_dte_for_roll}, "
         f"roll_target_dte={algo.roll_target_dte_min}-{algo.roll_target_dte_max}, "
+        f"sp_close_early_dte={algo.sp_close_early_dte}, "
+        f"sp_close_early_loss_limit_pct={algo.sp_close_early_loss_limit_pct}, "
         f"sp_delta_tolerance={algo.sp_primary_delta_tolerance}/{algo.sp_relaxed_delta_tolerance}, "
         f"sp_min_option_premium={algo.sp_min_option_premium}, "
         f"sp_assignment_cooldown_days={algo.sp_assignment_cooldown_days}, "
@@ -212,6 +237,10 @@ def log_effective_parameters(algo):
         f"cc_target_delta={algo.cc_target_delta}, "
         f"cc_target_dte={algo.cc_target_dte_min}-{algo.cc_target_dte_max}, "
         f"cc_max_discount_to_cost={algo.cc_max_discount_to_cost}, "
+        f"assigned_stock_inventory_cap_pct={algo.assigned_stock_inventory_cap_pct}, "
+        f"assigned_stock_max_repair_days={algo.assigned_stock_max_repair_days}, "
+        f"assigned_stock_cc_miss_limit={algo.assigned_stock_cc_miss_limit}, "
+        f"assigned_stock_exit_fraction={algo.assigned_stock_exit_fraction}, "
         f"assigned_stock_min_days_held={algo.assigned_stock_min_days_held}, "
         f"assigned_stock_drawdown_pct={algo.assigned_stock_drawdown_pct}, "
         f"assigned_stock_force_exit_pct={algo.assigned_stock_force_exit_pct}, "
