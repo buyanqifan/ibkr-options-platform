@@ -327,6 +327,8 @@ class BinbinGodStrategy(BaseStrategy):
         
         self._profit_target_disabled = True
         self._stop_loss_disabled = True
+        self.profit_target_pct = resolved_config.get("profit_target_pct", QC_BINBIN_DEFAULTS["profit_target_pct"])
+        self.stop_loss_pct = resolved_config.get("stop_loss_pct", QC_BINBIN_DEFAULTS["stop_loss_pct"])
 
     @property
     def phase(self) -> str:
