@@ -50,7 +50,9 @@ TRANSLATIONS = {
 def create_layout():
     initial_path = "/"
     if has_request_context():
-        initial_path = request.path or "/"
+        request_path = request.path or "/"
+        if request_path in _ROUTE_KEYS:
+            initial_path = request_path
 
     return html.Div([
         dcc.Location(id="url", refresh=False),
