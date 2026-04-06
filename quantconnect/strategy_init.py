@@ -125,6 +125,24 @@ def init_parameters(algo):
         0.0,
         0.30,
     )
+    algo.assigned_stock_cc_repair_delta = _clamp(
+        _as_float(_get_param(algo, "assigned_stock_cc_repair_delta", 0.35), 0.35),
+        0.10,
+        0.60,
+    )
+    algo.assigned_stock_cc_repair_dte_min = _as_int(
+        _get_param(algo, "assigned_stock_cc_repair_dte_min", 7),
+        7,
+    )
+    algo.assigned_stock_cc_repair_dte_max = _as_int(
+        _get_param(algo, "assigned_stock_cc_repair_dte_max", 21),
+        21,
+    )
+    algo.assigned_stock_cc_max_discount_to_cost = _clamp(
+        _as_float(_get_param(algo, "assigned_stock_cc_max_discount_to_cost", 0.10), 0.10),
+        0.0,
+        0.30,
+    )
 
     algo.assigned_stock_fail_safe_enabled = _as_bool(_get_param(algo, "assigned_stock_fail_safe_enabled", True), True)
     algo.assigned_stock_inventory_cap_pct = _clamp(
@@ -134,11 +152,11 @@ def init_parameters(algo):
     )
     algo.assigned_stock_max_repair_days = max(
         1,
-        _as_int(_get_param(algo, "assigned_stock_max_repair_days", 5), 5),
+        _as_int(_get_param(algo, "assigned_stock_max_repair_days", 3), 3),
     )
     algo.assigned_stock_cc_miss_limit = max(
         1,
-        _as_int(_get_param(algo, "assigned_stock_cc_miss_limit", 2), 2),
+        _as_int(_get_param(algo, "assigned_stock_cc_miss_limit", 1), 1),
     )
     algo.assigned_stock_exit_fraction = _clamp(
         _as_float(_get_param(algo, "assigned_stock_exit_fraction", 1.0), 1.0),
@@ -237,6 +255,9 @@ def log_effective_parameters(algo):
         f"cc_target_delta={algo.cc_target_delta}, "
         f"cc_target_dte={algo.cc_target_dte_min}-{algo.cc_target_dte_max}, "
         f"cc_max_discount_to_cost={algo.cc_max_discount_to_cost}, "
+        f"assigned_stock_cc_repair_delta={algo.assigned_stock_cc_repair_delta}, "
+        f"assigned_stock_cc_repair_dte={algo.assigned_stock_cc_repair_dte_min}-{algo.assigned_stock_cc_repair_dte_max}, "
+        f"assigned_stock_cc_max_discount_to_cost={algo.assigned_stock_cc_max_discount_to_cost}, "
         f"assigned_stock_inventory_cap_pct={algo.assigned_stock_inventory_cap_pct}, "
         f"assigned_stock_max_repair_days={algo.assigned_stock_max_repair_days}, "
         f"assigned_stock_cc_miss_limit={algo.assigned_stock_cc_miss_limit}, "

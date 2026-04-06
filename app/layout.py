@@ -1,8 +1,27 @@
 """Top-level layout: navbar + page container with manual URL routing."""
 
-from dash import html, dcc, callback, Output, Input, State
+import dash
+from dash import html, dcc, callback, Output, Input
 import dash_bootstrap_components as dbc
 from app.components.navbar import create_navbar
+
+
+def _page_layout(key: str):
+    page = dash.page_registry.get(key, {})
+    return page.get("layout", html.Div(f"Missing page: {key}", className="text-danger"))
+
+
+_ROUTE_KEYS = {
+    "/": "pages.dashboard",
+    "/market-data": "pages.market_data",
+    "/screener": "pages.screener",
+    "/options-chain": "pages.options_chain",
+    "/backtester": "pages.backtester",
+    "/backtest-history": "pages.backtest_history",
+    "/binbin-god": "pages.binbin_god",
+    "/binbin-god-live": "pages.binbin_god_live",
+    "/settings": "pages.settings",
+}
 
 # Language translations dictionary
 TRANSLATIONS = {
@@ -58,25 +77,8 @@ def create_layout():
 @callback(Output("page-content", "children"), Input("url", "pathname"))
 def display_page(pathname):
     """Route to the appropriate page based on URL pathname."""
-    from app.pages import (
-        dashboard, market_data, screener, options_chain, backtester, 
-        settings, backtest_history, binbin_god, binbin_god_live
-    )
-
-    routes = {
-        "/": dashboard.layout,
-        "/market-data": market_data.layout,
-        "/screener": screener.layout,
-        "/options-chain": options_chain.layout,
-        "/backtester": backtester.layout,
-        "/backtest-history": backtest_history.layout,
-        "/binbin-god": binbin_god.layout,
-        "/binbin-god-live": binbin_god_live.layout,
-        "/settings": settings.layout,
-    }
-
-    if pathname in routes:
-        layout = routes[pathname]
+    if pathname in _ROUTE_KEYS:
+        layout = _page_layout(_ROUTE_KEYS[pathname])
         return layout() if callable(layout) else layout
 
     # 404 fallback

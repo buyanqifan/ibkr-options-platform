@@ -55,18 +55,24 @@ def _annualized_realized_volatility(closes: List[float]) -> float:
     return math.sqrt(variance) * math.sqrt(252)
 
 
-def _build_cc_selection_tiers(target_dte_min: int, target_dte_max: int, min_strike: Optional[float]) -> List[Dict]:
+def _build_cc_selection_tiers(
+    target_dte_min: int,
+    target_dte_max: int,
+    min_strike: Optional[float],
+    primary_tolerance: float = 0.08,
+    relaxed_tolerance: float = 0.16,
+) -> List[Dict]:
     return [
         {
             "name": "primary",
-            "delta_tolerance": 0.08,
+            "delta_tolerance": primary_tolerance,
             "dte_min": target_dte_min,
             "dte_max": target_dte_max,
             "min_strike": min_strike,
         },
         {
             "name": "delta_relaxed",
-            "delta_tolerance": 0.16,
+            "delta_tolerance": relaxed_tolerance,
             "dte_min": target_dte_min,
             "dte_max": target_dte_max,
             "min_strike": min_strike,
@@ -152,6 +158,50 @@ def _should_block_sp_for_weakness(algo, symbol: str, underlying_price: float, ba
     return diagnostics["inventory_risk"] and diagnostics["trend_breakdown"] and diagnostics["vol_spike"], diagnostics
 
 
+def _get_assigned_stock_state(algo, symbol: str) -> Optional[Dict]:
+    state = getattr(algo, "assigned_stock_state", {}).get(symbol)
+    return state if isinstance(state, dict) else None
+
+
+def _build_cc_mode(algo, symbol: str, underlying_price: float, cost_basis: float) -> Dict:
+    mode = {
+        "label": "normal",
+        "delta": algo.cc_target_delta,
+        "dte_min": algo.cc_target_dte_min,
+        "dte_max": max(algo.cc_target_dte_min, algo.cc_target_dte_max),
+        "min_strike": underlying_price * 1.01,
+        "primary_tolerance": 0.08,
+        "relaxed_tolerance": 0.16,
+    }
+
+    if cost_basis > 0 and getattr(algo, "cc_below_cost_enabled", True) and underlying_price < cost_basis:
+        mode["min_strike"] = max(mode["min_strike"], cost_basis * (1 - algo.cc_max_discount_to_cost))
+
+    state = _get_assigned_stock_state(algo, symbol)
+    if not state:
+        return mode
+
+    inventory_mode = str(state.get("inventory_mode", "repair") or "repair")
+    if inventory_mode == "income":
+        mode["label"] = "income"
+        return mode
+
+    # Assigned stock in repair mode should prioritize getting a call sold.
+    mode["label"] = "repair"
+    mode["delta"] = max(algo.cc_target_delta, getattr(algo, "assigned_stock_cc_repair_delta", algo.cc_target_delta))
+    mode["dte_min"] = max(1, getattr(algo, "assigned_stock_cc_repair_dte_min", algo.cc_target_dte_min))
+    mode["dte_max"] = max(mode["dte_min"], getattr(algo, "assigned_stock_cc_repair_dte_max", algo.cc_target_dte_max))
+    mode["min_strike"] = underlying_price * 1.005
+    if cost_basis > 0:
+        mode["min_strike"] = max(
+            mode["min_strike"],
+            cost_basis * (1 - getattr(algo, "assigned_stock_cc_max_discount_to_cost", algo.cc_max_discount_to_cost)),
+        )
+    mode["primary_tolerance"] = 0.12
+    mode["relaxed_tolerance"] = 0.24
+    return mode
+
+
 def get_current_position(algo, symbol: str) -> Optional[Dict]:
     return get_position_for_symbol(algo, symbol)
 
@@ -230,10 +280,17 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
     current_position = get_position_for_symbol(algo, symbol, preferred_right=preferred_right)
     traditional_delta = 0.30 if strategy_phase == "SP" else algo.cc_target_delta
     cc_min_strike = None
+    cc_mode = None
     if strategy_phase == "CC":
-        cc_min_strike = underlying_price * 1.01
-        if cost_basis > 0 and getattr(algo, "cc_below_cost_enabled", True) and underlying_price < cost_basis:
-            cc_min_strike = max(cc_min_strike, cost_basis * (1 - algo.cc_max_discount_to_cost))
+        cc_mode = _build_cc_mode(algo, symbol, underlying_price, cost_basis)
+        cc_min_strike = cc_mode["min_strike"]
+        if cc_mode["label"] == "repair":
+            algo.Log(
+                f"CC_REPAIR_MODE:{symbol}:cost={cost_basis:.2f}:price={underlying_price:.2f}:"
+                f"min_strike={cc_min_strike:.2f}:delta={cc_mode['delta']:.2f}:"
+                f"dte={cc_mode['dte_min']}-{cc_mode['dte_max']}"
+            )
+        elif cost_basis > 0 and getattr(algo, "cc_below_cost_enabled", True) and underlying_price < cost_basis:
             algo.Log(
                 f"CC_COST_FLOOR:{symbol}:cost={cost_basis:.2f}:price={underlying_price:.2f}:"
                 f"min_strike={cc_min_strike:.2f}"
@@ -255,9 +312,9 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
         signal.delta = adaptive_delta
     if signal:
         if strategy_phase == "CC":
-            signal.delta = max(signal.delta, algo.cc_target_delta)
-            signal.dte_min = algo.cc_target_dte_min
-            signal.dte_max = max(algo.cc_target_dte_min, algo.cc_target_dte_max)
+            signal.delta = max(signal.delta, cc_mode["delta"] if cc_mode else algo.cc_target_delta)
+            signal.dte_min = cc_mode["dte_min"] if cc_mode else algo.cc_target_dte_min
+            signal.dte_max = cc_mode["dte_max"] if cc_mode else max(algo.cc_target_dte_min, algo.cc_target_dte_max)
             algo.Log(
                 f"CC_SIGNAL_READY:{symbol}:delta={signal.delta:.2f}:dte={signal.dte_min}-{signal.dte_max}:"
                 f"min_strike={cc_min_strike if cc_min_strike is not None else 0:.2f}:"
@@ -272,6 +329,8 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
                 target_dte_min=signal.dte_min,
                 target_dte_max=signal.dte_max,
                 min_strike=cc_min_strike,
+                primary_tolerance=cc_mode["primary_tolerance"] if cc_mode else 0.08,
+                relaxed_tolerance=cc_mode["relaxed_tolerance"] if cc_mode else 0.16,
             )
         elif strategy_phase == "SP":
             signal.selection_tiers = _build_sp_selection_tiers(
