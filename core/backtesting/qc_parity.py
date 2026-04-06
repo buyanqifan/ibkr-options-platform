@@ -171,6 +171,8 @@ QC_BINBIN_DEFAULTS = {
     "ml_adoption_rate": float(QC_PARAMETER_DEFAULTS["ml_adoption_rate"]),
     "ml_exploration_rate": float(QC_PARAMETER_DEFAULTS["ml_exploration_rate"]),
     "ml_learning_rate": float(QC_PARAMETER_DEFAULTS["ml_learning_rate"]),
+    "profit_target_pct": float(QC_PARAMETER_DEFAULTS.get("profit_target_pct", 50.0)),
+    "stop_loss_pct": float(QC_PARAMETER_DEFAULTS.get("stop_loss_pct", 999999.0)),
 }
 
 
