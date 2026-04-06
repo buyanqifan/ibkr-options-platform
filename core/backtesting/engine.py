@@ -438,7 +438,7 @@ class BacktestEngine:
                 current_date=bar_date,
                 price_lookup=parity_context["price_by_symbol"],
                 iv=iv,
-                profit_target_pct=strategy.profit_target_pct,
+                profit_target_pct=strategy.roll_threshold_pct,
                 stop_loss_pct=999999,
             )
             simulator.open_positions = still_open
@@ -827,8 +827,8 @@ class BacktestEngine:
                 # Multi-stock mode: check each position with its correct underlying price
                 # For Wheel-like strategies (binbin_god):
                 # - Disable stop loss: hold through drawdowns, let time work for us
-                # - Enable profit target: roll to new position when profitable
-                profit_target_to_use = strategy.profit_target_pct  # Enable profit target for rolling
+                # - Use roll_threshold for profit target (QC parity)
+                profit_target_to_use = strategy.roll_threshold_pct  # QC uses roll_threshold, not profit_target
                 stop_loss_to_use = 999999      # Disable stop loss for Wheel-like strategies
 
                 closed = []
@@ -862,12 +862,12 @@ class BacktestEngine:
                 
                 # For Wheel strategy:
                 # - Disable stop loss: hold through drawdowns
-                # - Enable profit target: roll when profitable
+                # - Use roll_threshold for profit target (QC parity)
                 closed = simulator.check_exits(
                     bar_date,
                     underlying_price,
                     iv,
-                    profit_target_pct=strategy.profit_target_pct,  # Enable profit target for rolling
+                    profit_target_pct=strategy.roll_threshold_pct,  # QC uses roll_threshold, not profit_target
                     stop_loss_pct=999999,  # Disable stop loss
                     min_dte=0,
                 )
