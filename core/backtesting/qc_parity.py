@@ -44,6 +44,8 @@ _QC_PARAMETER_FALLBACKS = {
     "ml_adoption_rate": 0.5,
     "ml_exploration_rate": 0.1,
     "ml_learning_rate": 0.01,
+    "profit_target_pct": 50.0,
+    "stop_loss_pct": 999999.0,
 }
 
 

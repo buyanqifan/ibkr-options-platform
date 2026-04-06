@@ -295,16 +295,19 @@ def _build_binbin_results_view(result, params):
     return mag7_section, content, {"display": "none"}, "d-block mt-2"
 
 
-def _get_initial_layout_state():
-    """Build initial server-rendered state from the persisted last result."""
-    payload = load_last_binbin_god_result() or {}
-    params = payload.get("params") if isinstance(payload, dict) else None
-    result = payload.get("result") if isinstance(payload, dict) else None
-
+def _get_initial_layout_state(force_load=False):
+    """Build initial server-rendered state. Does not load last result by default."""
     defaults = dict(QC_UI_DEFAULTS)
-    if params:
-        field_values = _form_values_from_params(params)
-        defaults = {field["default"]: value for field, value in zip(ALL_FORM_FIELDS, field_values)}
+    params = None
+    result = None
+
+    if force_load:
+        payload = load_last_binbin_god_result() or {}
+        params = payload.get("params") if isinstance(payload, dict) else None
+        result = payload.get("result") if isinstance(payload, dict) else None
+        if params:
+            field_values = _form_values_from_params(params)
+            defaults = {field["default"]: value for field, value in zip(ALL_FORM_FIELDS, field_values)}
 
     if params and result:
         mag7_section, content, _, export_class = _build_binbin_results_view(result, params)
@@ -315,6 +318,7 @@ def _get_initial_layout_state():
             "mag7_children": mag7_section,
             "results_children": content,
             "export_class": export_class,
+            "data_loaded": params is not None,
         }
 
     placeholder = [
@@ -338,6 +342,7 @@ def _get_initial_layout_state():
         "mag7_children": None,
         "results_children": placeholder,
         "export_class": "d-none",
+        "data_loaded": False,
     }
 
 
@@ -351,6 +356,13 @@ def _build_configuration_panel(defaults):
             _section_card("Covered Call", _build_rows(CC_FIELDS, defaults), color="warning"),
             _section_card("Assigned Stock Fail-Safe", _build_rows(ASSIGNED_STOCK_FIELDS, defaults), color="danger"),
             _section_card("ML", _build_rows(ML_FIELDS, defaults), color="primary"),
+            dbc.Button(
+                [html.I(className="bi bi-cloud-arrow-up me-2"), "Load Last Result"],
+                id="bbg-load-btn",
+                color="secondary",
+                className="w-100 mb-2",
+                n_clicks=0,
+            ),
             dbc.Button(
                 [html.I(className="bi bi-play-fill me-2"), "Run Backtest"],
                 id="bbg-run-btn",
@@ -446,6 +458,94 @@ def layout():
         ),
         ],
         fluid=True,
+    )
+
+
+@callback(
+    Output("binbin-params-store", "data"),
+    Output("binbin-results-store", "data"),
+    Output("binbin-mag7-analysis", "children"),
+    Output("binbin-results-container", "children"),
+    Output("bbg-export-container", "className"),
+    Output("bbg-stock-pool-text", "value"),
+    Output("bbg-start", "value"),
+    Output("bbg-end", "value"),
+    Output("bbg-initial-capital", "value"),
+    Output("bbg-max-positions-ceiling", "value"),
+    Output("bbg-target-margin-utilization", "value"),
+    Output("bbg-symbol-assignment-base-cap", "value"),
+    Output("bbg-max-assignment-risk-per-trade", "value"),
+    Output("bbg-max-new-puts-per-day", "value"),
+    Output("bbg-roll-threshold-pct", "value"),
+    Output("bbg-min-dte-for-roll", "value"),
+    Output("bbg-roll-target-dte-min", "value"),
+    Output("bbg-roll-target-dte-max", "value"),
+    Output("bbg-cc-below-cost-enabled", "value"),
+    Output("bbg-cc-target-delta", "value"),
+    Output("bbg-cc-target-dte-min", "value"),
+    Output("bbg-cc-target-dte-max", "value"),
+    Output("bbg-cc-max-discount-to-cost", "value"),
+    Output("bbg-assigned-stock-fail-safe-enabled", "value"),
+    Output("bbg-assigned-stock-min-days-held", "value"),
+    Output("bbg-assigned-stock-drawdown-pct", "value"),
+    Output("bbg-assigned-stock-force-exit-pct", "value"),
+    Output("bbg-ml-enabled", "value"),
+    Output("bbg-ml-adoption-rate", "value"),
+    Output("bbg-ml-min-confidence", "value"),
+    Output("bbg-ml-exploration-rate", "value"),
+    Output("bbg-ml-learning-rate", "value"),
+    Input("bbg-load-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def load_last_result_callback(n_clicks):
+    """Load the last saved backtest result and populate form fields."""
+    if not n_clicks:
+        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
+
+    payload = load_last_binbin_god_result() or {}
+    params = payload.get("params") if isinstance(payload, dict) else None
+    result = payload.get("result") if isinstance(payload, dict) else None
+
+    if not params or not result:
+        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
+
+    defaults = {field["default"]: value for field, value in zip(ALL_FORM_FIELDS, _form_values_from_params(params))}
+
+    mag7_section, content, _, export_class = _build_binbin_results_view(result, params)
+
+    return (
+        params,
+        result,
+        mag7_section,
+        content,
+        export_class,
+        defaults.get("stock_pool_text"),
+        defaults.get("start_date"),
+        defaults.get("end_date"),
+        defaults.get("initial_capital"),
+        defaults.get("max_positions_ceiling"),
+        defaults.get("target_margin_utilization"),
+        defaults.get("symbol_assignment_base_cap"),
+        defaults.get("max_assignment_risk_per_trade"),
+        defaults.get("max_new_puts_per_day"),
+        defaults.get("roll_threshold_pct"),
+        defaults.get("min_dte_for_roll"),
+        defaults.get("roll_target_dte_min"),
+        defaults.get("roll_target_dte_max"),
+        defaults.get("cc_below_cost_enabled"),
+        defaults.get("cc_target_delta"),
+        defaults.get("cc_target_dte_min"),
+        defaults.get("cc_target_dte_max"),
+        defaults.get("cc_max_discount_to_cost"),
+        defaults.get("assigned_stock_fail_safe_enabled"),
+        defaults.get("assigned_stock_min_days_held"),
+        defaults.get("assigned_stock_drawdown_pct"),
+        defaults.get("assigned_stock_force_exit_pct"),
+        defaults.get("ml_enabled"),
+        defaults.get("ml_adoption_rate"),
+        defaults.get("ml_min_confidence"),
+        defaults.get("ml_exploration_rate"),
+        defaults.get("ml_learning_rate"),
     )
 
 
