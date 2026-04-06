@@ -55,7 +55,7 @@ def create_layout():
             initial_path = request_path
 
     return html.Div([
-        dcc.Location(id="url", refresh=False),
+        dcc.Location(id="url", refresh=True),
         dcc.Store(id="connection-state-store", data={"state": "disconnected", "message": ""}),
         dcc.Store(id="account-store", data={}),
         dcc.Store(id="positions-store", data=[]),

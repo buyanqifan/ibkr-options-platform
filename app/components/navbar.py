@@ -42,22 +42,22 @@ def create_navbar_items(lang="en"):
             dbc.DropdownMenuItem(
                 nav_labels["backtester"],
                 href="/backtester",
-                external_link=False,
+                external_link=True,
             ),
             dbc.DropdownMenuItem(
                 nav_labels["backtest_history"],
                 href="/backtest-history",
-                external_link=False,
+                external_link=True,
             ),
             dbc.DropdownMenuItem(
                 nav_labels["binbin_god"],
                 href="/binbin-god",
-                external_link=False,
+                external_link=True,
             ),
             dbc.DropdownMenuItem(
                 nav_labels["binbin_god_live"],
                 href="/binbin-god-live",
-                external_link=False,
+                external_link=True,
             ),
         ],
         label=nav_labels["backtest"],
@@ -67,12 +67,12 @@ def create_navbar_items(lang="en"):
     )
     
     return [
-        dbc.NavItem(dbc.NavLink(nav_labels["dashboard"], href="/", active="exact")),
-        dbc.NavItem(dbc.NavLink(nav_labels["market_data"], href="/market-data", active="exact")),
-        dbc.NavItem(dbc.NavLink(nav_labels["screener"], href="/screener", active="exact")),
-        dbc.NavItem(dbc.NavLink(nav_labels["options_chain"], href="/options-chain", active="exact")),
+        dbc.NavItem(dbc.NavLink(nav_labels["dashboard"], href="/", active="exact", external_link=True)),
+        dbc.NavItem(dbc.NavLink(nav_labels["market_data"], href="/market-data", active="exact", external_link=True)),
+        dbc.NavItem(dbc.NavLink(nav_labels["screener"], href="/screener", active="exact", external_link=True)),
+        dbc.NavItem(dbc.NavLink(nav_labels["options_chain"], href="/options-chain", active="exact", external_link=True)),
         backtest_menu,  # Dropdown menu for backtest pages
-        dbc.NavItem(dbc.NavLink(nav_labels["settings"], href="/settings", active="exact")),
+        dbc.NavItem(dbc.NavLink(nav_labels["settings"], href="/settings", active="exact", external_link=True)),
 
         # Language Selector
         dbc.NavItem(
