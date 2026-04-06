@@ -3,6 +3,7 @@
 import dash
 from dash import html, dcc, callback, Output, Input
 import dash_bootstrap_components as dbc
+from flask import has_request_context, request
 from app.components.navbar import create_navbar
 
 
@@ -47,6 +48,10 @@ TRANSLATIONS = {
 
 
 def create_layout():
+    initial_path = "/"
+    if has_request_context():
+        initial_path = request.path or "/"
+
     return html.Div([
         dcc.Location(id="url", refresh=False),
         dcc.Store(id="connection-state-store", data={"state": "disconnected", "message": ""}),
@@ -56,6 +61,7 @@ def create_layout():
         dcc.Interval(id="global-interval", interval=5000, n_intervals=0),
         create_navbar(),
         dbc.Container(
+            display_page(initial_path),
             id="page-content",
             fluid=True,
             className="px-4",

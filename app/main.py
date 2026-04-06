@@ -90,7 +90,7 @@ server = app.server  # Flask server for gunicorn
 
 # Apply layout
 from app.layout import create_layout  # noqa: E402
-app.layout = create_layout()
+app.layout = create_layout
 
 
 # ---------------------------------------------------------------------------
