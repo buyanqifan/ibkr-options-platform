@@ -83,6 +83,21 @@ def init_parameters(algo):
     algo.min_dte_for_roll = _as_int(_get_param(algo, "min_dte_for_roll", 7), 7)
     algo.roll_target_dte_min = _as_int(_get_param(algo, "roll_target_dte_min", 21), 21)
     algo.roll_target_dte_max = _as_int(_get_param(algo, "roll_target_dte_max", 45), 45)
+    algo.sp_primary_delta_tolerance = _clamp(
+        _as_float(_get_param(algo, "sp_primary_delta_tolerance", 0.12), 0.12),
+        0.04,
+        0.40,
+    )
+    algo.sp_relaxed_delta_tolerance = _clamp(
+        _as_float(_get_param(algo, "sp_relaxed_delta_tolerance", 0.22), 0.22),
+        algo.sp_primary_delta_tolerance,
+        0.45,
+    )
+    algo.sp_min_option_premium = _clamp(
+        _as_float(_get_param(algo, "sp_min_option_premium", 0.05), 0.05),
+        0.01,
+        1.0,
+    )
 
     algo.cc_below_cost_enabled = _as_bool(_get_param(algo, "cc_below_cost_enabled", True), True)
     algo.cc_target_delta = _clamp(_as_float(_get_param(algo, "cc_target_delta", 0.25), 0.25), 0.10, 0.60)
@@ -176,6 +191,8 @@ def log_effective_parameters(algo):
         f"roll_threshold_pct={algo.roll_threshold_pct}, "
         f"min_dte_for_roll={algo.min_dte_for_roll}, "
         f"roll_target_dte={algo.roll_target_dte_min}-{algo.roll_target_dte_max}, "
+        f"sp_delta_tolerance={algo.sp_primary_delta_tolerance}/{algo.sp_relaxed_delta_tolerance}, "
+        f"sp_min_option_premium={algo.sp_min_option_premium}, "
         f"cc_target_delta={algo.cc_target_delta}, "
         f"cc_target_dte={algo.cc_target_dte_min}-{algo.cc_target_dte_max}, "
         f"cc_max_discount_to_cost={algo.cc_max_discount_to_cost}, "

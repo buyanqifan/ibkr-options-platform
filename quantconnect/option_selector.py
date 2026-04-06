@@ -28,6 +28,11 @@ def _find_option_by_constraints(
     min_strike: float | None,
 ) -> Optional[Dict]:
     underlying_price = algo.Securities[equity_symbol].Price
+    min_premium = (
+        getattr(algo, "sp_min_option_premium", 0.05)
+        if target_right == OptionRight.Put
+        else 0.10
+    )
     option_chain = algo.OptionChainProvider.GetOptionContractList(equity_symbol, algo.Time)
     if not option_chain:
         algo._last_option_selection_stats = {
@@ -38,6 +43,7 @@ def _find_option_by_constraints(
             "dte_max": dte_max,
             "delta_tolerance": delta_tolerance,
             "min_strike": min_strike,
+            "min_premium": min_premium,
             "total_chain": 0,
             "stats": {"right": 0, "dte": 0, "min_strike": 0, "itm": 0, "delta_none": 0, "tolerance": 0, "premium": 0},
         }
@@ -72,7 +78,7 @@ def _find_option_by_constraints(
             premium = bs_put_price(underlying_price, strike, T, iv)
         else:
             premium = bs_call_price(underlying_price, strike, T, iv)
-        if premium <= 0.10:
+        if premium <= min_premium:
             stats['premium'] += 1
             continue
         suitable.append(build_option_result(option_symbol, strike, option_symbol.ID.Date, dte,
@@ -85,6 +91,7 @@ def _find_option_by_constraints(
         "dte_max": dte_max,
         "delta_tolerance": delta_tolerance,
         "min_strike": min_strike,
+        "min_premium": min_premium,
         "total_chain": len(option_chain),
         "stats": stats,
         "suitable_count": len(suitable),

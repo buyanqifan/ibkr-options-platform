@@ -33,6 +33,7 @@ def _log_option_selection_failure(algo, signal: StrategySignal, target_right, ta
         f"dte={stats.get('dte_min')}-{stats.get('dte_max')}:"
         f"tol={stats.get('delta_tolerance', 0):.2f}:"
         f"minstrike={float(stats.get('min_strike') or 0):.2f}:"
+        f"minpremium={float(stats.get('min_premium') or 0):.2f}:"
         f"chain={stats.get('total_chain', 0)}:"
         f"right={counts.get('right', 0)}:"
         f"dtepass={counts.get('dte', 0)}:"

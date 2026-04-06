@@ -74,6 +74,23 @@ def _build_cc_selection_tiers(target_dte_min: int, target_dte_max: int, min_stri
     ]
 
 
+def _build_sp_selection_tiers(algo, target_dte_min: int, target_dte_max: int) -> List[Dict]:
+    return [
+        {
+            "name": "primary",
+            "delta_tolerance": algo.sp_primary_delta_tolerance,
+            "dte_min": target_dte_min,
+            "dte_max": target_dte_max,
+        },
+        {
+            "name": "delta_relaxed",
+            "delta_tolerance": algo.sp_relaxed_delta_tolerance,
+            "dte_min": target_dte_min,
+            "dte_max": target_dte_max,
+        },
+    ]
+
+
 def get_current_position(algo, symbol: str) -> Optional[Dict]:
     return get_position_for_symbol(algo, symbol)
 
@@ -177,5 +194,11 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
                 target_dte_min=signal.dte_min,
                 target_dte_max=signal.dte_max,
                 min_strike=cc_min_strike,
+            )
+        elif strategy_phase == "SP":
+            signal.selection_tiers = _build_sp_selection_tiers(
+                algo,
+                target_dte_min=signal.dte_min,
+                target_dte_max=signal.dte_max,
             )
     return signal
