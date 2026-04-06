@@ -4,6 +4,7 @@ import dash
 from dash import html, dcc, callback, Output, Input
 import dash_bootstrap_components as dbc
 from flask import has_request_context, request
+from urllib.parse import urlparse
 from app.components.navbar import create_navbar
 
 
@@ -53,6 +54,12 @@ def create_layout():
         request_path = request.path or "/"
         if request_path in _ROUTE_KEYS:
             initial_path = request_path
+        else:
+            referer = request.headers.get("Referer", "")
+            if referer:
+                referer_path = urlparse(referer).path or "/"
+                if referer_path in _ROUTE_KEYS:
+                    initial_path = referer_path
 
     return html.Div([
         dcc.Location(id="url", refresh=True),
