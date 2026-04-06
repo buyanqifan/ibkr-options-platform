@@ -229,6 +229,7 @@ class BinbinGodParityConfig:
     sp_primary_delta_tolerance: float = QC_BINBIN_DEFAULTS["sp_primary_delta_tolerance"]
     sp_relaxed_delta_tolerance: float = QC_BINBIN_DEFAULTS["sp_relaxed_delta_tolerance"]
     sp_min_option_premium: float = QC_BINBIN_DEFAULTS["sp_min_option_premium"]
+    margin_rate_per_contract: float = 0.20
     ml_enabled: bool = bool(QC_BINBIN_DEFAULTS["ml_enabled"])
     ml_min_confidence: float = QC_BINBIN_DEFAULTS["ml_min_confidence"]
     ml_adoption_rate: float = QC_BINBIN_DEFAULTS["ml_adoption_rate"]
@@ -693,7 +694,7 @@ def calculate_put_quantity_qc(
         strike=strike,
         premium=premium,
         underlying_price=underlying_price,
-        margin_rate_per_contract=0.25,
+        margin_rate_per_contract=0.20,
     )
 
     total_put_notional = 0.0
