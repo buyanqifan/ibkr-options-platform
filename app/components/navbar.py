@@ -1,11 +1,13 @@
 """Navigation bar component with multi-language support."""
 
 import dash_bootstrap_components as dbc
-from dash import html, dcc, callback, Output, Input
+from dash import html, dcc, callback, Output, Input, State
 
 
-def create_navbar_items(lang="en"):
+def create_navbar_items(lang="en", selected_lang=None):
     """Create navbar items based on language."""
+    selected_lang = selected_lang or lang
+
     # Navigation labels by language
     labels = {
         "en": {
@@ -85,7 +87,7 @@ def create_navbar_items(lang="en"):
                             {"label": "🇺🇸 English", "value": "en"},
                             {"label": "🇨🇳 中文", "value": "zh"},
                         ],
-                        value="en",
+                        value=selected_lang,
                         clearable=False,
                         style={"width": "150px"},
                     ),
@@ -135,13 +137,26 @@ def create_navbar():
 
 @callback(
     Output("navbar-collapse", "children"),
-    Input("language-selector", "value"),
+    Input("language-store", "data"),
     prevent_initial_call=False,
 )
 def update_navbar_language(lang):
     """Update navbar navigation items based on selected language."""
     if lang is None:
         lang = "en"
-    
-    navbar_items = create_navbar_items(lang)
+
+    navbar_items = create_navbar_items(lang, selected_lang=lang)
     return dbc.Nav(navbar_items, className="ms-auto", navbar=True)
+
+
+@callback(
+    Output("navbar-collapse", "is_open"),
+    Input("navbar-toggler", "n_clicks"),
+    State("navbar-collapse", "is_open"),
+    prevent_initial_call=False,
+)
+def toggle_navbar(n_clicks, is_open):
+    """Toggle the mobile navbar collapse state."""
+    if not n_clicks:
+        return is_open
+    return not is_open
