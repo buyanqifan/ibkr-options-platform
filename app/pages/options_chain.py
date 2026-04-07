@@ -44,6 +44,7 @@ layout = html.Div([
             html.P("Enter a symbol and click 'Load Chain'", className="text-muted"),
         ]),
         type="circle",
+        show_initially=False,
     ),
 
     # IV Smile chart

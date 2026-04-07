@@ -228,3 +228,25 @@ def test_layout_uses_last_result_as_initial_state(monkeypatch):
     assert results_store.data == result
     assert params_store.data == params
     assert export_container.className == "d-block mt-2"
+
+
+def test_load_last_result_callback_returns_one_value_per_output_when_missing_payload(monkeypatch):
+    page = _load_binbin_god_page(monkeypatch)
+    monkeypatch.setattr(page, "load_last_binbin_god_result", lambda: None)
+
+    response = page.load_last_result_callback(1)
+
+    assert len(response) == 32
+    assert all(value is no_update for value in response)
+
+
+def test_layout_avoids_startup_loading_overlay_that_blocks_interaction(monkeypatch):
+    page = _load_binbin_god_page(monkeypatch)
+
+    layout = _get_layout(page)
+    loading = _find_component(layout, "binbin-loading")
+    props = loading.to_plotly_json()["props"]
+
+    assert loading is not None
+    assert props.get("show_initially") is False
+    assert "visibility" not in props.get("overlay_style", {})

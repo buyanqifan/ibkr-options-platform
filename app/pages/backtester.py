@@ -341,6 +341,7 @@ layout = html.Div([
                     ),
                 ]),
                 type="circle",
+                show_initially=False,
             ),
         ], md=9),
     ]),

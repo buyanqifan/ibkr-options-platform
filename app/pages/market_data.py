@@ -55,6 +55,7 @@ layout = html.Div([
     dcc.Loading(
         dcc.Graph(id="md-candlestick-chart", figure=create_candlestick_chart([])),
         type="circle",
+        show_initially=False,
     ),
 
     # Hidden store for loaded data

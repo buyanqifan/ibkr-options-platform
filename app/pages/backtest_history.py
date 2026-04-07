@@ -67,6 +67,7 @@ layout = html.Div([
             dcc.Loading(
                 html.Div(id="bh-backtest-list"),
                 type="circle",
+                show_initially=False,
             ),
         ]),
     ], className="shadow-sm mb-4"),

@@ -75,6 +75,17 @@ def create_layout():
             fluid=True,
             className="px-4",
         ),
+        dcc.Markdown(
+            """
+<style>
+._dash-loading,
+._dash-loading-callback {
+    pointer-events: none !important;
+}
+</style>
+            """,
+            dangerously_allow_html=True,
+        ),
     ])
 
 

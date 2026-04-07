@@ -57,6 +57,9 @@ STRATEGY_INFO = {
     },
 }
 
+_LOAD_LAST_RESULT_OUTPUT_COUNT = 5 + len(ALL_FORM_FIELDS)
+_LOAD_LAST_RESULT_NO_UPDATE = (no_update,) * _LOAD_LAST_RESULT_OUTPUT_COUNT
+
 
 def get_services_cached():
     """Get services with caching to avoid repeated initialization."""
@@ -383,7 +386,7 @@ def _build_configuration_panel(defaults):
 
 
 def layout():
-    initial_state = _get_initial_layout_state()
+    initial_state = _get_initial_layout_state(force_load=True)
     defaults = dict(initial_state["defaults"])
     defaults["export_class"] = initial_state["export_class"]
     return dbc.Container(
@@ -429,11 +432,11 @@ def layout():
                         dcc.Loading(
                             id="binbin-loading",
                             type="circle",
+                            show_initially=False,
                             children=html.Div(
                                 id="binbin-results-container",
                                 children=initial_state["results_children"],
                             ),
-                            overlay_style={"visibility": "visible", "opacity": 0.9, "backgroundColor": "#1a1a2e"},
                         ),
                         dcc.Store(id="binbin-results-store", data=initial_state["result"]),
                         dcc.Store(id="binbin-params-store", data=initial_state["params"]),
@@ -447,6 +450,7 @@ def layout():
 <style>
 .dash-loading {
     background-color: #1a1a2e !important;
+    pointer-events: none !important;
 }
 .dash-spinner circle {
     stroke: #4CAF50 !important;
@@ -500,14 +504,14 @@ def layout():
 def load_last_result_callback(n_clicks):
     """Load the last saved backtest result and populate form fields."""
     if not n_clicks:
-        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
+        return _LOAD_LAST_RESULT_NO_UPDATE
 
     payload = load_last_binbin_god_result() or {}
     params = payload.get("params") if isinstance(payload, dict) else None
     result = payload.get("result") if isinstance(payload, dict) else None
 
     if not params or not result:
-        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
+        return _LOAD_LAST_RESULT_NO_UPDATE
 
     defaults = {field["default"]: value for field, value in zip(ALL_FORM_FIELDS, _form_values_from_params(params))}
 
