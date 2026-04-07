@@ -1,5 +1,7 @@
 """Top-level layout with resilient manual routing over Dash page registry."""
 
+import traceback
+
 import dash
 from dash import html, dcc, callback, Output, Input
 import dash_bootstrap_components as dbc
@@ -66,7 +68,7 @@ def create_layout():
         dcc.Store(id="connection-state-store", data={"state": "disconnected", "message": ""}),
         dcc.Store(id="account-store", data={}),
         dcc.Store(id="positions-store", data=[]),
-        dcc.Store(id="language-store", data="en"),
+        dcc.Store(id="language-store", data="en", storage_type="local"),
         dcc.Interval(id="global-interval", interval=5000, n_intervals=0),
         create_navbar(),
         dbc.Container(
@@ -118,10 +120,12 @@ def display_page(pathname):
     try:
         return _render_page(pathname)
     except Exception as exc:
+        trace = traceback.format_exc()
         return dbc.Alert(
             [
                 html.H5("Page render error", className="alert-heading"),
-                html.P(str(exc)),
+                html.P(f"{exc.__class__.__name__}: {exc}"),
+                html.Pre(trace, className="mb-0", style={"whiteSpace": "pre-wrap", "overflowX": "auto"}),
             ],
             color="danger",
             className="mt-4",
