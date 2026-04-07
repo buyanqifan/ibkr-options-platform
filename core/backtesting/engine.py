@@ -130,7 +130,14 @@ class BacktestEngine:
         entry_underlying_price: float,
     ) -> bool:
         """Open a parity-mode option position."""
-        if signal.confidence < strategy.ml_min_confidence:
+        can_execute_low_conf_cc = (
+            signal.right == "C"
+            and getattr(strategy, "_is_qc_parity_enabled", lambda: False)()
+            and isinstance(getattr(signal, "metadata", None), dict)
+            and signal.metadata.get("rules_fallback")
+            and str(signal.metadata.get("inventory_mode", "")).lower() == "repair"
+        )
+        if signal.confidence < strategy.ml_min_confidence and not can_execute_low_conf_cc:
             tracer.record(
                 bar_date,
                 "order_deferred",

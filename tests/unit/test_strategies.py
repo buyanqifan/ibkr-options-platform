@@ -947,9 +947,9 @@ class TestBinbinGodStrategy:
         assert strategy.initial_capital == 300000
         assert strategy.max_positions == 20
         assert strategy.target_margin_utilization == pytest.approx(0.65)
-        assert strategy.symbol_assignment_base_cap == pytest.approx(0.35)
+        assert strategy.symbol_assignment_base_cap == pytest.approx(0.45)
         assert strategy.max_assignment_risk_per_trade == pytest.approx(0.20)
-        assert strategy.roll_threshold_pct == pytest.approx(80.0)
+        assert strategy.roll_threshold_pct == pytest.approx(78.0)
         assert strategy.cc_target_delta == pytest.approx(0.25)
         assert strategy.assigned_stock_fail_safe_enabled is True
         assert strategy.max_new_puts_per_day == 3
@@ -1011,7 +1011,7 @@ class TestBinbinGodStrategy:
         assert len(signals) == 1
         assert abs(signals[0].quantity) == 5
 
-    def test_cc_below_cost_prefers_cost_floor(self, base_params, monkeypatch):
+    def test_cc_below_cost_prefers_cost_floor_and_uses_four_tiers(self, base_params, monkeypatch):
         params = base_params.copy()
         params["symbol"] = "NVDA"
         strategy = BinbinGodStrategy(params)
@@ -1045,7 +1045,12 @@ class TestBinbinGodStrategy:
 
         assert len(signals) == 1
         assert captured["min_strike"] == pytest.approx(max(120.0 * 1.01, 150.0 * 0.97))
-        assert [tier["label"] for tier in captured["selection_tiers"]] == ["primary", "delta_relaxed"]
+        assert [tier["label"] for tier in captured["selection_tiers"]] == [
+            "primary",
+            "fallback_delta",
+            "fallback_dte",
+            "rescue_discount",
+        ]
 
     def test_roll_rule_only_uses_threshold_and_dte(self):
         strategy = BinbinGodStrategy({"symbol": "NVDA"})

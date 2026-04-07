@@ -237,6 +237,22 @@ def build_cc_selection_tiers(
     ]
 
 
+def can_execute_cc_signal(signal, min_confidence: float) -> bool:
+    """Allow repair-context CC signals to bypass the normal ML confidence gate."""
+    confidence = float(getattr(signal, "confidence", 0.0) or 0.0)
+    if confidence >= min_confidence:
+        return True
+
+    metadata = getattr(signal, "metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    if getattr(signal, "action", "") != "SELL_CALL":
+        return False
+    if not metadata.get("rules_fallback"):
+        return False
+    return str(metadata.get("inventory_mode", "") or "").lower() == "repair"
+
+
 def build_position_data(
     pos_info: Dict,
     current_price: float,
