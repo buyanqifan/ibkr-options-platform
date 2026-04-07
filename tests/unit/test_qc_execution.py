@@ -245,3 +245,53 @@ def test_find_option_by_greeks_uses_fallback_selection_tiers(monkeypatch):
 
     assert selected["strike"] == pytest.approx(110.0)
     assert selected["selection_tier"] == "rescue_discount"
+
+
+def test_find_option_by_greeks_reaches_rescue_discount_tier(monkeypatch):
+    class _ChainProvider:
+        def __init__(self, contracts):
+            self.contracts = contracts
+
+        def GetOptionContractList(self, _equity_symbol, _time):
+            return list(self.contracts)
+
+    primary_expiry = datetime(2024, 2, 2)
+    fallback_expiry = datetime(2024, 2, 14)
+    contracts = [
+        SimpleNamespace(ID=SimpleNamespace(OptionRight="Call", StrikePrice=146.0, Date=primary_expiry)),
+        SimpleNamespace(ID=SimpleNamespace(OptionRight="Call", StrikePrice=129.0, Date=fallback_expiry)),
+    ]
+    algo = SimpleNamespace(
+        Time=datetime(2024, 1, 15),
+        Securities={"NVDA": SimpleNamespace(Price=120.0)},
+        OptionChainProvider=_ChainProvider(contracts),
+        price_history={"NVDA": [{"close": 120.0}] * 40},
+    )
+
+    monkeypatch.setattr(qc_option_selector, "calculate_historical_vol", lambda *_args, **_kwargs: 0.25)
+    monkeypatch.setattr(
+        qc_option_selector,
+        "bs_call_price",
+        lambda _underlying, strike, _time, _iv: 1.50 if strike == 129.0 else 0.01,
+    )
+
+    selected = qc_option_selector.find_option_by_greeks(
+        algo,
+        symbol="NVDA",
+        equity_symbol="NVDA",
+        target_right="Call",
+        target_delta=0.35,
+        dte_min=7,
+        dte_max=21,
+        delta_tolerance=0.08,
+        min_strike=145.5,
+        selection_tiers=[
+            {"label": "primary", "delta_tolerance": 0.08, "dte_min": 7, "dte_max": 21, "min_strike": 145.5},
+            {"label": "fallback_delta", "delta_tolerance": 0.12, "dte_min": 7, "dte_max": 21, "min_strike": 145.5},
+            {"label": "fallback_dte", "delta_tolerance": 0.12, "dte_min": 14, "dte_max": 30, "min_strike": 145.5},
+            {"label": "rescue_discount", "delta_tolerance": 0.15, "dte_min": 14, "dte_max": 30, "min_strike": 127.5},
+        ],
+    )
+
+    assert selected["selection_tier"] == "rescue_discount"
+    assert selected["strike"] == pytest.approx(129.0)

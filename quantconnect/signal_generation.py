@@ -8,6 +8,7 @@ No phase concept - signals are generated based on actual holdings:
 import math
 from typing import Dict, List, Optional, Tuple
 from ml_integration import StrategySignal
+from signals import build_cc_selection_tiers
 from scoring import score_single_stock
 from debug_counters import increment_debug_counter
 from qc_portfolio import (
@@ -53,31 +54,6 @@ def _annualized_realized_volatility(closes: List[float]) -> float:
     mean_return = sum(returns) / len(returns)
     variance = sum((ret - mean_return) ** 2 for ret in returns) / (len(returns) - 1)
     return math.sqrt(variance) * math.sqrt(252)
-
-
-def _build_cc_selection_tiers(
-    target_dte_min: int,
-    target_dte_max: int,
-    min_strike: Optional[float],
-    primary_tolerance: float = 0.08,
-    relaxed_tolerance: float = 0.16,
-) -> List[Dict]:
-    return [
-        {
-            "name": "primary",
-            "delta_tolerance": primary_tolerance,
-            "dte_min": target_dte_min,
-            "dte_max": target_dte_max,
-            "min_strike": min_strike,
-        },
-        {
-            "name": "delta_relaxed",
-            "delta_tolerance": relaxed_tolerance,
-            "dte_min": target_dte_min,
-            "dte_max": target_dte_max,
-            "min_strike": min_strike,
-        },
-    ]
 
 
 def _build_sp_selection_tiers(algo, target_dte_min: int, target_dte_max: int) -> List[Dict]:
@@ -202,6 +178,33 @@ def _build_cc_mode(algo, symbol: str, underlying_price: float, cost_basis: float
     return mode
 
 
+def _should_use_rules_based_cc_fallback(strategy_phase: str, cc_mode: Optional[Dict]) -> bool:
+    return strategy_phase == "CC" and isinstance(cc_mode, dict) and cc_mode.get("label") == "repair"
+
+
+def _build_rules_based_cc_signal(algo, symbol: str, cc_mode: Dict) -> StrategySignal:
+    signal = StrategySignal(
+        action="SELL_CALL",
+        symbol=symbol,
+        delta=float(cc_mode["delta"]),
+        dte_min=int(cc_mode["dte_min"]),
+        dte_max=int(cc_mode["dte_max"]),
+        num_contracts=1,
+        expected_premium=0.0,
+        expected_return=0.0,
+        expected_risk=0.0,
+        assignment_probability=0.0,
+        confidence=min(0.10, max(0.05, float(getattr(algo, "ml_min_confidence", 0.45)) * 0.25)),
+        reasoning="rules_repair_cc_fallback",
+    )
+    signal.metadata = {
+        "inventory_mode": "repair",
+        "rules_fallback": True,
+        "signal_origin": "rules",
+    }
+    return signal
+
+
 def get_current_position(algo, symbol: str) -> Optional[Dict]:
     return get_position_for_symbol(algo, symbol)
 
@@ -297,12 +300,21 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
             )
     signal = algo.ml_integration.generate_signal(symbol=symbol, current_price=underlying_price, cost_basis=cost_basis,
         bars=bars, strategy_phase=strategy_phase, portfolio_state=portfolio_state, current_position=current_position)
+    rules_fallback = False
     if not signal and strategy_phase == "CC":
-        increment_debug_counter(algo, "cc_signal_missing")
-        algo.Log(
-            f"CC_SIGNAL_MISSING:{symbol}:shares={get_shares_held(algo, symbol)}:"
-            f"cost={cost_basis:.2f}:price={underlying_price:.2f}"
-        )
+        if _should_use_rules_based_cc_fallback(strategy_phase, cc_mode):
+            signal = _build_rules_based_cc_signal(algo, symbol, cc_mode)
+            rules_fallback = True
+            algo.Log(
+                f"CC_RULES_FALLBACK:{symbol}:delta={signal.delta:.2f}:dte={signal.dte_min}-{signal.dte_max}:"
+                f"min_strike={cc_min_strike if cc_min_strike is not None else 0:.2f}"
+            )
+        else:
+            increment_debug_counter(algo, "cc_signal_missing")
+            algo.Log(
+                f"CC_SIGNAL_MISSING:{symbol}:shares={get_shares_held(algo, symbol)}:"
+                f"cost={cost_basis:.2f}:price={underlying_price:.2f}"
+            )
     if signal and algo.ml_enabled:
         right = "P" if strategy_phase == "SP" else "C"
         if right == "P":
@@ -315,6 +327,12 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
             signal.delta = max(signal.delta, cc_mode["delta"] if cc_mode else algo.cc_target_delta)
             signal.dte_min = cc_mode["dte_min"] if cc_mode else algo.cc_target_dte_min
             signal.dte_max = cc_mode["dte_max"] if cc_mode else max(algo.cc_target_dte_min, algo.cc_target_dte_max)
+            signal.metadata = {
+                **(getattr(signal, "metadata", {}) if isinstance(getattr(signal, "metadata", None), dict) else {}),
+                "inventory_mode": cc_mode["label"] if cc_mode else "normal",
+                "rules_fallback": bool(rules_fallback or (cc_mode and cc_mode["label"] == "repair")),
+                "signal_origin": "rules" if rules_fallback else "ml",
+            }
             algo.Log(
                 f"CC_SIGNAL_READY:{symbol}:delta={signal.delta:.2f}:dte={signal.dte_min}-{signal.dte_max}:"
                 f"min_strike={cc_min_strike if cc_min_strike is not None else 0:.2f}:"
@@ -325,12 +343,18 @@ def generate_signal_for_symbol(algo, symbol: str, strategy_phase: str, portfolio
         if cc_min_strike is not None:
             signal.min_strike = cc_min_strike
         if strategy_phase == "CC":
-            signal.selection_tiers = _build_cc_selection_tiers(
-                target_dte_min=signal.dte_min,
-                target_dte_max=signal.dte_max,
-                min_strike=cc_min_strike,
-                primary_tolerance=cc_mode["primary_tolerance"] if cc_mode else 0.08,
-                relaxed_tolerance=cc_mode["relaxed_tolerance"] if cc_mode else 0.16,
+            signal.selection_tiers = build_cc_selection_tiers(
+                underlying_price=underlying_price,
+                cost_basis=cost_basis,
+                primary_dte_min=signal.dte_min,
+                primary_dte_max=signal.dte_max,
+                primary_delta_tolerance=cc_mode["primary_tolerance"] if cc_mode else 0.08,
+                primary_min_strike=cc_min_strike,
+                fallback_delta_tolerance_1=getattr(algo, "cc_fallback_delta_tolerance_1", 0.12),
+                fallback_delta_tolerance_2=getattr(algo, "cc_fallback_delta_tolerance_2", 0.15),
+                fallback_dte_min=getattr(algo, "cc_fallback_dte_min", 14),
+                fallback_dte_max=getattr(algo, "cc_fallback_dte_max", 30),
+                fallback_min_cost_basis_ratio=getattr(algo, "cc_fallback_min_cost_basis_ratio", 0.85),
             )
         elif strategy_phase == "SP":
             signal.selection_tiers = _build_sp_selection_tiers(

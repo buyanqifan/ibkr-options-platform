@@ -1,7 +1,7 @@
 """Strategy mixin for BinbinGod - Main entry point coordinating all modules."""
 
 from debug_counters import DEFAULT_DEBUG_COUNTERS, increment_debug_counter
-from signals import select_best_signal_with_memory
+from signals import select_best_signal_with_memory, can_execute_cc_signal
 from strategy_init import init_dates, init_parameters, init_ml, init_securities, init_state, schedule_events
 from signal_generation import generate_ml_signals
 from execution import execute_signal, calculate_dynamic_max_positions, retry_pending_open_orders
@@ -102,8 +102,14 @@ def rebalance(algo):
         for cc_signal in sorted(cc_signals, key=lambda x: x.confidence, reverse=True):
             increment_debug_counter(algo, "cc_signals")
             algo.Log(f"CC_SIGNAL: {cc_signal.symbol} delta={cc_signal.delta:.2f}")
-            if cc_signal.confidence >= algo.ml_min_confidence:
+            if can_execute_cc_signal(cc_signal, algo.ml_min_confidence):
                 execute_signal(algo, cc_signal, find_option_by_greeks)
+            else:
+                increment_debug_counter(algo, "cc_confidence_block")
+                algo.Log(
+                    f"CC_CONFIDENCE_BLOCK:{cc_signal.symbol}:"
+                    f"confidence={cc_signal.confidence:.2f}:min={algo.ml_min_confidence:.2f}"
+                )
 
     open_count = get_option_position_count(algo)
 

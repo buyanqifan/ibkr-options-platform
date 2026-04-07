@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from AlgorithmImports import OptionRight, SecurityType
 from option_utils import calculate_dte
 from execution import record_trade, execute_signal
-from signals import calculate_pnl_metrics
+from signals import calculate_pnl_metrics, can_execute_cc_signal
 from debug_counters import increment_debug_counter
 from qc_portfolio import (
     get_option_positions, get_shares_held, get_cost_basis,
@@ -86,7 +86,7 @@ def try_sell_cc_immediately(algo, symbol):
     
     if signal:
         algo.Log(f"IMMEDIATE_CC: Generated signal for {symbol}, delta={signal.delta:.2f}")
-        if signal.confidence >= algo.ml_min_confidence:
+        if can_execute_cc_signal(signal, algo.ml_min_confidence):
             execute_signal(algo, signal, find_option_by_greeks)
             algo.Log(f"IMMEDIATE_CC: Executed CC for {symbol}")
         else:

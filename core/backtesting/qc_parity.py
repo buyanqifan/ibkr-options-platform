@@ -23,9 +23,9 @@ _QC_PARAMETER_FALLBACKS = {
     "stock_pool": "MSFT,AAPL,NVDA,GOOGL,AMZN,META,TSLA",
     "max_positions_ceiling": 20,
     "target_margin_utilization": 0.65,
-    "symbol_assignment_base_cap": 0.35,
+    "symbol_assignment_base_cap": 0.45,
     "max_assignment_risk_per_trade": 0.20,
-    "roll_threshold_pct": 80.0,
+    "roll_threshold_pct": 78.0,
     "min_dte_for_roll": 7,
     "roll_target_dte_min": 21,
     "roll_target_dte_max": 45,
@@ -37,7 +37,14 @@ _QC_PARAMETER_FALLBACKS = {
     "cc_target_dte_min": 10,
     "cc_target_dte_max": 28,
     "cc_max_discount_to_cost": 0.03,
+    "cc_fallback_delta_tolerance_1": 0.12,
+    "cc_fallback_delta_tolerance_2": 0.15,
+    "cc_fallback_dte_min": 14,
+    "cc_fallback_dte_max": 30,
+    "cc_fallback_min_cost_basis_ratio": 0.85,
     "assigned_stock_fail_safe_enabled": True,
+    "assigned_stock_max_repair_days": 7,
+    "assigned_stock_cc_miss_limit": 3,
     "assigned_stock_min_days_held": 5,
     "assigned_stock_drawdown_pct": 0.12,
     "assigned_stock_force_exit_pct": 1.0,
@@ -164,7 +171,14 @@ QC_BINBIN_DEFAULTS = {
     "cc_target_dte_min": int(QC_PARAMETER_DEFAULTS["cc_target_dte_min"]),
     "cc_target_dte_max": int(QC_PARAMETER_DEFAULTS["cc_target_dte_max"]),
     "cc_max_discount_to_cost": float(QC_PARAMETER_DEFAULTS["cc_max_discount_to_cost"]),
+    "cc_fallback_delta_tolerance_1": float(QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_1"]),
+    "cc_fallback_delta_tolerance_2": float(QC_PARAMETER_DEFAULTS["cc_fallback_delta_tolerance_2"]),
+    "cc_fallback_dte_min": int(QC_PARAMETER_DEFAULTS["cc_fallback_dte_min"]),
+    "cc_fallback_dte_max": int(QC_PARAMETER_DEFAULTS["cc_fallback_dte_max"]),
+    "cc_fallback_min_cost_basis_ratio": float(QC_PARAMETER_DEFAULTS["cc_fallback_min_cost_basis_ratio"]),
     "assigned_stock_fail_safe_enabled": bool(QC_PARAMETER_DEFAULTS["assigned_stock_fail_safe_enabled"]),
+    "assigned_stock_max_repair_days": int(QC_PARAMETER_DEFAULTS["assigned_stock_max_repair_days"]),
+    "assigned_stock_cc_miss_limit": int(QC_PARAMETER_DEFAULTS["assigned_stock_cc_miss_limit"]),
     "assigned_stock_min_days_held": int(QC_PARAMETER_DEFAULTS["assigned_stock_min_days_held"]),
     "assigned_stock_drawdown_pct": float(QC_PARAMETER_DEFAULTS["assigned_stock_drawdown_pct"]),
     "assigned_stock_force_exit_pct": float(QC_PARAMETER_DEFAULTS["assigned_stock_force_exit_pct"]),
@@ -221,7 +235,14 @@ class BinbinGodParityConfig:
     cc_target_dte_min: int = QC_BINBIN_DEFAULTS["cc_target_dte_min"]
     cc_target_dte_max: int = QC_BINBIN_DEFAULTS["cc_target_dte_max"]
     cc_max_discount_to_cost: float = QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"]
+    cc_fallback_delta_tolerance_1: float = QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]
+    cc_fallback_delta_tolerance_2: float = QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]
+    cc_fallback_dte_min: int = QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]
+    cc_fallback_dte_max: int = QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]
+    cc_fallback_min_cost_basis_ratio: float = QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"]
     assigned_stock_fail_safe_enabled: bool = bool(QC_BINBIN_DEFAULTS["assigned_stock_fail_safe_enabled"])
+    assigned_stock_max_repair_days: int = QC_BINBIN_DEFAULTS["assigned_stock_max_repair_days"]
+    assigned_stock_cc_miss_limit: int = QC_BINBIN_DEFAULTS["assigned_stock_cc_miss_limit"]
     assigned_stock_min_days_held: int = QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"]
     assigned_stock_drawdown_pct: float = QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"]
     assigned_stock_force_exit_pct: float = QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"]
@@ -291,7 +312,30 @@ class BinbinGodParityConfig:
             cc_target_dte_min=_to_int(merged.get("cc_target_dte_min", QC_BINBIN_DEFAULTS["cc_target_dte_min"]), QC_BINBIN_DEFAULTS["cc_target_dte_min"]),
             cc_target_dte_max=_to_int(merged.get("cc_target_dte_max", QC_BINBIN_DEFAULTS["cc_target_dte_max"]), QC_BINBIN_DEFAULTS["cc_target_dte_max"]),
             cc_max_discount_to_cost=_clamp(_to_float(merged.get("cc_max_discount_to_cost", QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"]), QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"]), 0.0, 0.30),
+            cc_fallback_delta_tolerance_1=_clamp(
+                _to_float(merged.get("cc_fallback_delta_tolerance_1", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]), QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]),
+                0.08,
+                0.30,
+            ),
+            cc_fallback_delta_tolerance_2=_clamp(
+                _to_float(merged.get("cc_fallback_delta_tolerance_2", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]), QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"]),
+                _clamp(
+                    _to_float(merged.get("cc_fallback_delta_tolerance_1", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]), QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"]),
+                    0.08,
+                    0.30,
+                ),
+                0.40,
+            ),
+            cc_fallback_dte_min=_to_int(merged.get("cc_fallback_dte_min", QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]), QC_BINBIN_DEFAULTS["cc_fallback_dte_min"]),
+            cc_fallback_dte_max=_to_int(merged.get("cc_fallback_dte_max", QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]), QC_BINBIN_DEFAULTS["cc_fallback_dte_max"]),
+            cc_fallback_min_cost_basis_ratio=_clamp(
+                _to_float(merged.get("cc_fallback_min_cost_basis_ratio", QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"]), QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"]),
+                0.50,
+                1.0,
+            ),
             assigned_stock_fail_safe_enabled=bool(merged.get("assigned_stock_fail_safe_enabled", QC_BINBIN_DEFAULTS["assigned_stock_fail_safe_enabled"])),
+            assigned_stock_max_repair_days=max(1, _to_int(merged.get("assigned_stock_max_repair_days", QC_BINBIN_DEFAULTS["assigned_stock_max_repair_days"]), QC_BINBIN_DEFAULTS["assigned_stock_max_repair_days"])),
+            assigned_stock_cc_miss_limit=max(1, _to_int(merged.get("assigned_stock_cc_miss_limit", QC_BINBIN_DEFAULTS["assigned_stock_cc_miss_limit"]), QC_BINBIN_DEFAULTS["assigned_stock_cc_miss_limit"])),
             assigned_stock_min_days_held=_to_int(merged.get("assigned_stock_min_days_held", QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"]), QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"]),
             assigned_stock_drawdown_pct=_to_float(merged.get("assigned_stock_drawdown_pct", QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"]), QC_BINBIN_DEFAULTS["assigned_stock_drawdown_pct"]),
             assigned_stock_force_exit_pct=_clamp(_to_float(merged.get("assigned_stock_force_exit_pct", QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"]), QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"]), 0.0, 1.0),
@@ -343,7 +387,14 @@ class BinbinGodParityConfig:
                 "cc_target_dte_min": self.cc_target_dte_min,
                 "cc_target_dte_max": self.cc_target_dte_max,
                 "cc_max_discount_to_cost": self.cc_max_discount_to_cost,
+                "cc_fallback_delta_tolerance_1": self.cc_fallback_delta_tolerance_1,
+                "cc_fallback_delta_tolerance_2": self.cc_fallback_delta_tolerance_2,
+                "cc_fallback_dte_min": self.cc_fallback_dte_min,
+                "cc_fallback_dte_max": self.cc_fallback_dte_max,
+                "cc_fallback_min_cost_basis_ratio": self.cc_fallback_min_cost_basis_ratio,
                 "assigned_stock_fail_safe_enabled": self.assigned_stock_fail_safe_enabled,
+                "assigned_stock_max_repair_days": self.assigned_stock_max_repair_days,
+                "assigned_stock_cc_miss_limit": self.assigned_stock_cc_miss_limit,
                 "assigned_stock_min_days_held": self.assigned_stock_min_days_held,
                 "assigned_stock_drawdown_pct": self.assigned_stock_drawdown_pct,
                 "assigned_stock_force_exit_pct": self.assigned_stock_force_exit_pct,
@@ -443,6 +494,12 @@ def build_cc_selection_tiers_qc(
     primary_delta_tolerance: float,
     primary_min_strike: float | None,
 ) -> List[Dict[str, float]]:
+    rescue_min_strike = None
+    if cost_basis > 0 and primary_min_strike is not None:
+        rescue_min_strike = max(
+            underlying_price * 1.01,
+            cost_basis * config.cc_fallback_min_cost_basis_ratio,
+        )
     return [
         {
             "label": "primary",
@@ -452,11 +509,25 @@ def build_cc_selection_tiers_qc(
             "min_strike": primary_min_strike,
         },
         {
-            "label": "delta_relaxed",
-            "delta_tolerance": 0.16,
+            "label": "fallback_delta",
+            "delta_tolerance": config.cc_fallback_delta_tolerance_1,
             "dte_min": primary_dte_min,
             "dte_max": primary_dte_max,
             "min_strike": primary_min_strike,
+        },
+        {
+            "label": "fallback_dte",
+            "delta_tolerance": config.cc_fallback_delta_tolerance_1,
+            "dte_min": config.cc_fallback_dte_min,
+            "dte_max": config.cc_fallback_dte_max,
+            "min_strike": primary_min_strike,
+        },
+        {
+            "label": "rescue_discount",
+            "delta_tolerance": config.cc_fallback_delta_tolerance_2,
+            "dte_min": config.cc_fallback_dte_min,
+            "dte_max": config.cc_fallback_dte_max,
+            "min_strike": rescue_min_strike,
         },
     ]
 
@@ -481,6 +552,16 @@ def build_sp_selection_tiers_qc(
             "dte_max": primary_dte_max,
         },
     ]
+
+
+def can_execute_cc_signal_qc(signal: Any, min_confidence: float) -> bool:
+    confidence = float(getattr(signal, "confidence", 0.0) or 0.0)
+    if confidence >= min_confidence:
+        return True
+    metadata = getattr(signal, "metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    return bool(metadata.get("rules_fallback")) and str(metadata.get("inventory_mode", "")).lower() == "repair"
 
 
 def filter_option_by_itm_protection(strike: float, underlying_price: float, right: str, itm_buffer_pct: float = 0.01) -> bool:

@@ -162,7 +162,7 @@ def test_qc_replay_warmup_pretrains_ml_once(monkeypatch):
     monkeypatch.setattr(BinbinGodStrategy, "generate_signals", lambda *args, **kwargs: [])
     monkeypatch.setattr(BinbinGodStrategy, "generate_immediate_cc_signal", lambda *args, **kwargs: None)
 
-    def fake_pretrain(self, historical_bars, iv_estimate=0.25):
+    def fake_pretrain(self, historical_bars, iv_estimate=0.25, stock_pool_data=None):
         pretrain_calls.append((len(historical_bars), iv_estimate))
         return {"status": "ok"}
 

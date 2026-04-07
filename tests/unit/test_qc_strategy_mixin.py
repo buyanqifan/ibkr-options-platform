@@ -1,5 +1,6 @@
 """Focused tests for QC rebalance control flow."""
 
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -52,6 +53,7 @@ if "AlgorithmImports" not in sys.modules:
     sys.modules["AlgorithmImports"] = algorithm_imports
 
 import strategy_mixin as qc_strategy_mixin
+import position_management as qc_position_management
 
 _MISSING = object()
 
@@ -125,13 +127,12 @@ def test_on_end_of_algorithm_emits_summary_lines(monkeypatch):
             "no_suitable_options": 6,
             "assigned_stock_track": 7,
             "immediate_cc": 8,
-            "assigned_repair_attempt": 9,
-            "assigned_repair_fail": 10,
+            "assigned_stock_cc_miss_exit": 9,
             "assigned_stock_exit": 11,
             "stock_buy": 12,
             "stock_sell": 13,
-            "sp_quality_block": 14,
-            "sp_stock_block": 15,
+            "sp_assignment_cooldown_block": 14,
+            "sp_weak_filter_block": 15,
             "sp_held_block": 16,
         }
     )
@@ -147,15 +148,14 @@ def test_on_end_of_algorithm_emits_summary_lines(monkeypatch):
     assert flow_tokens["sp_signals"] == "4"
     assert flow_tokens["put_block"] == "5"
     assert flow_tokens["no_suitable_options"] == "6"
+    assert flow_tokens["sp_assignment_cooldown_block"] == "14"
+    assert flow_tokens["sp_weak_filter_block"] == "15"
     assert assignment_tokens["assigned_stock_track"] == "7"
     assert assignment_tokens["immediate_cc"] == "8"
-    assert assignment_tokens["assigned_repair_attempt"] == "9"
-    assert assignment_tokens["assigned_repair_fail"] == "10"
+    assert assignment_tokens["assigned_stock_cc_miss_exit"] == "9"
     assert assignment_tokens["assigned_stock_exit"] == "11"
     assert stock_fill_tokens["stock_buy"] == "12"
     assert stock_fill_tokens["stock_sell"] == "13"
-    assert stock_fill_tokens["sp_quality_block"] == "14"
-    assert stock_fill_tokens["sp_stock_block"] == "15"
     assert stock_fill_tokens["sp_held_block"] == "16"
 
 
@@ -181,15 +181,14 @@ def test_on_end_of_algorithm_defaults_missing_summary_counters_to_zero(monkeypat
     assert flow_tokens["sp_signals"] == "0"
     assert flow_tokens["put_block"] == "0"
     assert flow_tokens["no_suitable_options"] == "0"
+    assert flow_tokens["sp_assignment_cooldown_block"] == "0"
+    assert flow_tokens["sp_weak_filter_block"] == "0"
     assert assignment_tokens["assigned_stock_track"] == "7"
     assert assignment_tokens["immediate_cc"] == "0"
-    assert assignment_tokens["assigned_repair_attempt"] == "0"
-    assert assignment_tokens["assigned_repair_fail"] == "0"
+    assert assignment_tokens["assigned_stock_cc_miss_exit"] == "0"
     assert assignment_tokens["assigned_stock_exit"] == "0"
     assert stock_fill_tokens["stock_buy"] == "12"
     assert stock_fill_tokens["stock_sell"] == "0"
-    assert stock_fill_tokens["sp_quality_block"] == "0"
-    assert stock_fill_tokens["sp_stock_block"] == "0"
     assert stock_fill_tokens["sp_held_block"] == "0"
 
 
@@ -209,15 +208,14 @@ def test_on_end_of_algorithm_defaults_all_summary_counters_to_zero_when_debug_co
     assert flow_tokens["sp_signals"] == "0"
     assert flow_tokens["put_block"] == "0"
     assert flow_tokens["no_suitable_options"] == "0"
+    assert flow_tokens["sp_assignment_cooldown_block"] == "0"
+    assert flow_tokens["sp_weak_filter_block"] == "0"
     assert assignment_tokens["assigned_stock_track"] == "0"
     assert assignment_tokens["immediate_cc"] == "0"
-    assert assignment_tokens["assigned_repair_attempt"] == "0"
-    assert assignment_tokens["assigned_repair_fail"] == "0"
+    assert assignment_tokens["assigned_stock_cc_miss_exit"] == "0"
     assert assignment_tokens["assigned_stock_exit"] == "0"
     assert stock_fill_tokens["stock_buy"] == "0"
     assert stock_fill_tokens["stock_sell"] == "0"
-    assert stock_fill_tokens["sp_quality_block"] == "0"
-    assert stock_fill_tokens["sp_stock_block"] == "0"
     assert stock_fill_tokens["sp_held_block"] == "0"
 
 
@@ -350,3 +348,80 @@ def test_rebalance_retries_pending_cc_opens_before_new_put_signals(monkeypatch):
     qc_strategy_mixin.rebalance(algo)
 
     assert order[:3] == ["manage", "retry", "signals"]
+
+
+def test_rebalance_executes_repair_cc_even_below_ml_gate(monkeypatch):
+    algo = _make_algo()
+    algo.ml_min_confidence = 0.45
+    cc_signal = SimpleNamespace(
+        action="SELL_CALL",
+        symbol="NVDA",
+        delta=0.35,
+        confidence=0.10,
+        reasoning="rules fallback",
+        metadata={"inventory_mode": "repair", "rules_fallback": True},
+    )
+
+    monkeypatch.setattr(qc_strategy_mixin, "calculate_dynamic_max_positions", lambda _algo: 3)
+    monkeypatch.setattr(qc_strategy_mixin, "check_position_management", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qc_strategy_mixin, "retry_pending_open_orders", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(qc_strategy_mixin, "generate_ml_signals", lambda _algo: [cc_signal])
+    monkeypatch.setattr(qc_strategy_mixin, "get_option_position_count", lambda _algo: 0)
+
+    executed = []
+    monkeypatch.setattr(
+        qc_strategy_mixin,
+        "execute_signal",
+        lambda _algo, signal, _finder: executed.append((signal.action, signal.symbol, signal.confidence)),
+    )
+
+    qc_strategy_mixin.rebalance(algo)
+
+    assert executed == [("SELL_CALL", "NVDA", 0.10)]
+
+
+def test_assigned_stock_fail_safe_does_not_exit_on_first_cc_miss(monkeypatch):
+    algo = SimpleNamespace(
+        assigned_stock_fail_safe_enabled=True,
+        assigned_stock_cc_miss_limit=3,
+        assigned_stock_min_days_held=5,
+        assigned_stock_drawdown_pct=0.12,
+        assigned_stock_exit_fraction=1.0,
+        Time=datetime(2024, 1, 12),
+        equities={"NVDA": SimpleNamespace(Symbol="NVDA")},
+        Securities=SimpleNamespace(ContainsKey=lambda _symbol: True),
+        assigned_stock_state={
+            "NVDA": {
+                "assignment_date": datetime(2024, 1, 10),
+                "assignment_cost_basis": 150.0,
+                "repair_deadline": datetime(2024, 1, 20),
+                "cc_miss_count": 0,
+                "force_exit_triggered": False,
+                "inventory_mode": "repair",
+            }
+        },
+        Log=lambda *_args, **_kwargs: None,
+        MarketOrder=lambda *_args, **_kwargs: None,
+    )
+    algo.Securities = SimpleNamespace(
+        ContainsKey=lambda _symbol: True,
+        __getitem__=lambda self, _symbol: SimpleNamespace(Price=140.0),
+    )
+
+    orders = []
+    algo.MarketOrder = lambda symbol, quantity: orders.append((symbol, quantity))
+
+    monkeypatch.setattr(qc_position_management, "get_shares_held", lambda *_args, **_kwargs: 200)
+    monkeypatch.setattr(qc_position_management, "get_call_position_contracts", lambda *_args, **_kwargs: 0)
+
+    class _Securities(dict):
+        def ContainsKey(self, key):
+            return key in self
+
+    algo.Securities = _Securities({"NVDA": SimpleNamespace(Price=140.0)})
+
+    qc_position_management._manage_assigned_stock_fail_safe(algo)
+
+    assert orders == []
+    assert algo.assigned_stock_state["NVDA"]["cc_miss_count"] == 1
+    assert algo.assigned_stock_state["NVDA"]["force_exit_triggered"] is False

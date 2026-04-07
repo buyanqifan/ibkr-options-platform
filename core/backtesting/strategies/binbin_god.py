@@ -15,6 +15,7 @@ from core.backtesting.qc_parity import (
     QC_BINBIN_DEFAULTS,
     build_cc_selection_tiers_qc,
     build_sp_selection_tiers_qc,
+    can_execute_cc_signal_qc,
     calculate_dynamic_max_positions_from_prices,
     calculate_put_quantity_qc,
     select_contract_from_lattice,
@@ -169,6 +170,11 @@ class BinbinGodStrategy(BaseStrategy):
         self.min_dte_for_roll = resolved_config.get("min_dte_for_roll", QC_BINBIN_DEFAULTS["min_dte_for_roll"])
         self.roll_target_dte_min = resolved_config.get("roll_target_dte_min", QC_BINBIN_DEFAULTS["roll_target_dte_min"])
         self.roll_target_dte_max = resolved_config.get("roll_target_dte_max", QC_BINBIN_DEFAULTS["roll_target_dte_max"])
+        self.defensive_put_roll_enabled = bool(resolved_config.get("defensive_put_roll_enabled", True))
+        self.defensive_put_roll_loss_pct = float(resolved_config.get("defensive_put_roll_loss_pct", 200.0))
+        self.defensive_put_roll_itm_buffer_pct = float(resolved_config.get("defensive_put_roll_itm_buffer_pct", 0.10))
+        self.defensive_put_roll_min_dte = int(resolved_config.get("defensive_put_roll_min_dte", 7))
+        self.defensive_put_roll_max_dte = int(resolved_config.get("defensive_put_roll_max_dte", 21))
 
         self.config = resolved_config
         self.symbol = resolved_config.get("symbol", "MAG7_AUTO")
@@ -186,6 +192,11 @@ class BinbinGodStrategy(BaseStrategy):
         self.cc_target_dte_min = resolved_config.get("cc_target_dte_min", QC_BINBIN_DEFAULTS["cc_target_dte_min"])
         self.cc_target_dte_max = resolved_config.get("cc_target_dte_max", QC_BINBIN_DEFAULTS["cc_target_dte_max"])
         self.cc_max_discount_to_cost = resolved_config.get("cc_max_discount_to_cost", QC_BINBIN_DEFAULTS["cc_max_discount_to_cost"])
+        self.cc_fallback_delta_tolerance_1 = resolved_config.get("cc_fallback_delta_tolerance_1", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_1"])
+        self.cc_fallback_delta_tolerance_2 = resolved_config.get("cc_fallback_delta_tolerance_2", QC_BINBIN_DEFAULTS["cc_fallback_delta_tolerance_2"])
+        self.cc_fallback_dte_min = resolved_config.get("cc_fallback_dte_min", QC_BINBIN_DEFAULTS["cc_fallback_dte_min"])
+        self.cc_fallback_dte_max = resolved_config.get("cc_fallback_dte_max", QC_BINBIN_DEFAULTS["cc_fallback_dte_max"])
+        self.cc_fallback_min_cost_basis_ratio = resolved_config.get("cc_fallback_min_cost_basis_ratio", QC_BINBIN_DEFAULTS["cc_fallback_min_cost_basis_ratio"])
         self.symbol_assignment_base_cap = resolved_config.get(
             "symbol_assignment_base_cap",
             QC_BINBIN_DEFAULTS["symbol_assignment_base_cap"],
@@ -194,6 +205,8 @@ class BinbinGodStrategy(BaseStrategy):
             "assigned_stock_fail_safe_enabled",
             QC_BINBIN_DEFAULTS["assigned_stock_fail_safe_enabled"],
         )
+        self.assigned_stock_max_repair_days = int(resolved_config.get("assigned_stock_max_repair_days", QC_BINBIN_DEFAULTS["assigned_stock_max_repair_days"]))
+        self.assigned_stock_cc_miss_limit = int(resolved_config.get("assigned_stock_cc_miss_limit", QC_BINBIN_DEFAULTS["assigned_stock_cc_miss_limit"]))
         self.assigned_stock_min_days_held = resolved_config.get(
             "assigned_stock_min_days_held",
             QC_BINBIN_DEFAULTS["assigned_stock_min_days_held"],
@@ -207,6 +220,8 @@ class BinbinGodStrategy(BaseStrategy):
             QC_BINBIN_DEFAULTS["assigned_stock_force_exit_pct"],
         )
         self.assignment_cooldown_days = int(resolved_config.get("assignment_cooldown_days", 0))
+        self.large_loss_cooldown_pct = float(resolved_config.get("large_loss_cooldown_pct", 100.0))
+        self.large_loss_cooldown_days = int(resolved_config.get("large_loss_cooldown_days", 15))
         self.margin_rate_per_contract = float(resolved_config.get("margin_rate_per_contract", 0.25))
         self.margin_buffer_pct = float(resolved_config.get("margin_buffer_pct", 0.0))
         self.max_new_puts_per_day = resolved_config.get("max_new_puts_per_day", QC_BINBIN_DEFAULTS["max_new_puts_per_day"])
@@ -879,7 +894,7 @@ class BinbinGodStrategy(BaseStrategy):
             selected_cc.extend(
                 signal
                 for signal in sorted(cc_signals, key=lambda item: item.confidence, reverse=True)
-                if signal.confidence >= self.ml_min_confidence
+                if can_execute_cc_signal_qc(signal, self.ml_min_confidence)
             )
 
         available_slots = max(0, self.max_positions - len(wheel_positions) - len(selected_cc))
@@ -1317,6 +1332,15 @@ class BinbinGodStrategy(BaseStrategy):
         
         logger.info(f"CC signal: {symbol} - Generated {max_contracts} contracts, strike=${strike:.2f}, premium=${premium:.2f}, delta={delta:.3f}")
         
+        inventory_mode = "repair" if cost_basis > 0 and underlying_price < cost_basis else "normal"
+        metadata = dict(contract_metadata or {})
+        metadata.update(
+            {
+                "inventory_mode": inventory_mode,
+                "rules_fallback": inventory_mode == "repair",
+            }
+        )
+
         return [Signal(
             symbol=symbol,
             trade_type="BINBIN_CALL",
@@ -1333,7 +1357,7 @@ class BinbinGodStrategy(BaseStrategy):
             confidence=confidence,
             reasoning="QC parity call" if self._is_qc_parity_enabled() else "",
             ml_score_adjustment=ml_score_adjustment,
-            metadata=contract_metadata,
+            metadata=metadata,
         )]
     
     def generate_signal(
@@ -1618,6 +1642,20 @@ class BinbinGodStrategy(BaseStrategy):
             dte = 0
 
         premium_captured_pct = ((entry_price - current_price) / abs(entry_price) * 100) if entry_price else 0.0
+        loss_pct = ((current_price - entry_price) / abs(entry_price) * 100) if entry_price else 0.0
+        underlying_price = float((market_data or {}).get("price", 0.0) or 0.0)
+        strike = float(position.get("strike", 0.0) or 0.0)
+
+        if (
+            option_right == "P"
+            and self.defensive_put_roll_enabled
+            and self.defensive_put_roll_min_dte <= dte <= self.defensive_put_roll_max_dte
+            and strike > 0
+            and underlying_price > 0
+            and underlying_price <= strike * (1 - self.defensive_put_roll_itm_buffer_pct)
+            and loss_pct >= self.defensive_put_roll_loss_pct
+        ):
+            return True, "DEFENSIVE_PUT_ROLL"
         if option_right == "P" and premium_captured_pct >= self.roll_threshold_pct and dte > self.min_dte_for_roll:
             return True, "ROLL_FORWARD"
         if dte <= 0:
