@@ -125,13 +125,12 @@ def test_on_end_of_algorithm_emits_summary_lines(monkeypatch):
             "no_suitable_options": 6,
             "assigned_stock_track": 7,
             "immediate_cc": 8,
-            "assigned_repair_attempt": 9,
-            "assigned_repair_fail": 10,
+            "assigned_stock_cc_miss_exit": 9,
             "assigned_stock_exit": 11,
             "stock_buy": 12,
             "stock_sell": 13,
-            "sp_quality_block": 14,
-            "sp_stock_block": 15,
+            "sp_assignment_cooldown_block": 14,
+            "sp_weak_filter_block": 15,
             "sp_held_block": 16,
         }
     )
@@ -147,15 +146,14 @@ def test_on_end_of_algorithm_emits_summary_lines(monkeypatch):
     assert flow_tokens["sp_signals"] == "4"
     assert flow_tokens["put_block"] == "5"
     assert flow_tokens["no_suitable_options"] == "6"
+    assert flow_tokens["sp_assignment_cooldown_block"] == "14"
+    assert flow_tokens["sp_weak_filter_block"] == "15"
     assert assignment_tokens["assigned_stock_track"] == "7"
     assert assignment_tokens["immediate_cc"] == "8"
-    assert assignment_tokens["assigned_repair_attempt"] == "9"
-    assert assignment_tokens["assigned_repair_fail"] == "10"
+    assert assignment_tokens["assigned_stock_cc_miss_exit"] == "9"
     assert assignment_tokens["assigned_stock_exit"] == "11"
     assert stock_fill_tokens["stock_buy"] == "12"
     assert stock_fill_tokens["stock_sell"] == "13"
-    assert stock_fill_tokens["sp_quality_block"] == "14"
-    assert stock_fill_tokens["sp_stock_block"] == "15"
     assert stock_fill_tokens["sp_held_block"] == "16"
 
 
@@ -181,15 +179,14 @@ def test_on_end_of_algorithm_defaults_missing_summary_counters_to_zero(monkeypat
     assert flow_tokens["sp_signals"] == "0"
     assert flow_tokens["put_block"] == "0"
     assert flow_tokens["no_suitable_options"] == "0"
+    assert flow_tokens["sp_assignment_cooldown_block"] == "0"
+    assert flow_tokens["sp_weak_filter_block"] == "0"
     assert assignment_tokens["assigned_stock_track"] == "7"
     assert assignment_tokens["immediate_cc"] == "0"
-    assert assignment_tokens["assigned_repair_attempt"] == "0"
-    assert assignment_tokens["assigned_repair_fail"] == "0"
+    assert assignment_tokens["assigned_stock_cc_miss_exit"] == "0"
     assert assignment_tokens["assigned_stock_exit"] == "0"
     assert stock_fill_tokens["stock_buy"] == "12"
     assert stock_fill_tokens["stock_sell"] == "0"
-    assert stock_fill_tokens["sp_quality_block"] == "0"
-    assert stock_fill_tokens["sp_stock_block"] == "0"
     assert stock_fill_tokens["sp_held_block"] == "0"
 
 
@@ -209,15 +206,14 @@ def test_on_end_of_algorithm_defaults_all_summary_counters_to_zero_when_debug_co
     assert flow_tokens["sp_signals"] == "0"
     assert flow_tokens["put_block"] == "0"
     assert flow_tokens["no_suitable_options"] == "0"
+    assert flow_tokens["sp_assignment_cooldown_block"] == "0"
+    assert flow_tokens["sp_weak_filter_block"] == "0"
     assert assignment_tokens["assigned_stock_track"] == "0"
     assert assignment_tokens["immediate_cc"] == "0"
-    assert assignment_tokens["assigned_repair_attempt"] == "0"
-    assert assignment_tokens["assigned_repair_fail"] == "0"
+    assert assignment_tokens["assigned_stock_cc_miss_exit"] == "0"
     assert assignment_tokens["assigned_stock_exit"] == "0"
     assert stock_fill_tokens["stock_buy"] == "0"
     assert stock_fill_tokens["stock_sell"] == "0"
-    assert stock_fill_tokens["sp_quality_block"] == "0"
-    assert stock_fill_tokens["sp_stock_block"] == "0"
     assert stock_fill_tokens["sp_held_block"] == "0"
 
 

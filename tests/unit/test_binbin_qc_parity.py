@@ -34,9 +34,9 @@ def test_qc_parity_config_uses_simplified_qc_defaults():
     assert config.initial_capital == 300000.0
     assert config.max_positions_ceiling == 20
     assert config.target_margin_utilization == pytest.approx(0.65)
-    assert config.symbol_assignment_base_cap == pytest.approx(0.35)
+    assert config.symbol_assignment_base_cap == pytest.approx(0.45)
     assert config.max_assignment_risk_per_trade == pytest.approx(0.20)
-    assert config.roll_threshold_pct == pytest.approx(80.0)
+    assert config.roll_threshold_pct == pytest.approx(78.0)
     assert config.min_dte_for_roll == 7
     assert config.cc_target_delta == pytest.approx(0.25)
     assert config.cc_target_dte_min == 10
@@ -51,9 +51,9 @@ def test_extract_strategy_init_parameter_defaults_reads_simplified_qc_defaults()
     defaults = _extract_strategy_init_parameter_defaults()
     assert defaults["max_positions_ceiling"] == 20
     assert defaults["target_margin_utilization"] == pytest.approx(0.65)
-    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.35)
+    assert defaults["symbol_assignment_base_cap"] == pytest.approx(0.45)
     assert defaults["max_assignment_risk_per_trade"] == pytest.approx(0.20)
-    assert defaults["roll_threshold_pct"] == pytest.approx(80.0)
+    assert defaults["roll_threshold_pct"] == pytest.approx(78.0)
     assert defaults["cc_target_delta"] == pytest.approx(0.25)
     assert defaults["assigned_stock_drawdown_pct"] == pytest.approx(0.12)
 
@@ -61,7 +61,7 @@ def test_extract_strategy_init_parameter_defaults_reads_simplified_qc_defaults()
 def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
     assert QC_PARAMETER_DEFAULTS["initial_capital"] == 300000.0
     assert QC_PARAMETER_DEFAULTS["target_margin_utilization"] == pytest.approx(0.65)
-    assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.35)
+    assert QC_PARAMETER_DEFAULTS["symbol_assignment_base_cap"] == pytest.approx(0.45)
     assert QC_PARAMETER_DEFAULTS["roll_target_dte_max"] == 45
     assert QC_PARAMETER_DEFAULTS["cc_target_dte_max"] == 28
     assert QC_PARAMETER_DEFAULTS["ml_min_confidence"] == pytest.approx(0.45)
@@ -69,9 +69,9 @@ def test_qc_parameter_defaults_merge_config_and_strategy_init_sources():
 
 def test_qc_parameter_fallbacks_track_runtime_defaults():
     assert _QC_PARAMETER_FALLBACKS["target_margin_utilization"] == pytest.approx(0.65)
-    assert _QC_PARAMETER_FALLBACKS["symbol_assignment_base_cap"] == pytest.approx(0.35)
+    assert _QC_PARAMETER_FALLBACKS["symbol_assignment_base_cap"] == pytest.approx(0.45)
     assert _QC_PARAMETER_FALLBACKS["max_assignment_risk_per_trade"] == pytest.approx(0.20)
-    assert _QC_PARAMETER_FALLBACKS["roll_threshold_pct"] == pytest.approx(80.0)
+    assert _QC_PARAMETER_FALLBACKS["roll_threshold_pct"] == pytest.approx(78.0)
     assert _QC_PARAMETER_FALLBACKS["cc_target_delta"] == pytest.approx(0.25)
 
 
