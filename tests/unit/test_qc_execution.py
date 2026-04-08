@@ -64,6 +64,44 @@ class _SecurityDict(dict):
         return key in self
 
 
+def test_calculate_dynamic_max_positions_compounds_with_total_portfolio_value():
+    algo_small = SimpleNamespace(
+        stock_pool=["MSFT", "AAPL"],
+        equities={"MSFT": SimpleNamespace(Symbol="MSFT"), "AAPL": SimpleNamespace(Symbol="AAPL")},
+        Securities=_SecurityDict(
+            {
+                "MSFT": SimpleNamespace(Price=200.0),
+                "AAPL": SimpleNamespace(Price=200.0),
+            }
+        ),
+        Portfolio=SimpleNamespace(TotalPortfolioValue=60000.0),
+        initial_capital=100000.0,
+        target_margin_utilization=0.50,
+        max_positions_ceiling=20,
+    )
+    algo_large = SimpleNamespace(
+        stock_pool=["MSFT", "AAPL"],
+        equities={"MSFT": SimpleNamespace(Symbol="MSFT"), "AAPL": SimpleNamespace(Symbol="AAPL")},
+        Securities=_SecurityDict(
+            {
+                "MSFT": SimpleNamespace(Price=200.0),
+                "AAPL": SimpleNamespace(Price=200.0),
+            }
+        ),
+        Portfolio=SimpleNamespace(TotalPortfolioValue=160000.0),
+        initial_capital=100000.0,
+        target_margin_utilization=0.50,
+        max_positions_ceiling=20,
+    )
+
+    result_small = qc_execution.calculate_dynamic_max_positions(algo_small)
+    result_large = qc_execution.calculate_dynamic_max_positions(algo_large)
+
+    assert result_small == 7
+    assert result_large == 20
+    assert result_small < result_large
+
+
 def test_execute_signal_uses_rebalanced_delta_tolerance(monkeypatch):
     captured = {}
     algo = SimpleNamespace(
