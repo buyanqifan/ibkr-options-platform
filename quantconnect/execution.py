@@ -47,7 +47,35 @@ def _log_option_selection_failure(algo, signal: StrategySignal, target_right, ta
 
 
 def calculate_dynamic_max_positions(algo) -> int:
-    return max(1, int(getattr(algo, "max_positions_ceiling", 1)))
+    max_positions_ceiling = max(1, int(getattr(algo, "max_positions_ceiling", 1)))
+    symbols = list(getattr(algo, "stock_pool", []) or [])
+    if not symbols and getattr(algo, "equities", None):
+        symbols = list(getattr(algo, "equities").keys())
+
+    prices = []
+    for symbol in symbols:
+        equity = getattr(algo, "equities", {}).get(symbol)
+        equity_symbol = getattr(equity, "Symbol", symbol)
+        security = getattr(algo, "Securities", {}).get(equity_symbol)
+        price = float(getattr(security, "Price", 0.0) or 0.0) if security is not None else 0.0
+        if price > 0:
+            prices.append(price)
+
+    if not prices:
+        return max_positions_ceiling
+
+    avg_price = sum(prices) / len(prices)
+    portfolio = getattr(algo, "Portfolio", None)
+    portfolio_value = float(
+        getattr(portfolio, "TotalPortfolioValue", getattr(algo, "initial_capital", 0.0)) or 0.0
+    )
+    margin_budget = max(0.0, portfolio_value) * float(getattr(algo, "target_margin_utilization", 1.0))
+    margin_per_contract = avg_price * 100 * 0.20
+    if margin_per_contract <= 0:
+        return max_positions_ceiling
+
+    dynamic_max = int(margin_budget / margin_per_contract)
+    return max(1, min(dynamic_max, max_positions_ceiling))
 
 
 def _format_pending_expiry(expiry) -> str:
